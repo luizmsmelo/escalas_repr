@@ -54,7 +54,11 @@ export const SCHEMA = [
      updated_at timestamptz not null default now()
    )`,
 
-  // Ajuste manual do contador geral de sextas. Serve para quem entra na equipe
-  // depois: por padrao comeca em 0, mas da para emparelhar com o grupo aqui.
-  `alter table people add column if not exists friday_offset int not null default 0`,
+  // Configuracoes gerais. Guarda, por ora, a data do ultimo zeramento dos
+  // contadores - eles nunca zeram sozinhos.
+  `create table if not exists settings (
+     key        text primary key,
+     value      text not null,
+     updated_at timestamptz not null default now()
+   )`,
 ];

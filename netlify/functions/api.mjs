@@ -79,7 +79,7 @@ async function dispatch(route, method, params, body) {
     case 'POST generate':   return generate(body);
     case 'POST publish':    return publish(body);
     case 'POST capacity':   return setCapacity(body);
-    case 'POST counter':    return setFridayOffset(body);
+    case 'POST reset':      return resetCounters();
     case 'POST day':        return setDayOverride(body);
     default:
       throw new HttpError(404, `Rota desconhecida: ${method} /api/${route}`);
@@ -94,7 +94,7 @@ async function getState(weekParam) {
     : nextMonday();
 
   const [people, week, prefs, overrides, assignments] = await Promise.all([
-    sql`select id, name, active, friday_offset from people`.then(byName),
+    sql`select id, name, active from people`.then(byName),
     ensureWeek(monday),
     sql`select person_id, choice1, choice2, choice3, unavailable, no_friday
           from preferences where monday = ${monday}`,
@@ -148,7 +148,7 @@ async function createPerson({ name }) {
 
   const [person] = await sql`
     insert into people (name) values (${clean})
-    returning id, name, active, friday_offset`;
+    returning id, name, active`;
   return { person };
 }
 
@@ -166,7 +166,7 @@ async function updatePerson({ id, name, active }) {
     await sql`update people set active = ${!!active} where id = ${personId}`;
   }
   const [person] = await sql`
-    select id, name, active, friday_offset from people where id = ${personId}`;
+    select id, name, active from people where id = ${personId}`;
   if (!person) throw new HttpError(404, 'Pessoa nao encontrada.');
   return { person };
 }
@@ -237,7 +237,7 @@ async function generate({ monday }) {
   const cfg = await ensureWeek(week);
 
   const rows = await sql`
-    select p.id, p.name, p.friday_offset,
+    select p.id, p.name,
            pr.choice1, pr.choice2, pr.choice3,
            coalesce(pr.unavailable, false) as unavailable,
            coalesce(pr.no_friday, false)   as no_friday
@@ -312,19 +312,6 @@ async function generate({ monday }) {
   };
 }
 
-/** Ajuste manual do contador geral de sextas de uma pessoa. */
-async function setFridayOffset({ id, fridayOffset }) {
-  const personId = requireId(id);
-  const offset = clampInt(fridayOffset, 0, 999, 'Contador de sextas');
-  const done = await sql`
-    select count(*)::int as n from assignments where person_id = ${personId} and day = ${FRIDAY}`;
-  // O ajuste e o total que a pessoa deve mostrar; guardamos so a diferenca em
-  // relacao as sextas que ela ja tem registradas.
-  const delta = Math.max(0, offset - done[0].n);
-  await sql`update people set friday_offset = ${delta} where id = ${personId}`;
-  return { ok: true };
-}
-
 async function publish({ monday, published }) {
   const week = requireMonday(monday);
   await ensureWeek(week);
@@ -355,17 +342,16 @@ async function getStats(monthParam) {
 
 async function computeStats(ym, overrides) {
   const excecoes = overrides ?? (await loadOverrides());
-  const [people, rows, weekRows, allTime] = await Promise.all([
+  const [people, rows, weekRows, allTime, resetAt] = await Promise.all([
     sql`select id, name, active from people`.then(byName),
     sql`select person_id, day, work_date from assignments
          where to_char(work_date, 'YYYY-MM') = ${ym}`,
     sql`select cap_weekday, cap_friday from weeks
          where to_char(monday, 'YYYY-MM') = ${ym} order by monday limit 1`,
     allTimeCounts(),
+    countersResetAt(),
   ]);
 
-  // O calendario oficial ja desconta feriado, ponto facultativo e recesso, entao
-  // o valor pre-preenchido nasce correto - e continua editavel.
   // Os dias uteis sao consequencia do calendario, nao um numero guardado a
   // parte: assim nao existe o estado inconsistente de a premissa dizer 15 dias
   // enquanto o calendario mostra 16.
@@ -374,15 +360,6 @@ async function computeStats(ym, overrides) {
 
   const capWeekday = weekRows[0]?.cap_weekday ?? 2;
   const capFriday = weekRows[0]?.cap_friday ?? 1;
-
-  // Contadores do mes (os graficos), separados do historico geral (a fila).
-  const monthly = new Map();
-  for (const r of rows) {
-    const c = monthly.get(r.person_id) ?? { total: 0, fridays: 0 };
-    c.total++;
-    if (r.day === FRIDAY) c.fridays++;
-    monthly.set(r.person_id, c);
-  }
 
   const activePeople = people.filter((p) => p.active);
   const headcount = activePeople.length || 1;
@@ -403,15 +380,21 @@ async function computeStats(ym, overrides) {
       fridayTargetPerPerson: round2(fridaySlots / headcount),
       assigned: rows.length,
     },
-    perPerson: activePeople.map((p) => ({
-      personId: p.id,
-      name: p.name,
-      total: monthly.get(p.id)?.total ?? 0,
-      fridays: monthly.get(p.id)?.fridays ?? 0,
-      allTimeFridays: allTime.get(p.id)?.fridays ?? 0,
-      allTimeTotal: allTime.get(p.id)?.total ?? 0,
-    })),
-    // A fila da sexta e geral e independente do mes que estiver na tela.
+    // Contadores acumulados desde o ultimo zeramento - nunca por mes.
+    counters: {
+      since: resetAt === '1900-01-01' ? null : resetAt,
+      perPerson: activePeople.map((p) => ({
+        personId: p.id,
+        name: p.name,
+        total: allTime.get(p.id)?.total ?? 0,
+        fridays: allTime.get(p.id)?.fridays ?? 0,
+      })),
+      avgTotal: round2(sumOf(activePeople, allTime, 'total') / (activePeople.length || 1)),
+      avgFridays: round2(sumOf(activePeople, allTime, 'fridays') / (activePeople.length || 1)),
+      grandTotal: sumOf(activePeople, allTime, 'total'),
+      grandFridays: sumOf(activePeople, allTime, 'fridays'),
+    },
+    // A fila da sexta e acumulada e independente do mes que estiver na tela.
     fridayQueue: buildFridayQueue(activePeople, allTime),
     // Dias uteis do mes que nao terao expediente, para a tela explicar a conta.
     closedDays: calendar.closed,
@@ -422,21 +405,23 @@ async function computeStats(ym, overrides) {
 }
 
 /**
- * Historico GERAL por pessoa: sextas e escalas de todas as semanas ja geradas,
- * somado ao ajuste manual do contador. `excludeMonday` tira a propria semana da
- * conta, para que regerar uma escala nao conte duas vezes.
+ * Contadores acumulados por pessoa: escalas e sextas de todas as semanas desde o
+ * ultimo zeramento. NAO zeram por mes - com feriado e semana curta, um recorte
+ * mensal compara periodos de tamanhos diferentes e o rodizio nunca fecha.
+ * `excludeMonday` tira a propria semana da conta, para que regerar uma escala
+ * nao conte duas vezes.
  */
 async function allTimeCounts(excludeMonday = null) {
+  const desde = await countersResetAt();
   const [rows, people] = await Promise.all([
     excludeMonday
-      ? sql`select person_id, day from assignments where monday <> ${excludeMonday}`
-      : sql`select person_id, day from assignments`,
-    sql`select id, friday_offset from people`,
+      ? sql`select person_id, day from assignments
+             where monday <> ${excludeMonday} and work_date >= ${desde}`
+      : sql`select person_id, day from assignments where work_date >= ${desde}`,
+    sql`select id from people`,
   ]);
 
-  const map = new Map(
-    people.map((p) => [p.id, { total: 0, fridays: p.friday_offset ?? 0 }]),
-  );
+  const map = new Map(people.map((p) => [p.id, { total: 0, fridays: 0 }]));
   for (const r of rows) {
     const c = map.get(r.person_id);
     if (!c) continue;
@@ -444,6 +429,22 @@ async function allTimeCounts(excludeMonday = null) {
     if (r.day === FRIDAY) c.fridays++;
   }
   return map;
+}
+
+/** Data a partir da qual os contadores contam. '1900-01-01' = desde sempre. */
+async function countersResetAt() {
+  const [row] = await sql`select value from settings where key = 'counters_reset_at'`;
+  return row?.value ?? '1900-01-01';
+}
+
+/** Zera os contadores marcando um novo ponto de partida, sem apagar historico. */
+async function resetCounters() {
+  const hoje = todayISO();
+  await sql`
+    insert into settings (key, value, updated_at)
+    values ('counters_reset_at', ${hoje}, now())
+    on conflict (key) do update set value = excluded.value, updated_at = now()`;
+  return { ok: true, since: hoje };
 }
 
 /** A fila da sexta como ela sera avaliada na proxima geracao. */
@@ -559,6 +560,9 @@ function isoOf(value) {
   if (typeof value === 'string') return value.slice(0, 10);
   return new Date(value).toISOString().slice(0, 10);
 }
+
+const sumOf = (people, counts, campo) =>
+  people.reduce((soma, p) => soma + (counts.get(p.id)?.[campo] ?? 0), 0);
 
 function round2(n) {
   return Math.round(n * 100) / 100;

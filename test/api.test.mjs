@@ -64,15 +64,13 @@ const SEM_VOL = '2026-03-09';
 for (const [i, n] of NOMES.entries()) {
   await call('POST', 'preferences', { monday: SEM_VOL, personId: ids[n], choices: TOP3[i] });
 }
-// Hugo ja tem sextas, mas se voluntaria: deve levar mesmo assim.
-await call('POST', 'counter', { id: ids['Hugo Dias'], fridayOffset: 20 });
+// Hugo se voluntaria colocando sexta como 1a opcao.
 await call('POST', 'preferences',
   { monday: SEM_VOL, personId: ids['Hugo Dias'], choices: [5,1,2] });
 const gv = (await call('POST', 'generate', { monday: SEM_VOL })).json;
 ok(sexta(gv).personId === ids['Hugo Dias'], `voluntario levou (${sexta(gv).name})`);
 ok(sexta(gv).via === 'voluntario', 'marcado como voluntario');
 ok(sexta(gv).rank === 1, 'mantem a 1a opcao que ele pediu');
-await call('POST', 'counter', { id: ids['Hugo Dias'], fridayOffset: 0 });
 
 console.log('\n=== todos vetam a sexta ===');
 const SEM_VETO = '2026-03-16';
@@ -113,20 +111,39 @@ ok(maior - menor <= 1, `rodizio fechado: diferenca entre maior e menor e ${maior
 ok(filaFinal.every((q) => q.fridays >= 1), 'todas as 9 pessoas ja pegaram ao menos uma sexta');
 ok(menor >= 1, `ninguem ficou zerado (menor contador: ${menor})`);
 
-console.log('\n=== ajuste manual do contador ===');
-await call('POST', 'counter', { id: ids['Carla Reis'], fridayOffset: 7 });
-let fila = (await call('GET', 'stats?month=2026-07')).json.stats.fridayQueue;
-ok(fila.find((q) => q.personId === ids['Carla Reis']).fridays === 7, 'contador ajustado para 7');
-ok(fila[fila.length - 1].personId === ids['Carla Reis'], 'e ela foi para o fim da fila');
-ok((await call('POST', 'counter', { id: ids['Carla Reis'], fridayOffset: -1 })).status === 400,
-   'rejeita contador negativo');
+console.log('\n=== contadores nunca zeram por mes ===');
+const antesReset = (await call('GET', 'stats?month=2026-07')).json.stats.counters;
+ok(antesReset.since === null, 'sem zeramento, conta desde o inicio');
+ok(antesReset.grandTotal > 0, `${antesReset.grandTotal} escalas acumuladas`);
+ok(antesReset.perPerson.every((p) => 'total' in p && 'fridays' in p),
+   'cada pessoa tem escalas e sextas acumuladas');
 
-console.log('\n=== contadores mensais continuam existindo ===');
-const s10 = (await call('GET', 'stats?month=2026-07')).json.stats;
-ok(s10.perPerson.every((p) => 'fridays' in p && 'allTimeFridays' in p),
-   'contador do mes e contador geral convivem');
-ok(s10.perPerson.some((p) => p.allTimeFridays >= p.fridays), 'geral nunca e menor que o do mes');
-console.log(`  jul/2026: ${s10.totals.assigned} escalas, meta ${s10.totals.targetPerPerson}/pessoa`);
+// O mes consultado nao muda os contadores: eles sao acumulados, nao mensais.
+const outroMes = (await call('GET', 'stats?month=2026-03')).json.stats.counters;
+ok(outroMes.grandTotal === antesReset.grandTotal,
+   'contadores nao mudam conforme o mes consultado');
+ok(Math.abs(outroMes.avgTotal - antesReset.avgTotal) < 0.001, 'media tambem nao muda');
+console.log(`  ${antesReset.grandTotal} escalas / ${antesReset.grandFridays} sextas, ` +
+            `media ${antesReset.avgTotal} e ${antesReset.avgFridays} por pessoa`);
+
+// Zeramento manual: novo ponto de partida, sem apagar historico.
+ok((await call('POST', 'reset', {})).status === 200, 'zeramento aceito');
+const depoisReset = (await call('GET', 'stats?month=2026-07')).json.stats.counters;
+ok(depoisReset.since !== null, `passa a contar desde ${depoisReset.since}`);
+ok(depoisReset.grandTotal === 0, `contadores zerados (${depoisReset.grandTotal})`);
+ok(depoisReset.perPerson.every((p) => p.total === 0 && p.fridays === 0), 'todos em zero');
+const filaZerada = (await call('GET', 'stats?month=2026-07')).json.stats.fridayQueue;
+ok(filaZerada.every((q) => q.fridays === 0), 'fila da sexta recomeca do zero');
+
+// O historico continua no banco: as escalas geradas seguem la.
+const aindaTem = (await call('GET', 'state?week=2026-06-08')).json;
+ok(aindaTem.assignments.length > 0, 'historico das escalas nao foi apagado');
+console.log(`  apos zerar: ${depoisReset.grandTotal} contabilizadas, ` +
+            `mas a semana de 08/06 ainda tem ${aindaTem.assignments.length} escalas`);
+
+// A rota de edicao por pessoa deixou de existir.
+ok((await call('POST', 'counter', { id: 1, fridayOffset: 5 })).status === 404,
+   'edicao manual do contador por pessoa foi removida');
 
 console.log('\n=== publicacao e cascata ===');
 
@@ -140,7 +157,7 @@ await call('POST', 'publish', { monday: WEEK, published: false });
 const antes = (await call('GET', 'stats?month=2026-07')).json.stats.totals.assigned;
 await call('DELETE', `people?id=${ids['Gisele Pinto']}`);
 const depois = (await call('GET', 'stats?month=2026-07')).json.stats;
-ok(depois.perPerson.length === 8, '8 pessoas restantes');
+ok(depois.counters.perPerson.length === 8, '8 pessoas restantes');
 ok(depois.totals.assigned < antes, `escalas apagadas em cascata (${antes} -> ${depois.totals.assigned})`);
 ok(depois.fridayQueue.length === 8, 'fila encolhe junto');
 

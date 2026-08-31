@@ -120,27 +120,23 @@
 
     <!-- ABA: contadores -------------------------------------------------- -->
     <section id="tab-contadores" class="tab" data-tab="contadores" hidden>
-      <nav class="weeknav">
-        <button class="weeknav-arrow" data-month-step="-1" type="button" aria-label="Mês anterior">‹</button>
-        <div class="weeknav-label"><strong id="monthLabel">—</strong></div>
-        <button class="weeknav-arrow" data-month-step="1" type="button" aria-label="Próximo mês">›</button>
-      </nav>
+      <p id="countersSince" class="since"></p>
 
       <div id="myStats" class="mystats"></div>
 
       <section class="card">
         <h2 class="card-title">
           Fila da sexta
-          <span class="card-sub">contagem geral, não do mês</span>
+          <span class="card-sub">quem tem menos leva a próxima</span>
         </h2>
-        <p class="hint hint-muted">Quem tem menos sextas no histórico leva a próxima.
-          Quem se voluntaria passa na frente.</p>
+        <p class="hint hint-muted">Quem se voluntaria, colocando sexta no próprio top 3,
+          passa na frente da fila.</p>
         <ol id="fridayQueue" class="queue"></ol>
       </section>
 
       <figure class="card chart-card">
         <figcaption class="card-title">
-          Escalas no mês
+          Escalas por pessoa
           <span class="card-sub" id="chartTotalSub"></span>
         </figcaption>
         <div id="chartTotal" class="chart"></div>
@@ -150,7 +146,7 @@
 
       <figure class="card chart-card">
         <figcaption class="card-title">
-          Sextas-feiras no mês
+          Sextas-feiras por pessoa
           <span class="card-sub" id="chartFridaySub"></span>
         </figcaption>
         <div id="chartFriday" class="chart"></div>
@@ -234,11 +230,17 @@
       </section>
 
       <section class="card">
-        <h2 class="card-title">Contador geral de sextas</h2>
-        <p class="hint">É este número que decide a fila. Quem entra na equipe começa em 0 e
-          por isso pega várias sextas seguidas até emparelhar &mdash; se quiser evitar isso,
-          ajuste aqui na mão.</p>
-        <ul id="counterList" class="people-edit"></ul>
+        <h2 class="card-title">Zerar contadores</h2>
+        <p class="hint">Os contadores <strong>nunca zeram sozinhos</strong> &mdash; nem por mês,
+          nem por ano. Meses com feriado têm menos vagas que meses cheios, então um recorte
+          mensal compararia períodos de tamanhos diferentes e o rodízio da sexta nunca
+          fecharia.</p>
+        <p class="hint hint-muted" id="resetInfo"></p>
+        <div id="resetBox">
+          <button id="resetBtn" class="btn btn-ghost btn-block" type="button">
+            Zerar contadores de todo mundo
+          </button>
+        </div>
       </section>
 
       <button id="switchUser" class="btn btn-ghost btn-block" type="button">Trocar de pessoa</button>

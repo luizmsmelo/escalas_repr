@@ -83,6 +83,13 @@ function weekLabel(monday) {
     : `${label1} a ${label2}`;
 }
 
+function fmtLongDate(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const meses = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho',
+                 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  return `${d} de ${meses[m - 1]} de ${y}`;
+}
+
 function monthLabel(ym) {
   const [y, m] = ym.split('-').map(Number);
   const names = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho',
@@ -485,46 +492,49 @@ function slotRankTone(a) {
 function renderCounters() {
   const s = state.stats;
   if (!s) return;
-  $('#monthLabel').textContent = monthLabel(s.month);
+  const c = s.counters;
 
-  const mine = s.perPerson.find((p) => p.personId === state.me?.id);
-  const target = s.totals.targetPerPerson;
-  const fridayTarget = s.totals.fridayTargetPerPerson;
+  $('#countersSince').textContent = c.since
+    ? `Contando desde ${fmtLongDate(c.since)}.`
+    : 'Contando desde o início. Os contadores não zeram por mês.';
 
+  const mine = c.perPerson.find((p) => p.personId === state.me?.id);
   const queue = s.fridayQueue ?? [];
   const myPos = queue.findIndex((q) => q.personId === state.me?.id) + 1;
 
   $('#myStats').innerHTML = [
-    statCard('Escalas no mês', mine?.total ?? 0, `meta ${fmtNum(target)}`,
-      diffTone(mine?.total ?? 0, target)),
-    statCard('Sextas no mês', mine?.fridays ?? 0, `meta ${fmtNum(fridayTarget)}`,
-      diffTone(mine?.fridays ?? 0, fridayTarget)),
-    statCard('Sextas no total', mine?.allTimeFridays ?? 0,
-      myPos ? `${myPos}º na fila de ${queue.length}` : 'fora da fila'),
-    statCard('Vagas no mês', s.totals.slots,
-      `${s.totals.assigned} já escaladas`),
+    statCard('Minhas escalas', mine?.total ?? 0, `média ${fmtNum(c.avgTotal)}`,
+      diffTone(mine?.total ?? 0, c.avgTotal)),
+    statCard('Minhas sextas', mine?.fridays ?? 0, `média ${fmtNum(c.avgFridays)}`,
+      diffTone(mine?.fridays ?? 0, c.avgFridays)),
+    statCard('Posição na fila', myPos || '—',
+      myPos ? `de ${queue.length} pessoas` : 'fora da fila'),
+    statCard('Total do grupo', c.grandTotal,
+      `${c.grandFridays} ${c.grandFridays === 1 ? 'sexta' : 'sextas'}`),
   ].join('');
 
   renderFridayQueue(queue);
 
-  const names = shortNames(s.perPerson);
-  const totalData = s.perPerson.map((p, i) => ({ label: names[i], full: p.name, value: p.total, id: p.personId }));
-  const fridayData = s.perPerson.map((p, i) => ({ label: names[i], full: p.name, value: p.fridays, id: p.personId }));
+  const names = shortNames(c.perPerson);
+  const totalData = c.perPerson.map((p, i) =>
+    ({ label: names[i], full: p.name, value: p.total, id: p.personId }));
+  const fridayData = c.perPerson.map((p, i) =>
+    ({ label: names[i], full: p.name, value: p.fridays, id: p.personId }));
 
-  $('#chartTotalSub').textContent = `meta ${fmtNum(target)} por pessoa`;
-  $('#chartFridaySub').textContent = `meta ${fmtNum(fridayTarget)} por pessoa`;
+  $('#chartTotalSub').textContent = `média ${fmtNum(c.avgTotal)}`;
+  $('#chartFridaySub').textContent = `média ${fmtNum(c.avgFridays)}`;
 
   drawBarChart($('#chartTotal'), totalData, {
-    target, targetLabel: `meta ${fmtNum(target)}`, unit: 'escala', unitPlural: 'escalas',
+    target: c.avgTotal, targetLabel: `média ${fmtNum(c.avgTotal)}`,
+    unit: 'escala', unitPlural: 'escalas',
   });
   drawBarChart($('#chartFriday'), fridayData, {
-    target: fridayTarget, targetLabel: `meta ${fmtNum(fridayTarget)}`,
+    target: c.avgFridays, targetLabel: `média ${fmtNum(c.avgFridays)}`,
     unit: 'sexta', unitPlural: 'sextas',
   });
 
   renderChartTable($('#chartTotalTable'), totalData, 'Escalas');
   renderChartTable($('#chartFridayTable'), fridayData, 'Sextas');
-
 }
 
 function renderFridayQueue(queue) {
@@ -716,14 +726,10 @@ function renderSettings() {
 
   renderCalendar();
 
-  $('#counterList').innerHTML = (state.stats?.fridayQueue ?? [])
-    .map((q) => `<li class="person-row" data-person="${q.personId}">
-      <span class="avatar">${esc(initials(q.name))}</span>
-      <span class="counter-name">${esc(q.name)}</span>
-      <input type="number" min="0" max="999" inputmode="numeric" value="${q.fridays}"
-             class="counter-input" aria-label="Sextas de ${esc(q.name)}">
-    </li>`)
-    .join('') || '<li class="empty">Ninguém cadastrado ainda.</li>';
+  const c = state.stats?.counters;
+  $('#resetInfo').textContent = c?.since
+    ? `Contando desde ${fmtLongDate(c.since)}: ${c.grandTotal} escalas, ${c.grandFridays} sextas.`
+    : `Contando desde o início: ${c?.grandTotal ?? 0} escalas, ${c?.grandFridays ?? 0} sextas.`;
 
   $('#capacityWeekLabel').textContent =
     `Aplica-se à semana de ${weekLabel(state.data.week.monday)}.`;
@@ -1035,13 +1041,16 @@ function wireEvents() {
     salvarDia(state.selectedDay, false, $('#dayNote').value);
   });
 
-  $('#counterList').addEventListener('change', (e) => {
-    if (!e.target.classList.contains('counter-input')) return;
-    const id = Number(e.target.closest('[data-person]').dataset.person);
+  $('#resetBtn').addEventListener('click', () => {
+    const c = state.stats?.counters;
+    const aviso = 'Zerar os contadores de escalas e de sextas de todo mundo?\n\n'
+      + `Hoje: ${c?.grandTotal ?? 0} escalas e ${c?.grandFridays ?? 0} sextas contabilizadas.\n`
+      + 'A fila da sexta recomeça do zero. O histórico das escalas não é apagado.';
+    if (!confirm(aviso)) return;
     run(async () => {
-      await post('/counter', { id, fridayOffset: Number(e.target.value) });
+      await post('/reset', {});
       await loadWeek(state.week);
-      toast('Contador atualizado.');
+      toast('Contadores zerados.');
     });
   });
 
