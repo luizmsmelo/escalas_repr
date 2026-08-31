@@ -141,6 +141,16 @@ ok(aindaTem.assignments.length > 0, 'historico das escalas nao foi apagado');
 console.log(`  apos zerar: ${depoisReset.grandTotal} contabilizadas, ` +
             `mas a semana de 08/06 ainda tem ${aindaTem.assignments.length} escalas`);
 
+// Zerar e so um marco, entao da para desfazer.
+ok((await call('POST', 'reset', { undo: true })).status === 200, 'desfazer aceito');
+const desfeito = (await call('GET', 'stats?month=2026-07')).json.stats.counters;
+ok(desfeito.since === null, 'volta a contar desde o inicio');
+ok(desfeito.grandTotal === antesReset.grandTotal,
+   `contadores restaurados por inteiro (${desfeito.grandTotal})`);
+console.log(`  desfazer devolveu as ${desfeito.grandTotal} escalas`);
+// zera de novo, para o resto do teste seguir do mesmo ponto
+await call('POST', 'reset', {});
+
 // A rota de edicao por pessoa deixou de existir.
 ok((await call('POST', 'counter', { id: 1, fridayOffset: 5 })).status === 404,
    'edicao manual do contador por pessoa foi removida');

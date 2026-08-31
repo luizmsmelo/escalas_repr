@@ -79,7 +79,7 @@ async function dispatch(route, method, params, body) {
     case 'POST generate':   return generate(body);
     case 'POST publish':    return publish(body);
     case 'POST capacity':   return setCapacity(body);
-    case 'POST reset':      return resetCounters();
+    case 'POST reset':      return resetCounters(body);
     case 'POST day':        return setDayOverride(body);
     default:
       throw new HttpError(404, `Rota desconhecida: ${method} /api/${route}`);
@@ -437,8 +437,15 @@ async function countersResetAt() {
   return row?.value ?? '1900-01-01';
 }
 
-/** Zera os contadores marcando um novo ponto de partida, sem apagar historico. */
-async function resetCounters() {
+/**
+ * Zera os contadores marcando um novo ponto de partida - o historico das escalas
+ * nao e apagado. Como e so um marco, `undo: true` desfaz e volta a contar tudo.
+ */
+async function resetCounters({ undo } = {}) {
+  if (undo) {
+    await sql`delete from settings where key = 'counters_reset_at'`;
+    return { ok: true, since: null };
+  }
   const hoje = todayISO();
   await sql`
     insert into settings (key, value, updated_at)

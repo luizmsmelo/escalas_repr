@@ -730,6 +730,8 @@ function renderSettings() {
   $('#resetInfo').textContent = c?.since
     ? `Contando desde ${fmtLongDate(c.since)}: ${c.grandTotal} escalas, ${c.grandFridays} sextas.`
     : `Contando desde o início: ${c?.grandTotal ?? 0} escalas, ${c?.grandFridays ?? 0} sextas.`;
+  // Zerar é só um marco, não apaga nada - então dá para voltar atrás.
+  $('#undoResetBtn').hidden = !c?.since;
 
   $('#capacityWeekLabel').textContent =
     `Aplica-se à semana de ${weekLabel(state.data.week.monday)}.`;
@@ -1053,6 +1055,13 @@ function wireEvents() {
       toast('Contadores zerados.');
     });
   });
+
+  $('#undoResetBtn').addEventListener('click', () =>
+    run(async () => {
+      await post('/reset', { undo: true });
+      await loadWeek(state.week);
+      toast('Voltou a contar desde o início.');
+    }));
 
   $('#capacityForm').addEventListener('submit', (e) => {
     e.preventDefault();
