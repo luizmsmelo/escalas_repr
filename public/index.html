@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2a78d6">
+<meta name="description" content="Escolha semanal da escala ate as 18h, com resolucao automatica de conflitos.">
+<title>Escala 18h</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕕</text></svg>">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="boot" class="boot">
+  <div class="spinner" aria-hidden="true"></div>
+  <p>Carregando…</p>
+</div>
+
+<!-- Tela de identificacao -------------------------------------------------->
+<section id="identity" class="identity" hidden>
+  <div class="identity-card">
+    <h1 class="identity-title">Escala&nbsp;18h</h1>
+    <p class="identity-sub">Quem é você?</p>
+    <div id="identityList" class="identity-list"></div>
+    <details class="identity-add">
+      <summary>Não estou na lista</summary>
+      <form id="identityAddForm" class="row-form">
+        <input id="identityAddName" type="text" placeholder="Seu nome" autocomplete="name"
+               maxlength="60" required>
+        <button type="submit" class="btn btn-primary">Adicionar</button>
+      </form>
+    </details>
+  </div>
+</section>
+
+<!-- App -------------------------------------------------------------------->
+<div id="app" class="app" hidden>
+
+  <header class="topbar">
+    <div class="topbar-title">Escala&nbsp;18h</div>
+    <button id="whoami" class="whoami" type="button">
+      <span id="whoamiInitials" class="avatar"></span>
+      <span id="whoamiName"></span>
+    </button>
+  </header>
+
+  <main class="main">
+
+    <!-- ABA: escolher ---------------------------------------------------- -->
+    <section id="tab-escolher" class="tab" data-tab="escolher">
+      <nav class="weeknav">
+        <button class="weeknav-arrow" data-week-step="-1" type="button" aria-label="Semana anterior">‹</button>
+        <div class="weeknav-label">
+          <strong id="pickWeekLabel">—</strong>
+          <span id="pickWeekBadge" class="badge"></span>
+        </div>
+        <button class="weeknav-arrow" data-week-step="1" type="button" aria-label="Próxima semana">›</button>
+      </nav>
+
+      <div id="pickLocked" class="notice notice-lock" hidden>
+        Escala desta semana já foi publicada. As preferências estão travadas.
+      </div>
+
+      <div id="pickBody">
+        <label class="switch">
+          <input id="awayToggle" type="checkbox">
+          <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          <span class="switch-label">Não vou participar desta semana</span>
+        </label>
+
+        <div id="pickPrefs">
+          <p class="hint">Toque nos dias na sua <strong>ordem de preferência</strong>. O primeiro
+            toque vira sua 1ª opção.</p>
+          <div id="dayPicker" class="daypicker" role="group" aria-label="Dias de preferência"></div>
+          <p id="pickHelp" class="hint hint-muted"></p>
+        </div>
+
+        <button id="savePrefs" class="btn btn-primary btn-block" type="button">Salvar preferência</button>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Quem já respondeu</h2>
+        <ul id="responded" class="people-status"></ul>
+      </div>
+    </section>
+
+    <!-- ABA: escala ------------------------------------------------------ -->
+    <section id="tab-escala" class="tab" data-tab="escala" hidden>
+      <nav class="weeknav">
+        <button class="weeknav-arrow" data-week-step="-1" type="button" aria-label="Semana anterior">‹</button>
+        <div class="weeknav-label">
+          <strong id="schedWeekLabel">—</strong>
+          <span id="schedWeekBadge" class="badge"></span>
+        </div>
+        <button class="weeknav-arrow" data-week-step="1" type="button" aria-label="Próxima semana">›</button>
+      </nav>
+
+      <div id="schedNotice" class="notice" hidden></div>
+      <div id="schedule" class="schedule"></div>
+      <div id="schedSummary" class="summary" hidden></div>
+
+      <div class="actions">
+        <button id="generateBtn" class="btn btn-primary btn-block" type="button">Gerar escala</button>
+        <button id="publishBtn" class="btn btn-ghost btn-block" type="button">Publicar escala</button>
+      </div>
+    </section>
+
+    <!-- ABA: contadores -------------------------------------------------- -->
+    <section id="tab-contadores" class="tab" data-tab="contadores" hidden>
+      <nav class="weeknav">
+        <button class="weeknav-arrow" data-month-step="-1" type="button" aria-label="Mês anterior">‹</button>
+        <div class="weeknav-label"><strong id="monthLabel">—</strong></div>
+        <button class="weeknav-arrow" data-month-step="1" type="button" aria-label="Próximo mês">›</button>
+      </nav>
+
+      <div id="myStats" class="mystats"></div>
+
+      <figure class="card chart-card">
+        <figcaption class="card-title">
+          Escalas no mês
+          <span class="card-sub" id="chartTotalSub"></span>
+        </figcaption>
+        <div id="chartTotal" class="chart"></div>
+        <button class="linkbtn" type="button" data-table="chartTotal">Ver como tabela</button>
+        <div id="chartTotalTable" class="tablewrap" hidden></div>
+      </figure>
+
+      <figure class="card chart-card">
+        <figcaption class="card-title">
+          Sextas-feiras no mês
+          <span class="card-sub" id="chartFridaySub"></span>
+        </figcaption>
+        <div id="chartFriday" class="chart"></div>
+        <button class="linkbtn" type="button" data-table="chartFriday">Ver como tabela</button>
+        <div id="chartFridayTable" class="tablewrap" hidden></div>
+      </figure>
+
+      <section class="card">
+        <h2 class="card-title">Como a meta do mês é calculada</h2>
+        <p class="hint">Os dias úteis abaixo vêm do calendário. Ajuste se houver feriado,
+          recesso ou ponto facultativo.</p>
+        <form id="premiseForm" class="premise">
+          <label class="field">
+            <span>Dias úteis seg&ndash;qui</span>
+            <input id="premiseMonThu" type="number" min="0" max="31" inputmode="numeric" required>
+          </label>
+          <label class="field">
+            <span>Sextas úteis</span>
+            <input id="premiseFriday" type="number" min="0" max="31" inputmode="numeric" required>
+          </label>
+          <div class="premise-actions">
+            <button type="submit" class="btn btn-primary">Aplicar</button>
+            <button id="premiseReset" type="button" class="linkbtn">Voltar ao calendário</button>
+          </div>
+        </form>
+        <div id="premiseMath" class="math"></div>
+      </section>
+    </section>
+
+    <!-- ABA: ajustes ----------------------------------------------------- -->
+    <section id="tab-ajustes" class="tab" data-tab="ajustes" hidden>
+      <section class="card">
+        <h2 class="card-title">Pessoas</h2>
+        <ul id="peopleList" class="people-edit"></ul>
+        <form id="addPersonForm" class="row-form">
+          <input id="addPersonName" type="text" placeholder="Nome" maxlength="60" required>
+          <button type="submit" class="btn btn-primary">Adicionar</button>
+        </form>
+        <p class="hint hint-muted">Desativar mantém o histórico da pessoa nos contadores;
+          remover apaga tudo.</p>
+      </section>
+
+      <section class="card">
+        <h2 class="card-title">Vagas da semana</h2>
+        <p class="hint" id="capacityWeekLabel"></p>
+        <form id="capacityForm" class="premise">
+          <label class="field">
+            <span>Pessoas seg&ndash;qui</span>
+            <input id="capWeekday" type="number" min="0" max="9" inputmode="numeric" required>
+          </label>
+          <label class="field">
+            <span>Pessoas na sexta</span>
+            <input id="capFriday" type="number" min="0" max="9" inputmode="numeric" required>
+          </label>
+          <div class="premise-actions">
+            <button type="submit" class="btn btn-primary">Salvar</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2 class="card-title">Como os conflitos são resolvidos</h2>
+        <p class="hint">
+          O app testa todas as combinações possíveis e escolhe a que deixa o grupo
+          <strong>como um todo</strong> mais perto das primeiras opções &mdash; não é ordem de
+          chegada. Quando duas escalas empatam em preferência, ganha o dia quem tem menos
+          escalas (e menos sextas) acumuladas no mês.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2 class="card-title">Rodízio de sextas-feiras</h2>
+        <label class="switch switch-plain">
+          <input id="fairnessToggle" type="checkbox">
+          <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          <span class="switch-label">Forçar rodízio das sextas</span>
+        </label>
+        <p class="hint" style="margin-top:10px">
+          <strong>Desligado:</strong> vale só a preferência. Se apenas uma pessoa costuma
+          pedir sexta, ela pode acabar pegando quase todas.<br><br>
+          <strong>Ligado:</strong> cada sexta já cumprida no mês empurra a pessoa para o fim
+          da fila, mesmo que isso troque a 1ª opção de alguém pela 2ª. Em simulação de 16
+          semanas, no cenário em que só uma pessoa pede sexta, o pior caso cai de
+          <b>16 sextas</b> para <b>4</b>.
+        </p>
+      </section>
+
+      <button id="switchUser" class="btn btn-ghost btn-block" type="button">Trocar de pessoa</button>
+    </section>
+
+  </main>
+
+  <nav class="tabbar" role="tablist">
+    <button class="tabbtn is-active" data-goto="escolher" role="tab" type="button">
+      <span class="tabicon" aria-hidden="true">✓</span>Escolher</button>
+    <button class="tabbtn" data-goto="escala" role="tab" type="button">
+      <span class="tabicon" aria-hidden="true">▦</span>Escala</button>
+    <button class="tabbtn" data-goto="contadores" role="tab" type="button">
+      <span class="tabicon" aria-hidden="true">▮</span>Contadores</button>
+    <button class="tabbtn" data-goto="ajustes" role="tab" type="button">
+      <span class="tabicon" aria-hidden="true">⚙</span>Ajustes</button>
+  </nav>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

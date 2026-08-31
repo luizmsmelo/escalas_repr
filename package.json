@@ -1,0 +1,16 @@
+{
+  "name": "escalas-repr",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Escala de plantao ate as 18h - preferencias semanais com resolucao automatica de conflitos",
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4"
+  },
+  "scripts": {
+    "test": "node test/solver.test.mjs && node test/api.test.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.2.17"
+  }
+}
