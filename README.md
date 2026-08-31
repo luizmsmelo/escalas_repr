@@ -74,6 +74,33 @@ decide a fila é o contador geral.
 Começa em 0 e por isso pega várias sextas seguidas até emparelhar com o grupo.
 Se não for o que vocês querem, o contador é editável na aba Ajustes.
 
+## Calendário oficial
+
+O app carrega os dias sem expediente do **Decreto nº 12.134 de 04/12/2025**
+(Calendário 2026 do Poder Executivo do Paraná), em
+`netlify/functions/lib/holidays.mjs`, nas três categorias do próprio decreto:
+
+| categoria | 2026 | tratamento |
+| --- | --- | --- |
+| feriado | 10 datas | sem expediente, fixo |
+| ponto facultativo | 8 datas | sem expediente por padrão, reversível em Ajustes |
+| recesso | 21 a 31/12 | sem expediente, fixo |
+
+Um dia sem expediente **não tem vaga**: ninguém é escalado, ele aparece marcado
+no seletor e na escala, e a fila da sexta não anda numa semana em que a sexta é
+feriado. Semana inteira fechada (21 a 25/12, por exemplo) é recusada com aviso.
+
+O decreto define ponto facultativo como "dia útil em que a administração *poderá*
+dispensar total ou parcialmente o expediente" — não é garantido. Por isso cada
+uma dessas datas tem um botão **"Vai ter expediente"** na aba Ajustes. Feriado e
+recesso não têm esse botão, porque vêm de lei e decreto.
+
+Impacto em 2026: **426 vagas no ano em vez de 470** — 44 a menos (9,4%).
+Dezembro cai de 42 para 25.
+
+Para um ano sem calendário carregado, o app assume que todo dia útil tem
+expediente **e avisa na tela**, para ninguém confiar num calendário vazio.
+
 ## Meta do mês
 
 ```
@@ -81,8 +108,9 @@ vagas do mês   = dias úteis (seg–qui) × 2  +  sextas úteis × 1
 meta por pessoa = vagas do mês ÷ nº de pessoas ativas
 ```
 
-Os dias úteis vêm do calendário e ficam **editáveis** na aba Contadores, para
-descontar feriado, recesso ou ponto facultativo. A conta inteira aparece na tela.
+Os dias úteis já vêm do calendário oficial **com os feriados descontados**, e a
+tela lista quais dias foram tirados da conta. Continuam **editáveis** na aba
+Contadores, como manda a especificação.
 
 ## Stack
 
@@ -96,6 +124,7 @@ netlify/functions/
   api.mjs             toda a API, servida em /api/*
   lib/solver.mjs      resolução de conflitos (fluxo de custo mínimo)
   lib/dates.mjs       aritmética de datas, feita em UTC
+  lib/holidays.mjs    calendário oficial (Decreto 12.134/2025)
   lib/schema.mjs      schema SQL
   lib/db.mjs          consultas, transação e migração automática
   lib/driver.mjs      conexão com o Neon (único ponto trocado nos testes)

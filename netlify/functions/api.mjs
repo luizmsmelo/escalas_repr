@@ -2,8 +2,9 @@ import { sql, ensureSchema } from './lib/db.mjs';
 import { solveWeek, DAYS, FRIDAY } from './lib/solver.mjs';
 import {
   todayISO, mondayOf, nextMonday, addDays, weekDates, monthOf,
-  calendarWorkingDays, isValidISO, isValidMonth,
+  isValidISO, isValidMonth,
 } from './lib/dates.mjs';
+import { dayStatus, workingDaysInMonth, hasCalendar, TYPE_LABEL } from './lib/holidays.mjs';
 
 export const config = { path: '/api/*' };
 
@@ -79,6 +80,7 @@ async function dispatch(route, method, params, body) {
     case 'POST capacity':   return setCapacity(body);
     case 'POST premise':    return setPremise(body);
     case 'POST counter':    return setFridayOffset(body);
+    case 'POST day':        return setDayOverride(body);
     default:
       throw new HttpError(404, `Rota desconhecida: ${method} /api/${route}`);
   }
@@ -91,11 +93,12 @@ async function getState(weekParam) {
     ? requireMonday(weekParam)
     : nextMonday();
 
-  const [people, week, prefs, assignments] = await Promise.all([
+  const [people, week, prefs, overrides, assignments] = await Promise.all([
     sql`select id, name, active, friday_offset from people`.then(byName),
     ensureWeek(monday),
     sql`select person_id, choice1, choice2, choice3, unavailable, no_friday
           from preferences where monday = ${monday}`,
+    loadOverrides(),
     sql`select a.person_id, a.day, a.rank, a.via, a.work_date, p.name
           from assignments a join people p on p.id = a.person_id
          where a.monday = ${monday}
@@ -109,7 +112,8 @@ async function getState(weekParam) {
     currentMonday: mondayOf(today),
     week: {
       monday,
-      dates: weekDates(monday),
+      dates: weekDayStatus(monday, overrides),
+      hasCalendar: hasCalendar(monday),
       published: week.published,
       capWeekday: week.cap_weekday,
       capFriday: week.cap_friday,
@@ -128,7 +132,7 @@ async function getState(weekParam) {
       personId: a.person_id, name: a.name, day: a.day,
       rank: a.rank, via: a.via, date: isoOf(a.work_date),
     })),
-    stats: await computeStats(monthOf(monday)),
+    stats: await computeStats(monthOf(monday), overrides),
   };
 }
 
@@ -188,10 +192,21 @@ async function savePreferences({ monday, personId, choices, unavailable, noFrida
   let picks = [null, null, null];
 
   if (!away) {
+    // Numa semana encurtada por feriado pode nao haver 3 dias para escolher.
+    const overrides = await loadOverrides();
+    const abertos = weekDayStatus(week, overrides).filter((d) => d.works);
+    const exigidos = Math.min(3, abertos.length);
+
     const list = Array.isArray(choices) ? choices.map(Number) : [];
-    if (list.length !== 3) throw bad('Escolha exatamente 3 dias, em ordem de preferencia.');
+    if (list.length !== exigidos) {
+      throw bad(exigidos === 3
+        ? 'Escolha exatamente 3 dias, em ordem de preferencia.'
+        : `Esta semana so tem ${abertos.length} dia(s) com expediente: escolha ${exigidos}.`);
+    }
     if (list.some((d) => !DAYS.includes(d))) throw bad('Dia invalido: use de segunda a sexta.');
-    if (new Set(list).size !== 3) throw bad('Os 3 dias precisam ser diferentes entre si.');
+    if (new Set(list).size !== exigidos) throw bad('Os dias precisam ser diferentes entre si.');
+    const fechado = list.find((d) => !abertos.some((a) => a.day === d));
+    if (fechado) throw bad('Um dos dias escolhidos nao tem expediente nesta semana.');
     picks = list;
     // Pedir sexta e vetar sexta na mesma semana e contraditorio; a tela nem
     // oferece as duas coisas juntas, mas a API nao pode aceitar o estado misto.
@@ -250,13 +265,23 @@ async function generate({ monday }) {
     fridayCount: history.get(r.id)?.fridays ?? 0,
   }));
 
-  const capacity = {
-    1: cfg.cap_weekday, 2: cfg.cap_weekday,
-    3: cfg.cap_weekday, 4: cfg.cap_weekday, 5: cfg.cap_friday,
-  };
+  // Dia sem expediente nao tem vaga: a capacidade dele vai a zero, e nem a fila
+  // da sexta avanca numa semana em que a sexta e feriado.
+  const overrides = await loadOverrides();
+  const situacao = weekDayStatus(week, overrides);
+  const capacity = {};
+  for (const { day, works } of situacao) {
+    const base = day === 5 ? cfg.cap_friday : cfg.cap_weekday;
+    capacity[day] = works ? base : 0;
+  }
+
+  const fechados = situacao.filter((d) => !d.works);
+  if (fechados.length === 5) {
+    throw bad('Esta semana inteira está sem expediente - não há escala para montar.');
+  }
 
   const result = solveWeek(input, capacity);
-  const dates = Object.fromEntries(weekDates(week).map((d) => [d.day, d.date]));
+  const dates = Object.fromEntries(situacao.map((d) => [d.day, d.date]));
 
   await sql.transaction([
     sql`delete from assignments where monday = ${week}`,
@@ -279,6 +304,10 @@ async function generate({ monday }) {
         .map((r) => r.name),
       awayCount: rows.length - participants.length,
       friday: result.friday,
+      closedDays: fechados.map((d) => ({
+        day: d.day, date: d.date, name: d.holiday?.name ?? 'Sem expediente',
+        label: d.holiday?.label ?? 'Sem expediente',
+      })),
     },
   };
 }
@@ -331,7 +360,7 @@ async function setPremise({ ym, monThuDays, fridayDays }) {
 
   // Se os valores voltarem a ser exatamente os do calendario, a premissa deixa
   // de ser uma excecao e some do banco - assim a tela nao diz "ajustado a mao".
-  const calendar = calendarWorkingDays(month);
+  const calendar = workingDaysInMonth(month, await loadOverrides());
   if (monThu === calendar.monThu && fridays === calendar.fridays) {
     await sql`delete from month_premises where ym = ${month}`;
     return { stats: await computeStats(month) };
@@ -346,7 +375,8 @@ async function setPremise({ ym, monThuDays, fridayDays }) {
   return { stats: await computeStats(month) };
 }
 
-async function computeStats(ym) {
+async function computeStats(ym, overrides) {
+  const excecoes = overrides ?? (await loadOverrides());
   const [people, rows, premiseRows, weekRows, allTime] = await Promise.all([
     sql`select id, name, active from people`.then(byName),
     sql`select person_id, day, work_date from assignments
@@ -357,7 +387,9 @@ async function computeStats(ym) {
     allTimeCounts(),
   ]);
 
-  const calendar = calendarWorkingDays(ym);
+  // O calendario oficial ja desconta feriado, ponto facultativo e recesso, entao
+  // o valor pre-preenchido nasce correto - e continua editavel.
+  const calendar = workingDaysInMonth(ym, excecoes);
   const premise = premiseRows[0]
     ? { monThuDays: premiseRows[0].mon_thu_days, fridayDays: premiseRows[0].friday_days, custom: true }
     : { monThuDays: calendar.monThu, fridayDays: calendar.fridays, custom: false };
@@ -403,6 +435,9 @@ async function computeStats(ym) {
     })),
     // A fila da sexta e geral e independente do mes que estiver na tela.
     fridayQueue: buildFridayQueue(activePeople, allTime),
+    // Dias uteis do mes que nao terao expediente, para a tela explicar a conta.
+    closedDays: calendar.closed,
+    hasCalendar: calendar.hasCalendar,
   };
 }
 
@@ -441,6 +476,49 @@ function buildFridayQueue(people, counts) {
       total: counts.get(p.id)?.total ?? 0,
     }))
     .sort((a, b) => a.fridays - b.fridays || a.total - b.total || a.personId - b.personId);
+}
+
+/** Marca que um dia terá ou não terá expediente, contra o calendário oficial. */
+async function setDayOverride({ date, works, note }) {
+  if (!isValidISO(date)) throw bad('Data invalida (esperado YYYY-MM-DD).');
+  const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
+  if (dow === 0 || dow === 6) throw bad('Sabado e domingo nunca tem escala.');
+
+  const padrao = dayStatus(date, {});
+  if (padrao.works === !!works) {
+    // Voltou a coincidir com o calendario oficial: a excecao deixa de existir.
+    await sql`delete from day_overrides where work_date = ${date}`;
+  } else {
+    await sql`
+      insert into day_overrides (work_date, works, note, updated_at)
+      values (${date}, ${!!works}, ${note ?? null}, now())
+      on conflict (work_date) do update
+        set works = excluded.works, note = excluded.note, updated_at = now()`;
+  }
+  return getState(mondayOf(date));
+}
+
+/** Exceções manuais ao calendário: 'YYYY-MM-DD' -> true/false. */
+async function loadOverrides() {
+  const rows = await sql`select work_date, works from day_overrides`;
+  return Object.fromEntries(rows.map((r) => [isoOf(r.work_date), r.works]));
+}
+
+/** Situação de cada dia da semana, para a tela e para a geração da escala. */
+function weekDayStatus(monday, overrides) {
+  return weekDates(monday).map(({ day, date }) => {
+    const { works, holiday, overridden } = dayStatus(date, overrides);
+    return {
+      day,
+      date,
+      works,
+      overridden,
+      holiday: holiday
+        ? { type: holiday.type, name: holiday.name, note: holiday.note ?? null,
+            label: TYPE_LABEL[holiday.type] ?? 'Sem expediente' }
+        : null,
+    };
+  });
 }
 
 /* ------------------------------------------------------------------ helpers */

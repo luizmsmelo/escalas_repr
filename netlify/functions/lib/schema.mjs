@@ -52,6 +52,15 @@ export const SCHEMA = [
   // Veto pontual da sexta: "nao posso esta sexta", valido so naquela semana.
   `alter table preferences add column if not exists no_friday boolean not null default false`,
 
+  // Exceções ao calendário oficial: a equipe pode marcar que um ponto
+  // facultativo terá expediente, ou que um dia comum não terá.
+  `create table if not exists day_overrides (
+     work_date date primary key,
+     works     boolean not null,
+     note      text,
+     updated_at timestamptz not null default now()
+   )`,
+
   // Ajuste manual do contador geral de sextas. Serve para quem entra na equipe
   // depois: por padrao comeca em 0, mas da para emparelhar com o grupo aqui.
   `alter table people add column if not exists friday_offset int not null default 0`,

@@ -4,6 +4,11 @@ const DAY_NAMES  = { 1: 'Segunda', 2: 'Terça', 3: 'Quarta', 4: 'Quinta', 5: 'Se
 const DAY_SHORT  = { 1: 'SEG', 2: 'TER', 3: 'QUA', 4: 'QUI', 5: 'SEX' };
 const ORDINAL    = { 1: '1ª', 2: '2ª', 3: '3ª', 4: '4ª' };
 const FRIDAY     = 5;
+const TYPE_LABEL = { feriado: 'Feriado', facultativo: 'Facultativo',
+                     recesso: 'Recesso', excecao: 'Exceção' };
+// Cabe na largura de um botão de dia no celular.
+const SHORT_TYPE = { feriado: 'feriado', facultativo: 'facult.',
+                     recesso: 'recesso', excecao: 'fechado' };
 const STORAGE_ME = 'escalas.personId';
 
 const state = {
@@ -155,6 +160,7 @@ async function loadMonth(ym) {
   state.stats = stats;
   state.month = stats.month;
   renderCounters();
+  renderDayList();   // a lista de Ajustes acompanha o mesmo mês
 }
 
 function syncDraftFromServer() {
@@ -230,12 +236,26 @@ function renderPicker() {
   $('#pickPrefs').hidden = state.away;
 
   const fridayPicked = state.draft.includes(FRIDAY);
+  const fridayOpen = week.dates.find((d) => d.day === FRIDAY)?.works !== false;
+
+  // Numa semana encurtada por feriado pode nao haver 3 dias para escolher.
+  const abertos = week.dates.filter((d) => d.works).length;
+  const exigidos = Math.min(3, abertos);
 
   const picker = $('#dayPicker');
   picker.innerHTML = week.dates
-    .map(({ day, date }) => {
+    .map(({ day, date, works, holiday }) => {
+      if (!works) {
+        return `<button class="daybtn" type="button" data-day="${day}" data-closed="1" disabled
+                        title="${esc(holiday?.name ?? 'Sem expediente')}"
+                        aria-label="${DAY_NAMES[day]} ${fmtDay(date)}: sem expediente, ${esc(holiday?.name ?? '')}">
+          <span class="daybtn-closed">${esc(SHORT_TYPE[holiday?.type] ?? 'fechado')}</span>
+          <span class="daybtn-name">${DAY_SHORT[day]}</span>
+          <span class="daybtn-date">${fmtDay(date)}</span>
+        </button>`;
+      }
       const rank = state.draft.indexOf(day) + 1;
-      const full = state.draft.length >= 3 && !rank;
+      const full = state.draft.length >= exigidos && !rank;
       // Sexta nao escolhida no top 3 e a 4a opcao automatica de todo mundo -
       // por isso ela nunca aparece como "sem opção", e sim como "4ª".
       const auto = day === FRIDAY && !rank && !state.noFriday;
@@ -254,24 +274,41 @@ function renderPicker() {
     })
     .join('');
 
-  const missing = 3 - state.draft.length;
-  $('#pickHelp').textContent = missing > 0
-    ? `Faltam ${missing} ${missing === 1 ? 'dia' : 'dias'}. Toque de novo num dia escolhido para desfazer.`
-    : 'Pronto. Toque num dia escolhido para desfazer.';
+  const missing = exigidos - state.draft.length;
+  $('#pickHelp').textContent = abertos === 0
+    ? 'Esta semana não tem expediente em nenhum dia.'
+    : missing > 0
+      ? `Faltam ${missing} ${missing === 1 ? 'dia' : 'dias'}${
+          exigidos < 3 ? ` (só ${abertos} dias com expediente nesta semana)` : ''
+        }. Toque de novo num dia escolhido para desfazer.`
+      : 'Pronto. Toque num dia escolhido para desfazer.';
 
-  renderFridayBox(fridayPicked, locked);
+  renderFridayBox(fridayPicked, locked, fridayOpen);
 
   const save = $('#savePrefs');
-  save.disabled = locked || (!state.away && state.draft.length !== 3);
+  save.disabled = locked || (!state.away && state.draft.length !== exigidos);
   save.textContent = state.away ? 'Salvar ausência' : 'Salvar preferência';
 
   renderRespondedList();
 }
 
 /** Explica a posicao da pessoa na fila da sexta e oferece o veto da semana. */
-function renderFridayBox(fridayPicked, locked) {
+function renderFridayBox(fridayPicked, locked, fridayOpen = true) {
   const box = $('#fridayBox');
   const toggle = $('#noFridayToggle');
+
+  // Sexta feriado: nao ha vaga, entao nao ha fila nem veto a discutir.
+  if (!fridayOpen) {
+    const info = state.data.week.dates.find((d) => d.day === FRIDAY);
+    box.dataset.state = 'fechado';
+    toggle.checked = false;
+    toggle.disabled = true;
+    $('#fridayPos').textContent = '';
+    $('#fridayText').innerHTML =
+      `Nesta semana <b>não há expediente na sexta</b> (${esc(info?.holiday?.name ?? 'sem expediente')}), ` +
+      'então a fila não anda.';
+    return;
+  }
   const queue = state.stats?.fridayQueue ?? [];
   const mine = queue.find((q) => q.personId === state.me?.id);
   const position = mine ? queue.indexOf(mine) + 1 : null;
@@ -334,7 +371,21 @@ function renderSchedule(generation) {
 
   $('#schedule').innerHTML = hasAny
     ? week.dates
-        .map(({ day, date }) => {
+        .map(({ day, date, works, holiday }) => {
+          if (!works) {
+            return `<div class="dayrow" data-closed="1">
+              <div class="dayrow-when">
+                <span class="dayrow-day">${DAY_SHORT[day]}</span>
+                <span class="dayrow-date">${fmtDay(date)}</span>
+              </div>
+              <div class="dayrow-people">
+                <div class="slot slot-closed">
+                  <span class="slot-name">${esc(holiday?.name ?? 'Sem expediente')}</span>
+                  <span class="slot-rank">${esc(holiday?.label ?? 'sem expediente')}</span>
+                </div>
+              </div>
+            </div>`;
+          }
           const slots = byDay.get(day);
           const empty = Math.max(0, capOf(day) - slots.length);
           const rows =
@@ -394,6 +445,12 @@ function renderSchedule(generation) {
       `Sem preferência registrada: <b>${esc(generation.missingPreferences.join(', '))}</b>. ` +
         'Essas pessoas entraram em qualquer dia disponível.',
     );
+  }
+  if (generation?.closedDays?.length) {
+    const lista = generation.closedDays
+      .map((d) => `${DAY_NAMES[d.day]} ${fmtDay(d.date)} (${d.name})`)
+      .join(', ');
+    messages.push(`Sem expediente nesta semana: <b>${esc(lista)}</b>.`);
   }
   if (generation?.unfilledSlots?.length) {
     const days = generation.unfilledSlots.map((d) => DAY_NAMES[d]).join(', ');
@@ -467,6 +524,7 @@ function renderCounters() {
   renderChartTable($('#chartTotalTable'), totalData, 'Escalas');
   renderChartTable($('#chartFridayTable'), fridayData, 'Sextas');
 
+  renderClosedDays(s);
   $('#premiseMonThu').value = s.premise.monThuDays;
   $('#premiseFriday').value = s.premise.fridayDays;
   $('#premiseReset').hidden = !s.premise.custom;
@@ -489,6 +547,31 @@ function renderFridayQueue(queue) {
       <span class="queue-count">${q.fridays} ${q.fridays === 1 ? 'sexta' : 'sextas'}</span>
     </li>`)
     .join('');
+}
+
+/** Explica de onde vem o número pré-preenchido de dias úteis. */
+function renderClosedDays(s) {
+  const fechados = s.closedDays ?? [];
+  $('#premiseSource').innerHTML = s.hasCalendar
+    ? 'Os dias úteis abaixo já vêm do <strong>calendário oficial de 2026</strong>, com feriado, '
+      + 'ponto facultativo e recesso descontados. Dá para ajustar se precisar.'
+    : '<strong>Não há calendário oficial carregado para este ano</strong>, então a conta assume '
+      + 'que todo dia útil tem expediente. Ajuste à mão.';
+
+  const el = $('#closedDays');
+  if (!fechados.length) {
+    el.innerHTML = s.hasCalendar
+      ? '<p class="hint hint-muted">Nenhum dia útil sem expediente neste mês.</p>' : '';
+    return;
+  }
+  el.innerHTML = `<p class="hint hint-muted">Descontados deste mês:</p>
+    <ul class="closed-list">${fechados
+      .map((d) => `<li class="closed-item" data-type="${esc(d.type)}">
+        <span class="closed-date">${fmtDay(d.date)}</span>
+        <span class="closed-name">${esc(d.name)}</span>
+        <span class="closed-tag">${esc(d.overridden ? 'exceção' : TYPE_LABEL[d.type] ?? '')}</span>
+      </li>`)
+      .join('')}</ul>`;
 }
 
 function statCard(label, value, note, tone = '') {
@@ -683,6 +766,8 @@ function renderSettings() {
         .join('')
     : '<li class="empty">Ninguém cadastrado ainda.</li>';
 
+  renderDayList();
+
   $('#counterList').innerHTML = (state.stats?.fridayQueue ?? [])
     .map((q) => `<li class="person-row" data-person="${q.personId}">
       <span class="avatar">${esc(initials(q.name))}</span>
@@ -696,6 +781,34 @@ function renderSettings() {
     `Aplica-se à semana de ${weekLabel(state.data.week.monday)}.`;
   $('#capWeekday').value = state.data.week.capWeekday;
   $('#capFriday').value = state.data.week.capFriday;
+}
+
+/** Dias do mês que não terão expediente, com opção de devolver o expediente. */
+function renderDayList() {
+  const s = state.stats;
+  $('#daysMonthLabel').textContent = s ? monthLabel(s.month) : '—';
+  const el = $('#dayList');
+  const fechados = s?.closedDays ?? [];
+
+  if (!s?.hasCalendar) {
+    el.innerHTML = '<li class="empty">Não há calendário oficial carregado para este ano.</li>';
+    return;
+  }
+  if (!fechados.length) {
+    el.innerHTML = '<li class="empty">Todo dia útil deste mês tem expediente.</li>';
+    return;
+  }
+
+  el.innerHTML = fechados
+    .map((d) => `<li class="dayrow-edit" data-date="${d.date}" data-type="${esc(d.type)}">
+      <span class="closed-date">${fmtDay(d.date)}</span>
+      <span class="dayrow-edit-name">
+        ${esc(d.name)}
+        <span class="closed-tag">${esc(d.overridden ? 'exceção' : TYPE_LABEL[d.type] ?? '')}</span>
+      </span>
+      <button class="linkbtn" type="button" data-restore="${d.date}">Vai ter expediente</button>
+    </li>`)
+    .join('');
 }
 
 /* ------------------------------------------------------------------ abas -- */
@@ -894,6 +1007,18 @@ function wireEvents() {
       if (state.me?.id === id) state.me.name = name.trim();
       await loadWeek(state.week);
       toast('Nome atualizado.');
+    });
+  });
+
+  $('#dayList').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-restore]');
+    if (!btn) return;
+    run(async () => {
+      state.data = await post('/day', { date: btn.dataset.restore, works: true });
+      state.stats = state.data.stats;
+      syncDraftFromServer();
+      renderAll();
+      toast('Expediente devolvido. Gere a escala de novo, se já tinha gerado.');
     });
   });
 

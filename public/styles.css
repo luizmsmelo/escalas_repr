@@ -630,7 +630,91 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 }
 .counter-input:focus { border-color: var(--accent); outline: none; }
 
+/* -------------------------------------------------- dias sem expediente --- */
+.daybtn[data-closed="1"] {
+  background: var(--surface-2);
+  border-style: dashed;
+  opacity: .8;
+}
+.daybtn[data-closed="1"] .daybtn-name,
+.daybtn[data-closed="1"] .daybtn-date { color: var(--text-muted); }
+.daybtn[data-closed="1"] .daybtn-rank {
+  background: transparent; color: var(--text-muted); font-weight: 400;
+}
+
+.fridaybox[data-state="fechado"] { border-left-color: var(--text-muted); }
+
+.dayrow[data-closed="1"] {
+  background: var(--surface-0);
+  box-shadow: none;
+  border-style: dashed;
+}
+.slot-closed { color: var(--text-muted); width: 100%; }
+.slot-closed .slot-name { font-weight: 500; font-size: .9rem; }
+
+.closed { margin-top: 10px; }
+.closed-list { display: grid; gap: 3px; margin-top: 6px; }
+.closed-item {
+  display: flex; align-items: baseline; gap: 10px;
+  font-size: .82rem; color: var(--text-secondary);
+}
+.closed-date {
+  flex: none; width: 44px;
+  font-variant-numeric: tabular-nums; color: var(--text-primary); font-weight: 600;
+}
+.closed-name { flex: 1; min-width: 0; }
+.closed-tag {
+  flex: none;
+  font-size: .66rem; font-weight: 700;
+  letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text-muted);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 1px 7px;
+}
+.closed-item[data-type="feriado"] .closed-tag,
+.dayrow-edit[data-type="feriado"] .closed-tag {
+  color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+.closed-item[data-type="facultativo"] .closed-tag,
+.dayrow-edit[data-type="facultativo"] .closed-tag {
+  color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+}
+.closed-item[data-type="recesso"] .closed-tag,
+.dayrow-edit[data-type="recesso"] .closed-tag {
+  color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.weeknav-inline { box-shadow: none; margin: 10px 0; padding: 2px; }
+.weeknav-inline .weeknav-arrow { width: 34px; height: 34px; font-size: 1.1rem; }
+.weeknav-inline .weeknav-label strong { font-size: .85rem; }
+
+.daylist { display: grid; gap: 4px; }
+.dayrow-edit {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  font-size: .86rem;
+}
+.dayrow-edit-name {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.dayrow-edit .linkbtn { padding: 0; white-space: nowrap; }
+/* Feriado e recesso vêm de lei/decreto: não faz sentido "devolver expediente". */
+.dayrow-edit[data-type="feriado"] .linkbtn,
+.dayrow-edit[data-type="recesso"] .linkbtn { display: none; }
+
 body.is-busy .main, body.is-busy .identity-card { opacity: .6; pointer-events: none; }
 body.is-busy { cursor: progress; }
 
 .switch-plain { border: 0; box-shadow: none; padding: 0; background: none; }
+
+.daybtn-closed {
+  min-height: 26px;
+  display: grid; place-items: center;
+  font-size: .58rem; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: center; line-height: 1.1;
+}

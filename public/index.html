@@ -160,8 +160,8 @@
 
       <section class="card">
         <h2 class="card-title">Como a meta do mês é calculada</h2>
-        <p class="hint">Os dias úteis abaixo vêm do calendário. Ajuste se houver feriado,
-          recesso ou ponto facultativo.</p>
+        <p class="hint" id="premiseSource"></p>
+        <div id="closedDays" class="closed"></div>
         <form id="premiseForm" class="premise">
           <label class="field">
             <span>Dias úteis seg&ndash;qui</span>
@@ -226,6 +226,21 @@
           das primeiras opções &mdash; não é ordem de chegada. Empates vão para quem tem
           menos escalas acumuladas.
         </p>
+      </section>
+
+      <section class="card">
+        <h2 class="card-title">
+          Dias sem expediente
+          <span class="card-sub">Decreto 12.134 / 2026</span>
+        </h2>
+        <p class="hint">Feriado e recesso são fixos. <strong>Ponto facultativo</strong> o decreto
+          deixa a critério da chefia &mdash; se o setor for trabalhar, devolva o expediente aqui.</p>
+        <nav class="weeknav weeknav-inline">
+          <button class="weeknav-arrow" data-month-step="-1" type="button" aria-label="Mês anterior">‹</button>
+          <div class="weeknav-label"><strong id="daysMonthLabel">—</strong></div>
+          <button class="weeknav-arrow" data-month-step="1" type="button" aria-label="Próximo mês">›</button>
+        </nav>
+        <ul id="dayList" class="daylist"></ul>
       </section>
 
       <section class="card">

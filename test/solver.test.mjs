@@ -1,6 +1,7 @@
 // Testes do solver (duas fases) e da aritmetica de datas.
 import { solveWeek, rankOf, FRIDAY } from '../netlify/functions/lib/solver.mjs';
 import * as D from '../netlify/functions/lib/dates.mjs';
+import { workingDaysInMonth, dayStatus } from '../netlify/functions/lib/holidays.mjs';
 
 let fails = 0;
 const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FALHA:', msg); } };
@@ -12,8 +13,41 @@ ok(D.addDays('2026-12-31', 1) === '2027-01-01', 'virada de ano');
 ok(D.addDays('2028-02-28', 1) === '2028-02-29', 'ano bissexto');
 ok(D.isValidISO('2026-02-30') === false, 'rejeita 30 de fevereiro');
 ok(D.isValidMonth('2026-13') === false, 'rejeita mes 13');
-const ago = D.calendarWorkingDays('2026-08');
-ok(ago.monThu === 17 && ago.fridays === 4, `ago/2026: ${ago.monThu} seg-qui, ${ago.fridays} sextas`);
+
+console.log('\n--- calendário oficial de 2026 ---');
+const ago = workingDaysInMonth('2026-08');
+ok(ago.monThu === 17 && ago.fridays === 4, `ago/2026 sem feriado: ${ago.monThu} seg-qui, ${ago.fridays} sextas`);
+
+// Dezembro é o mês mais afetado: recesso de 21 a 31.
+const dez = workingDaysInMonth('2026-12');
+ok(dez.monThu === 11 && dez.fridays === 3, `dez/2026: ${dez.monThu} seg-qui, ${dez.fridays} sextas`);
+// 21,22,23,24 (recesso) + 25 (Natal) + 28,29,30,31 (recesso) = 9 dias úteis
+ok(dez.closed.length === 9, `dez/2026 tem 9 dias úteis fechados (${dez.closed.length})`);
+ok(dez.closed.filter((d) => d.type === 'feriado').length === 1, 'sendo 1 feriado (Natal)');
+ok(dez.closed.filter((d) => d.type === 'recesso').length === 8, 'e 8 de recesso');
+console.log(`  dez/2026: ${dez.monThu} dias seg-qui + ${dez.fridays} sextas = ` +
+            `${dez.monThu * 2 + dez.fridays} vagas (seriam 42 sem o recesso)`);
+
+// Fevereiro perde o Carnaval.
+const fev = workingDaysInMonth('2026-02');
+ok(fev.monThu === 13 && fev.fridays === 4, `fev/2026: ${fev.monThu} seg-qui, ${fev.fridays} sextas`);
+
+// Março não tem nada.
+const mar = workingDaysInMonth('2026-03');
+ok(mar.closed.length === 0, 'mar/2026 não tem dia fechado');
+
+ok(dayStatus('2026-12-25').works === false, '25/12 é feriado');
+ok(dayStatus('2026-02-16').works === false, '16/02 é Carnaval');
+ok(dayStatus('2026-03-10').works === true, '10/03 é dia normal');
+ok(dayStatus('2026-02-16', { '2026-02-16': true }).works === true,
+   'exceção manual devolve o expediente a um facultativo');
+ok(dayStatus('2026-03-10', { '2026-03-10': false }).works === false,
+   'exceção manual tira o expediente de um dia comum');
+
+// Ano sem calendário carregado: assume expediente normal, mas sinaliza.
+const sem = workingDaysInMonth('2030-03');
+ok(sem.hasCalendar === false, '2030 não tem calendário carregado');
+ok(sem.closed.length === 0, 'ano sem calendário não inventa feriado');
 
 const CAP = { 1: 2, 2: 2, 3: 2, 4: 2, 5: 1 };
 const NOMES = ['Luiz','Ana','Bruno','Carla','Diego','Elisa','Fabio','Gisele','Hugo'];

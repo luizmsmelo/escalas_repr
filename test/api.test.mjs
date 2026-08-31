@@ -13,7 +13,7 @@ const call = async (method, path, body) => {
   return { status: res.status, json: await res.json() };
 };
 
-const WEEK = '2026-09-07';
+const WEEK = '2026-03-02';      // março/2026 não tem feriado nenhum
 const NOMES = ['Luiz Melo','Ana Souza','Bruno Lima','Carla Reis','Diego Alves',
                'Elisa Nunes','Fabio Costa','Gisele Pinto','Hugo Dias'];
 const TOP3 = [[1,4,3],[2,1,3],[3,2,4],[4,1,2],[1,2,3],[2,3,4],[3,4,1],[4,2,3],[1,3,4]];
@@ -60,7 +60,7 @@ ok(sexta(gen).via === 'fila', `sexta veio da fila (via=${sexta(gen).via})`);
 console.log(`  sexta ficou com ${sexta(gen).name} (via ${sexta(gen).via})`);
 
 console.log('\n=== voluntario fura a fila ===');
-const SEM_VOL = '2026-09-14';
+const SEM_VOL = '2026-03-09';
 for (const [i, n] of NOMES.entries()) {
   await call('POST', 'preferences', { monday: SEM_VOL, personId: ids[n], choices: TOP3[i] });
 }
@@ -75,7 +75,7 @@ ok(sexta(gv).rank === 1, 'mantem a 1a opcao que ele pediu');
 await call('POST', 'counter', { id: ids['Hugo Dias'], fridayOffset: 0 });
 
 console.log('\n=== todos vetam a sexta ===');
-const SEM_VETO = '2026-09-21';
+const SEM_VETO = '2026-03-16';
 for (const [i, n] of NOMES.entries()) {
   await call('POST', 'preferences',
     { monday: SEM_VETO, personId: ids[n], choices: TOP3[i], noFriday: true });
@@ -89,10 +89,10 @@ ok(gvet.assignments.length === 8, `as 8 vagas de seg-qui saem normalmente (${gve
 console.log('\n=== contador GERAL faz o rodizio fechar ===');
 // 12 semanas seguidas, atravessando 3 meses. Com contador mensal, so metade do
 // grupo pegaria sexta; com contador geral, todos devem passar.
-const inicio = '2026-10-05';
+const inicio = '2026-06-08';   // 12 semanas seguidas sem feriado em sexta
 const donos = [];
 for (let w = 0; w < 12; w++) {
-  const monday = new Date(Date.UTC(2026, 9, 5) + w * 7 * 86400000).toISOString().slice(0, 10);
+  const monday = new Date(Date.UTC(2026, 5, 8) + w * 7 * 86400000).toISOString().slice(0, 10);
   for (const [i, n] of NOMES.entries()) {
     await call('POST', 'preferences', { monday, personId: ids[n], choices: TOP3[i] });
   }
@@ -105,7 +105,7 @@ console.log(`  sextas de ${inicio} em diante: ${donos.join(', ')}`);
 // pode ter pego a sexta antes dela comecar. E que o rodizio FECHE: ninguem pega
 // a segunda sexta antes de todo mundo ter pego a primeira. Isso equivale a
 // diferenca entre o maior e o menor contador nunca passar de 1.
-const filaFinal = (await call('GET', 'stats?month=2026-10')).json.stats.fridayQueue;
+const filaFinal = (await call('GET', 'stats?month=2026-07')).json.stats.fridayQueue;
 const menor = filaFinal[0].fridays;
 const maior = filaFinal[filaFinal.length - 1].fridays;
 console.log(`  contadores no fim: ${filaFinal.map((q) => q.fridays).join(', ')}`);
@@ -115,26 +115,26 @@ ok(menor >= 1, `ninguem ficou zerado (menor contador: ${menor})`);
 
 console.log('\n=== ajuste manual do contador ===');
 await call('POST', 'counter', { id: ids['Carla Reis'], fridayOffset: 7 });
-let fila = (await call('GET', 'stats?month=2026-10')).json.stats.fridayQueue;
+let fila = (await call('GET', 'stats?month=2026-07')).json.stats.fridayQueue;
 ok(fila.find((q) => q.personId === ids['Carla Reis']).fridays === 7, 'contador ajustado para 7');
 ok(fila[fila.length - 1].personId === ids['Carla Reis'], 'e ela foi para o fim da fila');
 ok((await call('POST', 'counter', { id: ids['Carla Reis'], fridayOffset: -1 })).status === 400,
    'rejeita contador negativo');
 
 console.log('\n=== contadores mensais continuam existindo ===');
-const s10 = (await call('GET', 'stats?month=2026-10')).json.stats;
+const s10 = (await call('GET', 'stats?month=2026-07')).json.stats;
 ok(s10.perPerson.every((p) => 'fridays' in p && 'allTimeFridays' in p),
    'contador do mes e contador geral convivem');
 ok(s10.perPerson.some((p) => p.allTimeFridays >= p.fridays), 'geral nunca e menor que o do mes');
-console.log(`  out/2026: ${s10.totals.assigned} escalas, meta ${s10.totals.targetPerPerson}/pessoa`);
+console.log(`  jul/2026: ${s10.totals.assigned} escalas, meta ${s10.totals.targetPerPerson}/pessoa`);
 
 console.log('\n=== premissa, publicacao e cascata ===');
-let prem = (await call('POST', 'premise', { ym: '2026-09', monThuDays: 15, fridayDays: 3 })).json;
+let prem = (await call('POST', 'premise', { ym: '2026-08', monThuDays: 15, fridayDays: 3 })).json;
 ok(prem.stats.totals.slots === 33, `premissa recalcula vagas (${prem.stats.totals.slots})`);
 ok(prem.stats.premise.custom === true, 'marcada como ajustada');
-const cal = prem.stats.calendar;
+// "voltar ao calendário" usa os dias úteis reais, já sem feriados
 prem = (await call('POST', 'premise',
-  { ym: '2026-09', monThuDays: cal.monThu, fridayDays: cal.fridays })).json;
+  { ym: '2026-08', monThuDays: 17, fridayDays: 4 })).json;
 ok(prem.stats.premise.custom === false, 'voltar ao calendario limpa a marca');
 
 await call('POST', 'publish', { monday: WEEK, published: true });
@@ -144,12 +144,83 @@ ok((await call('POST', 'preferences',
 ok((await call('POST', 'generate', { monday: WEEK })).status === 409, 'e trava a geracao');
 await call('POST', 'publish', { monday: WEEK, published: false });
 
-const antes = (await call('GET', 'stats?month=2026-10')).json.stats.totals.assigned;
+const antes = (await call('GET', 'stats?month=2026-07')).json.stats.totals.assigned;
 await call('DELETE', `people?id=${ids['Gisele Pinto']}`);
-const depois = (await call('GET', 'stats?month=2026-10')).json.stats;
+const depois = (await call('GET', 'stats?month=2026-07')).json.stats;
 ok(depois.perPerson.length === 8, '8 pessoas restantes');
 ok(depois.totals.assigned < antes, `escalas apagadas em cascata (${antes} -> ${depois.totals.assigned})`);
 ok(depois.fridayQueue.length === 8, 'fila encolhe junto');
+
+console.log('\n=== calendário oficial ===');
+// 03/04/2026 é Paixão de Cristo (sexta). A semana de 30/03 não deve ter sexta.
+const PASCOA = '2026-03-30';
+for (const [i, n] of NOMES.entries()) {
+  if (!ids[n]) continue;
+  await call('POST', 'preferences', { monday: PASCOA, personId: ids[n], choices: TOP3[i] });
+}
+let stP = (await call('GET', `state?week=${PASCOA}`)).json;
+const sexP = stP.week.dates.find((d) => d.day === 5);
+ok(sexP.works === false, 'sexta 03/04 marcada como sem expediente');
+ok(sexP.holiday?.name === 'Paixão de Cristo', `feriado identificado: ${sexP.holiday?.name}`);
+const quiP = stP.week.dates.find((d) => d.day === 4);
+ok(quiP.works === false, 'quinta 02/04 é ponto facultativo (véspera)');
+
+const gP = (await call('POST', 'generate', { monday: PASCOA })).json;
+ok(!gP.assignments.some((a) => a.day === 5), 'ninguém escalado na sexta feriado');
+ok(!gP.assignments.some((a) => a.day === 4), 'ninguém escalado na quinta facultativa');
+ok(gP.assignments.length === 6, `só as 6 vagas de seg/ter/qua (${gP.assignments.length})`);
+ok(gP.generation.closedDays.length === 2, 'os 2 dias fechados são reportados');
+console.log(`  semana de 30/03: ${gP.assignments.length} vagas; fechados: ` +
+            gP.generation.closedDays.map((d) => `${d.date} ${d.name}`).join(', '));
+
+// A fila da sexta não anda numa semana sem sexta.
+const filaAntes = JSON.stringify((await call('GET', 'stats?month=2026-03')).json.stats.fridayQueue);
+await call('POST', 'generate', { monday: PASCOA });
+const filaDepois = JSON.stringify((await call('GET', 'stats?month=2026-03')).json.stats.fridayQueue);
+ok(filaAntes === filaDepois, 'fila da sexta não anda quando a sexta é feriado');
+
+// Semana inteira sem expediente: recesso de 21 a 25 de dezembro.
+const RECESSO = '2026-12-21';
+const gR = await call('POST', 'generate', { monday: RECESSO });
+ok(gR.status === 400, `semana toda fechada é recusada com aviso (status ${gR.status})`);
+console.log(`  semana de 21/12: ${gR.json.error}`);
+
+// Meta do mês já nasce descontando feriados.
+const dez = (await call('GET', 'stats?month=2026-12')).json.stats;
+ok(dez.premise.monThuDays === 11 && dez.premise.fridayDays === 3,
+   `dez/2026 pré-preenchido: ${dez.premise.monThuDays} seg-qui e ${dez.premise.fridayDays} sextas`);
+ok(dez.totals.slots === 25, `dez/2026: ${dez.totals.slots} vagas (42 sem o recesso)`);
+ok(dez.closedDays.length === 9, `9 dias fechados listados (${dez.closedDays.length})`);
+ok(dez.hasCalendar === true, 'calendário de 2026 disponível');
+console.log(`  dez/2026: ${dez.totals.slots} vagas, meta ${dez.totals.targetPerPerson}/pessoa`);
+
+// Exceção manual: o setor decide trabalhar num ponto facultativo.
+const exc = await call('POST', 'day', { date: '2026-06-05', works: true });
+ok(exc.status === 200, 'exceção aceita para ponto facultativo');
+const jun = (await call('GET', 'stats?month=2026-06')).json.stats;
+ok(jun.premise.fridayDays === 4, `sexta 05/06 devolvida à conta (${jun.premise.fridayDays} sextas)`);
+ok(!jun.closedDays.some((d) => d.date === '2026-06-05'), '05/06 saiu da lista de fechados');
+// Desfazendo, volta ao calendário oficial.
+await call('POST', 'day', { date: '2026-06-05', works: false });
+const jun2 = (await call('GET', 'stats?month=2026-06')).json.stats;
+ok(jun2.premise.fridayDays === 3, 'desfazer devolve o calendário oficial');
+
+ok((await call('POST', 'day', { date: '2026-06-06', works: false })).status === 400,
+   'rejeita exceção em sábado');
+
+// Semana encurtada: 30/03 tem só seg, ter e qua. Exigir 3 dias ainda funciona,
+// mas escolher um dia fechado não pode passar.
+const fechado = await call('POST', 'preferences',
+  { monday: PASCOA, personId: ids['Luiz Melo'], choices: [1, 2, 5] });
+ok(fechado.status === 400, 'rejeita preferência num dia sem expediente');
+console.log(`  ${fechado.json.error}`);
+
+// Semana do recesso: 3 dias fechados de 28/12, sobra só... nada.
+// Use 14/12, que tem seg-qui normais e sexta 18/12 normal.
+const curta = '2026-12-14';
+ok((await call('POST', 'preferences',
+   { monday: curta, personId: ids['Luiz Melo'], choices: [1, 2, 3] })).status === 200,
+   'semana de 14/12 é normal e aceita 3 dias');
 
 console.log('\n=== rotas invalidas ===');
 ok((await call('GET', 'inexistente')).status === 404, '404 em rota desconhecida');

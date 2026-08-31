@@ -45,24 +45,6 @@ export function monthOf(iso) {
   return iso.slice(0, 7);
 }
 
-/**
- * Dias uteis de calendario do mes, separados porque sexta tem capacidade
- * diferente. Feriados NAO sao considerados aqui - e exatamente por isso que os
- * dois numeros ficam editaveis na tela.
- */
-export function calendarWorkingDays(ym) {
-  const [y, m] = ym.split('-').map(Number);
-  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  let monThu = 0;
-  let fridays = 0;
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-    if (dow >= 1 && dow <= 4) monThu++;
-    else if (dow === 5) fridays++;
-  }
-  return { monThu, fridays };
-}
-
 export function isValidISO(v) {
   return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && toISO(parseISO(v)) === v;
 }
