@@ -54,6 +54,7 @@ export const TYPE_LABEL = {
   feriado: 'Feriado',
   facultativo: 'Ponto facultativo',
   recesso: 'Recesso',
+  excecao: 'Sem expediente',
 };
 
 /** Temos calendário oficial para este ano? */
@@ -63,19 +64,66 @@ export function hasCalendar(iso) {
 
 /**
  * Situacao de um dia, ja considerando as excecoes que a equipe marcou a mao.
- * `overrides` mapeia 'YYYY-MM-DD' -> true (tem expediente) | false (nao tem).
+ * `overrides` mapeia 'YYYY-MM-DD' -> { works: boolean, note?: string }.
  */
 export function dayStatus(iso, overrides = {}) {
   const base = HOLIDAYS[iso] ?? null;
-  const override = overrides[iso];
+  const ex = overrides[iso];
 
-  if (override === true) {
-    return { works: true, holiday: base, overridden: true };
+  if (ex && ex.works === true) {
+    return { works: true, holiday: null, base, overridden: true };
   }
-  if (override === false) {
-    return { works: false, holiday: base ?? { type: 'excecao', name: 'Sem expediente' }, overridden: true };
+  if (ex && ex.works === false) {
+    return {
+      works: false,
+      holiday: base ?? { type: 'excecao', name: ex.note || 'Sem expediente' },
+      base,
+      overridden: true,
+    };
   }
-  return { works: !base, holiday: base, overridden: false };
+  return { works: !base, holiday: base, base, overridden: false };
+}
+
+/**
+ * Um dia so pode ser reaberto se a folga nao vier de lei ou decreto. Feriado e
+ * recesso ficam travados de proposito - ninguem deveria "abrir" o Natal na mao.
+ */
+export function isLocked(iso) {
+  const base = HOLIDAYS[iso];
+  return base ? base.type === 'feriado' || base.type === 'recesso' : false;
+}
+
+/** Todos os dias do mes, com a situacao de cada um - a base do calendario. */
+export function monthDays(ym, overrides = {}) {
+  const [y, m] = ym.split('-').map(Number);
+  const total = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const days = [];
+
+  for (let d = 1; d <= total; d++) {
+    const date = new Date(Date.UTC(y, m - 1, d));
+    const iso = date.toISOString().slice(0, 10);
+    const dow = date.getUTCDay();
+    const weekend = dow === 0 || dow === 6;
+    const status = dayStatus(iso, overrides);
+
+    days.push({
+      date: iso,
+      dayOfMonth: d,
+      dow,
+      weekend,
+      works: weekend ? false : status.works,
+      overridden: weekend ? false : status.overridden,
+      locked: isLocked(iso),
+      // Fim de semana nunca tem escala, entao marcar "recesso" num sabado so
+      // polui a tela - o que interessa e qual DIA UTIL perdeu o expediente.
+      holiday: weekend ? null : status.holiday
+        ? { type: status.holiday.type, name: status.holiday.name,
+            note: status.holiday.note ?? null,
+            label: TYPE_LABEL[status.holiday.type] ?? 'Sem expediente' }
+        : null,
+    });
+  }
+  return days;
 }
 
 /** Dias uteis do mes que efetivamente terao expediente, separados seg-qui/sexta. */

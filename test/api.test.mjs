@@ -128,14 +128,7 @@ ok(s10.perPerson.every((p) => 'fridays' in p && 'allTimeFridays' in p),
 ok(s10.perPerson.some((p) => p.allTimeFridays >= p.fridays), 'geral nunca e menor que o do mes');
 console.log(`  jul/2026: ${s10.totals.assigned} escalas, meta ${s10.totals.targetPerPerson}/pessoa`);
 
-console.log('\n=== premissa, publicacao e cascata ===');
-let prem = (await call('POST', 'premise', { ym: '2026-08', monThuDays: 15, fridayDays: 3 })).json;
-ok(prem.stats.totals.slots === 33, `premissa recalcula vagas (${prem.stats.totals.slots})`);
-ok(prem.stats.premise.custom === true, 'marcada como ajustada');
-// "voltar ao calendário" usa os dias úteis reais, já sem feriados
-prem = (await call('POST', 'premise',
-  { ym: '2026-08', monThuDays: 17, fridayDays: 4 })).json;
-ok(prem.stats.premise.custom === false, 'voltar ao calendario limpa a marca');
+console.log('\n=== publicacao e cascata ===');
 
 await call('POST', 'publish', { monday: WEEK, published: true });
 ok((await call('POST', 'preferences',
@@ -207,6 +200,51 @@ ok(jun2.premise.fridayDays === 3, 'desfazer devolve o calendário oficial');
 
 ok((await call('POST', 'day', { date: '2026-06-06', works: false })).status === 400,
    'rejeita exceção em sábado');
+
+console.log('\n=== calendário dia a dia ===');
+const mar = (await call('GET', 'stats?month=2026-03')).json.stats;
+ok(mar.days.length === 31, `março tem 31 dias no calendário (${mar.days.length})`);
+ok(mar.days.filter((d) => d.weekend).length === 9, 'com 9 dias de fim de semana');
+ok(mar.days.every((d) => d.weekend || d.works), 'março não tem nenhum dia fechado');
+ok(mar.days[0].dow === 0, 'o dia 1 de março de 2026 é domingo');
+
+const abr = (await call('GET', 'stats?month=2026-04')).json.stats;
+const natal = (await call('GET', 'stats?month=2026-12')).json.stats;
+const d25 = natal.days.find((d) => d.date === '2026-12-25');
+ok(d25.locked === true, 'Natal vem travado');
+ok(abr.days.find((d) => d.date === '2026-04-02').locked === false,
+   'ponto facultativo não vem travado');
+ok((await call('POST', 'day', { date: '2026-12-25', works: true })).status === 400,
+   'API recusa abrir expediente em feriado');
+console.log(`  ${(await call('POST', 'day', { date: '2026-12-25', works: true })).json.error}`);
+
+// Cadastrar um dia sem expediente que não está no decreto.
+const custom = await call('POST', 'day',
+  { date: '2026-03-10', works: false, note: 'Recesso do órgão' });
+ok(custom.status === 200, 'cadastra dia sem expediente fora do decreto');
+const mar2 = (await call('GET', 'stats?month=2026-03')).json.stats;
+const d10 = mar2.days.find((d) => d.date === '2026-03-10');
+ok(d10.works === false, '10/03 passa a não ter expediente');
+ok(d10.holiday.name === 'Recesso do órgão', `com o motivo cadastrado: ${d10.holiday.name}`);
+ok(d10.holiday.type === 'excecao', 'marcado como exceção');
+ok(mar2.premise.monThuDays === 17, `março cai para 17 dias seg-qui (${mar2.premise.monThuDays})`);
+ok(mar2.totals.slots === 38, `e para 38 vagas (${mar2.totals.slots})`);
+console.log(`  10/03 fechado: março vai de 40 para ${mar2.totals.slots} vagas`);
+
+// Ninguém é escalado nesse dia.
+for (const [i, n] of NOMES.entries()) {
+  if (!ids[n]) continue;
+  await call('POST', 'preferences', { monday: '2026-03-09', personId: ids[n], choices: TOP3[i] });
+}
+const gC = (await call('POST', 'generate', { monday: '2026-03-09' })).json;
+ok(!gC.assignments.some((a) => a.day === 2), 'ninguém escalado na terça 10/03');
+ok(gC.generation.closedDays.some((d) => d.date === '2026-03-10'), 'dia reportado como fechado');
+
+// Desfazendo, o dia volta ao normal.
+await call('POST', 'day', { date: '2026-03-10', works: true });
+const mar3 = (await call('GET', 'stats?month=2026-03')).json.stats;
+ok(mar3.premise.monThuDays === 18, 'desfazer devolve o dia');
+ok(mar3.days.find((d) => d.date === '2026-03-10').works === true, '10/03 volta a ter expediente');
 
 // Semana encurtada: 30/03 tem só seg, ter e qua. Exigir 3 dias ainda funciona,
 // mas escolher um dia fechado não pode passar.

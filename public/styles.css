@@ -705,6 +705,77 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 .dayrow-edit[data-type="feriado"] .linkbtn,
 .dayrow-edit[data-type="recesso"] .linkbtn { display: none; }
 
+/* ------------------------------------------------------------ calendário -- */
+.cal { margin-top: 4px; }
+.calhead, .calgrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+.calhead {
+  margin-bottom: 4px;
+  font-size: .62rem; font-weight: 700;
+  letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text-muted); text-align: center;
+}
+.calcell {
+  display: grid; gap: 1px; place-items: center; align-content: center;
+  min-height: 46px; padding: 4px 1px;
+  background: var(--surface-0);
+  border: 1.5px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.calcell.is-blank { background: none; cursor: default; }
+.calcell.is-weekend { background: none; cursor: default; opacity: .4; }
+.calcell:not(.is-weekend):not(.is-blank):hover { border-color: var(--border-strong); }
+.calcell.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.calnum { font-size: .88rem; font-variant-numeric: tabular-nums; }
+.caltag {
+  min-height: 11px;
+  font-size: .52rem; font-weight: 700;
+  letter-spacing: .02em; text-transform: uppercase;
+  line-height: 1.1; text-align: center;
+  color: var(--text-muted);
+}
+.calcell.is-off { background: var(--surface-2); }
+.calcell.is-off .calnum { color: var(--text-secondary); }
+.calcell[data-type="feriado"]     { background: color-mix(in srgb, var(--danger) 16%, var(--surface-0)); }
+.calcell[data-type="facultativo"] { background: color-mix(in srgb, var(--warn)   20%, var(--surface-0)); }
+.calcell[data-type="recesso"]     { background: color-mix(in srgb, var(--accent) 18%, var(--surface-0)); }
+.calcell[data-type="excecao"]     { background: color-mix(in srgb, var(--good)   18%, var(--surface-0)); }
+
+.callegend {
+  display: flex; flex-wrap: wrap; gap: 6px 14px;
+  margin-top: 12px;
+  font-size: .72rem; color: var(--text-secondary);
+}
+.callegend li { display: flex; align-items: center; gap: 6px; }
+.calswatch {
+  width: 11px; height: 11px; border-radius: 3px;
+  border: 1px solid var(--border);
+}
+.calswatch[data-type="feriado"]     { background: color-mix(in srgb, var(--danger) 16%, var(--surface-0)); }
+.calswatch[data-type="facultativo"] { background: color-mix(in srgb, var(--warn)   20%, var(--surface-0)); }
+.calswatch[data-type="recesso"]     { background: color-mix(in srgb, var(--accent) 18%, var(--surface-0)); }
+.calswatch[data-type="excecao"]     { background: color-mix(in srgb, var(--good)   18%, var(--surface-0)); }
+
+.dayeditor {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+}
+.dayeditor-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 10px; margin-bottom: 6px;
+}
+.dayeditor-head strong { font-size: .95rem; }
+.dayeditor .row-form { margin-top: 10px; }
+.dayeditor .btn { margin-top: 10px; }
+
 body.is-busy .main, body.is-busy .identity-card { opacity: .6; pointer-events: none; }
 body.is-busy { cursor: progress; }
 

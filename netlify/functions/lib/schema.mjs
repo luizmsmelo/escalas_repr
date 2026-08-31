@@ -38,13 +38,6 @@ export const SCHEMA = [
 
   `create index if not exists assignments_work_date_idx on assignments (work_date)`,
 
-  `create table if not exists month_premises (
-     ym           text primary key,
-     mon_thu_days int not null,
-     friday_days  int not null,
-     updated_at   timestamptz not null default now()
-   )`,
-
   // Como a pessoa chegou naquele dia: 'preferencia', 'voluntario' ou 'fila'.
   // Guardado para a tela conseguir explicar cada linha da escala.
   `alter table assignments add column if not exists via text`,

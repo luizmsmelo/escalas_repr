@@ -90,10 +90,20 @@ Um dia sem expediente **não tem vaga**: ninguém é escalado, ele aparece marca
 no seletor e na escala, e a fila da sexta não anda numa semana em que a sexta é
 feriado. Semana inteira fechada (21 a 25/12, por exemplo) é recusada com aviso.
 
+### O calendário na aba Ajustes
+
+A aba Ajustes traz o mês inteiro desenhado, com cada dia colorido por categoria.
+Tocar num dia abre o editor:
+
+- **dia com expediente** → dá para fechá-lo, informando o motivo (paralisação,
+  manutenção, recesso do órgão). Vira uma exceção verde no calendário.
+- **ponto facultativo ou exceção de vocês** → botão "Vai ter expediente neste
+  dia", que devolve o dia à escala.
+- **feriado ou recesso** → travado, com a explicação. Vem de lei e de decreto.
+
 O decreto define ponto facultativo como "dia útil em que a administração *poderá*
-dispensar total ou parcialmente o expediente" — não é garantido. Por isso cada
-uma dessas datas tem um botão **"Vai ter expediente"** na aba Ajustes. Feriado e
-recesso não têm esse botão, porque vêm de lei e decreto.
+dispensar total ou parcialmente o expediente" — não é garantido, e por isso ele é
+o único do decreto que vocês podem reverter.
 
 Impacto em 2026: **426 vagas no ano em vez de 470** — 44 a menos (9,4%).
 Dezembro cai de 42 para 25.
@@ -108,6 +118,7 @@ vagas do mês   = dias úteis (seg–qui) × 2  +  sextas úteis × 1
 meta por pessoa = vagas do mês ÷ nº de pessoas ativas
 ```
 
-Os dias úteis já vêm do calendário oficial **com os feriados descontados**, e a
-tela lista quais dias foram tirados da conta. Continuam **editáveis** na aba
-Contadores, como manda a especificação.
+Os dias úteis **não são um número digitado**: saem do calendário da aba Ajustes.
+Fechar ou abrir um dia lá recalcula a meta na hora, e a conta inteira aparece
+embaixo do calendário. Assim não existe o estado inconsistente de a premissa
+dizer 15 dias enquanto o calendário mostra 16 — é a mesma fonte para os dois.

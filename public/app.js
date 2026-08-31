@@ -21,6 +21,7 @@ const state = {
   away: false,
   noFriday: false,   // veto pontual da sexta nesta semana
   tab: 'escolher',
+  selectedDay: null,   // dia aberto no editor do calendário
   busy: false,
 };
 
@@ -160,7 +161,7 @@ async function loadMonth(ym) {
   state.stats = stats;
   state.month = stats.month;
   renderCounters();
-  renderDayList();   // a lista de Ajustes acompanha o mesmo mês
+  renderCalendar();   // o calendário de Ajustes acompanha o mesmo mês
 }
 
 function syncDraftFromServer() {
@@ -524,11 +525,6 @@ function renderCounters() {
   renderChartTable($('#chartTotalTable'), totalData, 'Escalas');
   renderChartTable($('#chartFridayTable'), fridayData, 'Sextas');
 
-  renderClosedDays(s);
-  $('#premiseMonThu').value = s.premise.monThuDays;
-  $('#premiseFriday').value = s.premise.fridayDays;
-  $('#premiseReset').hidden = !s.premise.custom;
-  renderPremiseMath(s);
 }
 
 function renderFridayQueue(queue) {
@@ -549,31 +545,6 @@ function renderFridayQueue(queue) {
     .join('');
 }
 
-/** Explica de onde vem o número pré-preenchido de dias úteis. */
-function renderClosedDays(s) {
-  const fechados = s.closedDays ?? [];
-  $('#premiseSource').innerHTML = s.hasCalendar
-    ? 'Os dias úteis abaixo já vêm do <strong>calendário oficial de 2026</strong>, com feriado, '
-      + 'ponto facultativo e recesso descontados. Dá para ajustar se precisar.'
-    : '<strong>Não há calendário oficial carregado para este ano</strong>, então a conta assume '
-      + 'que todo dia útil tem expediente. Ajuste à mão.';
-
-  const el = $('#closedDays');
-  if (!fechados.length) {
-    el.innerHTML = s.hasCalendar
-      ? '<p class="hint hint-muted">Nenhum dia útil sem expediente neste mês.</p>' : '';
-    return;
-  }
-  el.innerHTML = `<p class="hint hint-muted">Descontados deste mês:</p>
-    <ul class="closed-list">${fechados
-      .map((d) => `<li class="closed-item" data-type="${esc(d.type)}">
-        <span class="closed-date">${fmtDay(d.date)}</span>
-        <span class="closed-name">${esc(d.name)}</span>
-        <span class="closed-tag">${esc(d.overridden ? 'exceção' : TYPE_LABEL[d.type] ?? '')}</span>
-      </li>`)
-      .join('')}</ul>`;
-}
-
 function statCard(label, value, note, tone = '') {
   return `<div class="stat">
     <div class="stat-label">${esc(label)}</div>
@@ -585,29 +556,6 @@ function statCard(label, value, note, tone = '') {
 function diffTone(actual, target) {
   if (Math.abs(actual - target) < 0.5) return '';
   return actual > target ? 'over' : 'under';
-}
-
-function renderPremiseMath(s) {
-  const { premise, capacity, totals, headcount, calendar } = s;
-  const rows = [
-    row('Dias úteis seg–qui', `${premise.monThuDays} × ${capacity.weekday} vagas`, premise.monThuDays * capacity.weekday),
-    row('Sextas úteis', `${premise.fridayDays} × ${capacity.friday} ${capacity.friday === 1 ? 'vaga' : 'vagas'}`, premise.fridayDays * capacity.friday),
-    row('Total de vagas no mês', '', totals.slots, true),
-    row('Meta por pessoa', `${totals.slots} ÷ ${headcount || 1} ${headcount === 1 ? 'pessoa' : 'pessoas'}`, fmtNum(totals.targetPerPerson), true),
-    row('Meta de sextas por pessoa', `${totals.fridaySlots} ÷ ${headcount || 1}`, fmtNum(totals.fridayTargetPerPerson), true),
-  ];
-  const note = premise.custom
-    ? `<p class="hint hint-muted">Valores ajustados à mão. No calendário puro seriam
-       ${calendar.monThu} dias seg–qui e ${calendar.fridays} sextas.</p>`
-    : '';
-  $('#premiseMath').innerHTML = rows.join('') + note;
-
-  function row(label, expr, value, total = false) {
-    return `<div class="math-row"${total ? ' data-total="1"' : ''}>
-      <span>${esc(label)}${expr ? ` <span class="math-expr">${esc(expr)}</span>` : ''}</span>
-      <b>${esc(String(value))}</b>
-    </div>`;
-  }
 }
 
 function renderChartTable(el, data, valueHeader) {
@@ -766,7 +714,7 @@ function renderSettings() {
         .join('')
     : '<li class="empty">Ninguém cadastrado ainda.</li>';
 
-  renderDayList();
+  renderCalendar();
 
   $('#counterList').innerHTML = (state.stats?.fridayQueue ?? [])
     .map((q) => `<li class="person-row" data-person="${q.personId}">
@@ -783,32 +731,116 @@ function renderSettings() {
   $('#capFriday').value = state.data.week.capFriday;
 }
 
-/** Dias do mês que não terão expediente, com opção de devolver o expediente. */
-function renderDayList() {
+/* --------------------------------------------------------- calendário ---- */
+
+const DOW_SHORT = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+
+function renderCalendar() {
   const s = state.stats;
-  $('#daysMonthLabel').textContent = s ? monthLabel(s.month) : '—';
-  const el = $('#dayList');
-  const fechados = s?.closedDays ?? [];
+  if (!s) return;
+  $('#calMonthLabel').textContent = monthLabel(s.month);
+  $('#calSource').textContent = s.hasCalendar
+    ? 'Decreto 12.134 / 2026' : 'sem calendário oficial para este ano';
 
-  if (!s?.hasCalendar) {
-    el.innerHTML = '<li class="empty">Não há calendário oficial carregado para este ano.</li>';
+  const dias = s.days ?? [];
+  const grade = [];
+  // Espaços vazios até o primeiro dia cair na coluna certa.
+  for (let i = 0; i < (dias[0]?.dow ?? 0); i++) grade.push('<div class="calcell is-blank"></div>');
+
+  for (const d of dias) {
+    const tipo = d.holiday?.type ?? '';
+    const selecionado = state.selectedDay === d.date;
+    const classes = ['calcell'];
+    if (d.weekend) classes.push('is-weekend');
+    if (!d.works && !d.weekend) classes.push('is-off');
+    if (selecionado) classes.push('is-selected');
+
+    const titulo = d.weekend ? 'Fim de semana'
+      : d.works ? 'Com expediente'
+      : `${d.holiday?.label ?? 'Sem expediente'}: ${d.holiday?.name ?? ''}`;
+
+    grade.push(`<button class="${classes.join(' ')}" type="button"
+        data-date="${d.date}" data-type="${esc(tipo)}"
+        ${d.weekend ? 'disabled' : ''}
+        aria-pressed="${selecionado ? 'true' : 'false'}"
+        title="${esc(titulo)}">
+      <span class="calnum">${d.dayOfMonth}</span>
+      ${!d.weekend && !d.works
+        ? `<span class="caltag">${esc(SHORT_TYPE[tipo] ?? 'fechado')}</span>`
+        : '<span class="caltag"></span>'}
+    </button>`);
+  }
+
+  $('#calendar').innerHTML =
+    `<div class="calhead">${DOW_SHORT.map((d) => `<span>${d}</span>`).join('')}</div>
+     <div class="calgrid">${grade.join('')}</div>`;
+
+  renderDayEditor();
+  renderCalMath(s);
+}
+
+/** Painel que aparece ao tocar num dia do calendário. */
+function renderDayEditor() {
+  const box = $('#dayEditor');
+  const dia = (state.stats?.days ?? []).find((d) => d.date === state.selectedDay);
+
+  if (!dia || dia.weekend) { box.hidden = true; return; }
+  box.hidden = false;
+
+  const titulo = `${DOW_SHORT[dia.dow]}, ${fmtDay(dia.date)}`;
+
+  if (dia.locked) {
+    box.innerHTML = `<div class="dayeditor-head">
+        <strong>${titulo}</strong>
+        <span class="closed-tag">${esc(dia.holiday.label)}</span>
+      </div>
+      <p class="hint">${esc(dia.holiday.name)}${dia.holiday.note ? ` &mdash; ${esc(dia.holiday.note)}` : ''}.
+        Vem de lei ou decreto, então não dá para abrir expediente aqui.</p>`;
     return;
   }
-  if (!fechados.length) {
-    el.innerHTML = '<li class="empty">Todo dia útil deste mês tem expediente.</li>';
+
+  if (!dia.works) {
+    box.innerHTML = `<div class="dayeditor-head">
+        <strong>${titulo}</strong>
+        <span class="closed-tag">${esc(dia.holiday?.label ?? 'Sem expediente')}</span>
+      </div>
+      <p class="hint">${esc(dia.holiday?.name ?? 'Sem expediente')}.</p>
+      <button class="btn btn-ghost btn-block" type="button" data-day-action="abrir">
+        Vai ter expediente neste dia
+      </button>`;
     return;
   }
 
-  el.innerHTML = fechados
-    .map((d) => `<li class="dayrow-edit" data-date="${d.date}" data-type="${esc(d.type)}">
-      <span class="closed-date">${fmtDay(d.date)}</span>
-      <span class="dayrow-edit-name">
-        ${esc(d.name)}
-        <span class="closed-tag">${esc(d.overridden ? 'exceção' : TYPE_LABEL[d.type] ?? '')}</span>
-      </span>
-      <button class="linkbtn" type="button" data-restore="${d.date}">Vai ter expediente</button>
-    </li>`)
-    .join('');
+  box.innerHTML = `<div class="dayeditor-head"><strong>${titulo}</strong>
+      <span class="closed-tag">Com expediente</span></div>
+    <p class="hint">Marcar como dia sem expediente. Ninguém será escalado e ele sai da meta do mês.</p>
+    <form class="row-form" data-day-action="fechar">
+      <input id="dayNote" type="text" maxlength="80" required
+             placeholder="Motivo (ex.: recesso do órgão)">
+      <button type="submit" class="btn btn-primary">Fechar dia</button>
+    </form>`;
+}
+
+function renderCalMath(s) {
+  const linha = (rot, expr, val, total = false) =>
+    `<div class="math-row"${total ? ' data-total="1"' : ''}>
+      <span>${esc(rot)}${expr ? ` <span class="math-expr">${esc(expr)}</span>` : ''}</span>
+      <b>${esc(String(val))}</b>
+    </div>`;
+
+  const { premise, capacity, totals, headcount } = s;
+  $('#calMath').innerHTML = [
+    linha('Dias com expediente seg–qui', `${premise.monThuDays} × ${capacity.weekday} vagas`,
+      premise.monThuDays * capacity.weekday),
+    linha('Sextas com expediente',
+      `${premise.fridayDays} × ${capacity.friday} ${capacity.friday === 1 ? 'vaga' : 'vagas'}`,
+      premise.fridayDays * capacity.friday),
+    linha('Total de vagas no mês', '', totals.slots, true),
+    linha('Meta por pessoa', `${totals.slots} ÷ ${headcount || 1} ${headcount === 1 ? 'pessoa' : 'pessoas'}`,
+      fmtNum(totals.targetPerPerson), true),
+    linha('Meta de sextas por pessoa', `${totals.fridaySlots} ÷ ${headcount || 1}`,
+      fmtNum(totals.fridayTargetPerPerson), true),
+  ].join('');
 }
 
 /* ------------------------------------------------------------------ abas -- */
@@ -930,31 +962,6 @@ function wireEvents() {
     }));
 
   // contadores
-  $('#premiseForm').addEventListener('submit', (e) => {
-    e.preventDefault();
-    run(async () => {
-      const { stats } = await post('/premise', {
-        ym: state.month,
-        monThuDays: Number($('#premiseMonThu').value),
-        fridayDays: Number($('#premiseFriday').value),
-      });
-      state.stats = stats;
-      renderCounters();
-      toast('Premissa do mês atualizada.');
-    });
-  });
-
-  $('#premiseReset').addEventListener('click', () =>
-    run(async () => {
-      const { calendar } = state.stats;
-      const { stats } = await post('/premise', {
-        ym: state.month, monThuDays: calendar.monThu, fridayDays: calendar.fridays,
-      });
-      state.stats = stats;
-      renderCounters();
-      toast('Voltou aos dias do calendário.');
-    }));
-
   $$('[data-table]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const el = $(`#${btn.dataset.table}Table`);
@@ -1010,16 +1017,22 @@ function wireEvents() {
     });
   });
 
-  $('#dayList').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-restore]');
-    if (!btn) return;
-    run(async () => {
-      state.data = await post('/day', { date: btn.dataset.restore, works: true });
-      state.stats = state.data.stats;
-      syncDraftFromServer();
-      renderAll();
-      toast('Expediente devolvido. Gere a escala de novo, se já tinha gerado.');
-    });
+  $('#calendar').addEventListener('click', (e) => {
+    const cell = e.target.closest('[data-date]');
+    if (!cell || cell.disabled) return;
+    state.selectedDay = state.selectedDay === cell.dataset.date ? null : cell.dataset.date;
+    renderCalendar();
+  });
+
+  $('#dayEditor').addEventListener('click', (e) => {
+    if (!e.target.closest('[data-day-action="abrir"]')) return;
+    salvarDia(state.selectedDay, true, null);
+  });
+
+  $('#dayEditor').addEventListener('submit', (e) => {
+    if (!e.target.closest('[data-day-action="fechar"]')) return;
+    e.preventDefault();
+    salvarDia(state.selectedDay, false, $('#dayNote').value);
   });
 
   $('#counterList').addEventListener('change', (e) => {
@@ -1047,6 +1060,25 @@ function wireEvents() {
     });
   });
 }
+
+function salvarDia(date, works, note) {
+  if (!date) return;
+  run(async () => {
+    state.data = await post('/day', { date, works, note });
+    state.stats = state.data.stats;
+    // O calendário pode estar num mês diferente do da semana aberta.
+    if (state.stats.month !== monthOf(date)) {
+      const { stats } = await get(`/stats?month=${monthOf(date)}`);
+      state.stats = stats;
+    }
+    state.selectedDay = null;
+    syncDraftFromServer();
+    renderAll();
+    toast(works ? 'Expediente devolvido a esse dia.' : 'Dia marcado como sem expediente.');
+  });
+}
+
+const monthOf = (iso) => iso.slice(0, 7);
 
 /* ----------------------------------------------------------------- start -- */
 

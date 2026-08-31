@@ -158,26 +158,6 @@
         <div id="chartFridayTable" class="tablewrap" hidden></div>
       </figure>
 
-      <section class="card">
-        <h2 class="card-title">Como a meta do mês é calculada</h2>
-        <p class="hint" id="premiseSource"></p>
-        <div id="closedDays" class="closed"></div>
-        <form id="premiseForm" class="premise">
-          <label class="field">
-            <span>Dias úteis seg&ndash;qui</span>
-            <input id="premiseMonThu" type="number" min="0" max="31" inputmode="numeric" required>
-          </label>
-          <label class="field">
-            <span>Sextas úteis</span>
-            <input id="premiseFriday" type="number" min="0" max="31" inputmode="numeric" required>
-          </label>
-          <div class="premise-actions">
-            <button type="submit" class="btn btn-primary">Aplicar</button>
-            <button id="premiseReset" type="button" class="linkbtn">Voltar ao calendário</button>
-          </div>
-        </form>
-        <div id="premiseMath" class="math"></div>
-      </section>
     </section>
 
     <!-- ABA: ajustes ----------------------------------------------------- -->
@@ -230,17 +210,27 @@
 
       <section class="card">
         <h2 class="card-title">
-          Dias sem expediente
-          <span class="card-sub">Decreto 12.134 / 2026</span>
+          Calendário
+          <span class="card-sub" id="calSource"></span>
         </h2>
-        <p class="hint">Feriado e recesso são fixos. <strong>Ponto facultativo</strong> o decreto
-          deixa a critério da chefia &mdash; se o setor for trabalhar, devolva o expediente aqui.</p>
         <nav class="weeknav weeknav-inline">
           <button class="weeknav-arrow" data-month-step="-1" type="button" aria-label="Mês anterior">‹</button>
-          <div class="weeknav-label"><strong id="daysMonthLabel">—</strong></div>
+          <div class="weeknav-label"><strong id="calMonthLabel">—</strong></div>
           <button class="weeknav-arrow" data-month-step="1" type="button" aria-label="Próximo mês">›</button>
         </nav>
-        <ul id="dayList" class="daylist"></ul>
+
+        <div id="calendar" class="cal"></div>
+
+        <div id="dayEditor" class="dayeditor" hidden></div>
+
+        <ul class="callegend">
+          <li><span class="calswatch" data-type="feriado"></span>Feriado</li>
+          <li><span class="calswatch" data-type="facultativo"></span>Ponto facultativo</li>
+          <li><span class="calswatch" data-type="recesso"></span>Recesso</li>
+          <li><span class="calswatch" data-type="excecao"></span>Cadastrado por vocês</li>
+        </ul>
+
+        <div id="calMath" class="math"></div>
       </section>
 
       <section class="card">
