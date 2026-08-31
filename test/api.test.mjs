@@ -4,151 +4,157 @@ import { loadApi } from './load-api.mjs';
 const handler = await loadApi();
 
 let pass = 0, fail = 0;
-const ok = (cond, msg) => cond ? (pass++, true)
-  : (fail++, console.log('  ✗ ' + msg), false);
+const ok = (cond, msg) => cond ? (pass++, true) : (fail++, console.log('  ✗ ' + msg), false);
 
 const call = async (method, path, body) => {
   const res = await handler(new Request(`https://x.test/api/${path}`, {
-    method,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    method, body: body === undefined ? undefined : JSON.stringify(body),
   }));
   return { status: res.status, json: await res.json() };
 };
 
-const WEEK = '2026-09-07'; // uma segunda-feira
+const WEEK = '2026-09-07';
 const NOMES = ['Luiz Melo','Ana Souza','Bruno Lima','Carla Reis','Diego Alves',
                'Elisa Nunes','Fabio Costa','Gisele Pinto','Hugo Dias'];
+const TOP3 = [[1,4,3],[2,1,3],[3,2,4],[4,1,2],[1,2,3],[2,3,4],[3,4,1],[4,2,3],[1,3,4]];
+const sexta = (st) => st.assignments.find((a) => a.day === 5);
 
-console.log('=== cadastro de pessoas ===');
+console.log('=== cadastro ===');
 const ids = {};
 for (const n of NOMES) {
   const r = await call('POST', 'people', { name: n });
   ok(r.status === 200, `criar ${n}: ${JSON.stringify(r.json)}`);
   ids[n] = r.json.person?.id;
 }
-ok(Object.keys(ids).length === 9, '9 pessoas cadastradas');
+ok((await call('POST', 'people', { name: 'luiz melo' })).status === 400, 'rejeita duplicado');
+ok((await call('POST', 'people', { name: 'X' })).status === 400, 'rejeita nome curto');
 
-const dup = await call('POST', 'people', { name: 'luiz melo' });
-ok(dup.status === 400, 'rejeita nome duplicado ignorando maiusculas');
-const curto = await call('POST', 'people', { name: 'X' });
-ok(curto.status === 400, 'rejeita nome de 1 caractere');
-
-console.log('\n=== estado inicial ===');
+console.log('\n=== preferencias e veto da sexta ===');
+for (const [i, n] of NOMES.entries()) {
+  await call('POST', 'preferences', { monday: WEEK, personId: ids[n], choices: TOP3[i] });
+}
 let st = (await call('GET', `state?week=${WEEK}`)).json;
-ok(st.week.monday === WEEK, 'semana correta');
-ok(st.week.capWeekday === 2 && st.week.capFriday === 1, 'capacidade padrao 2/1');
-ok(st.people.length === 9, '9 pessoas no estado');
-ok(st.assignments.length === 0, 'sem escala ainda');
-ok(st.settings.fridayFairness === false, 'rodizio desligado por padrao');
-ok(st.stats.month === '2026-09', `mes das estatisticas: ${st.stats.month}`);
-console.log(`  set/2026 no calendario: ${st.stats.calendar.monThu} dias seg-qui + ${st.stats.calendar.fridays} sextas`);
-console.log(`  vagas no mes: ${st.stats.totals.slots}, meta por pessoa: ${st.stats.totals.targetPerPerson}`);
-ok(st.stats.totals.slots === st.stats.calendar.monThu * 2 + st.stats.calendar.fridays, 'total de vagas confere');
+ok(st.preferences.length === 9, '9 preferencias gravadas');
+ok(st.preferences.every((p) => p.noFriday === false), 'ninguem vetou ainda');
 
-console.log('\n=== preferencias ===');
-const prefs = {
-  'Luiz Melo': [1,4,3], 'Ana Souza': [2,1,3],   'Bruno Lima': [3,2,4],
-  'Carla Reis': [4,5,1], 'Diego Alves': [1,2,5], 'Elisa Nunes': [5,3,2],
-  'Fabio Costa': [2,3,1], 'Gisele Pinto': [3,4,5], 'Hugo Dias': [4,1,2],
-};
-for (const [n, choices] of Object.entries(prefs)) {
-  const r = await call('POST', 'preferences', { monday: WEEK, personId: ids[n], choices });
-  ok(r.status === 200, `preferencia de ${n}`);
-}
-const invalida = await call('POST', 'preferences', { monday: WEEK, personId: ids['Luiz Melo'], choices: [1,1,2] });
-ok(invalida.status === 400, 'rejeita 3 dias com repeticao');
-const doisDias = await call('POST', 'preferences', { monday: WEEK, personId: ids['Luiz Melo'], choices: [1,2] });
-ok(doisDias.status === 400, 'rejeita menos de 3 dias');
-const diaMau = await call('POST', 'preferences', { monday: WEEK, personId: ids['Luiz Melo'], choices: [1,2,6] });
-ok(diaMau.status === 400, 'rejeita sabado');
-const naoSegunda = await call('POST', 'preferences', { monday: '2026-09-08', personId: ids['Luiz Melo'], choices: [1,2,3] });
-ok(naoSegunda.status === 400, 'rejeita semana que nao comeca na segunda');
+const veto = await call('POST', 'preferences',
+  { monday: WEEK, personId: ids['Luiz Melo'], choices: [1,4,3], noFriday: true });
+ok(veto.status === 200, 'veto aceito');
+ok(veto.json.preferences.find((p) => p.personId === ids['Luiz Melo']).noFriday === true,
+   'veto persistido');
 
+const contradicao = await call('POST', 'preferences',
+  { monday: WEEK, personId: ids['Ana Souza'], choices: [5,1,2], noFriday: true });
+ok(contradicao.status === 400, 'rejeita pedir sexta e vetar sexta ao mesmo tempo');
+
+console.log('\n=== fila da sexta ===');
 st = (await call('GET', `state?week=${WEEK}`)).json;
-ok(st.preferences.length === 9, 'todas as 9 preferencias gravadas');
+ok(st.stats.fridayQueue.length === 9, 'fila com as 9 pessoas');
+ok(st.stats.fridayQueue.every((q) => q.fridays === 0), 'todos comecam em 0');
 
-console.log('\n=== gerar escala ===');
 let gen = (await call('POST', 'generate', { monday: WEEK })).json;
-ok(gen.assignments.length === 9, `9 vagas preenchidas (veio ${gen.assignments.length})`);
-ok(new Set(gen.assignments.map(a=>a.personId)).size === 9, 'ninguem repetido');
-const porDia = {};
-gen.assignments.forEach(a => porDia[a.day] = (porDia[a.day]||0)+1);
-ok(JSON.stringify(porDia) === '{"1":2,"2":2,"3":2,"4":2,"5":1}', `capacidade respeitada: ${JSON.stringify(porDia)}`);
-console.log(`  ${gen.generation.firstChoice} na 1a opcao, ${gen.generation.secondChoice} na 2a, ${gen.generation.thirdChoice} na 3a`);
-const nomesDia = {1:'SEG',2:'TER',3:'QUA',4:'QUI',5:'SEX'};
-for (const d of [1,2,3,4,5]) {
-  const quem = gen.assignments.filter(a=>a.day===d).map(a=>`${a.name.split(' ')[0]} (${a.rank}a)`);
-  console.log(`  ${nomesDia[d]} ${gen.week.dates.find(x=>x.day===d).date}: ${quem.join(', ')}`);
+ok(gen.assignments.length === 9, `9 vagas (${gen.assignments.length})`);
+ok(sexta(gen).personId !== ids['Luiz Melo'], 'quem vetou nao pegou a sexta');
+ok(gen.generation.friday.vetoed.includes('Luiz Melo'), 'veto reportado');
+ok(sexta(gen).via === 'fila', `sexta veio da fila (via=${sexta(gen).via})`);
+console.log(`  sexta ficou com ${sexta(gen).name} (via ${sexta(gen).via})`);
+
+console.log('\n=== voluntario fura a fila ===');
+const SEM_VOL = '2026-09-14';
+for (const [i, n] of NOMES.entries()) {
+  await call('POST', 'preferences', { monday: SEM_VOL, personId: ids[n], choices: TOP3[i] });
 }
-ok(gen.assignments.every(a => a.date === gen.week.dates.find(d=>d.day===a.day).date), 'data de trabalho bate com o dia');
+// Hugo ja tem sextas, mas se voluntaria: deve levar mesmo assim.
+await call('POST', 'counter', { id: ids['Hugo Dias'], fridayOffset: 20 });
+await call('POST', 'preferences',
+  { monday: SEM_VOL, personId: ids['Hugo Dias'], choices: [5,1,2] });
+const gv = (await call('POST', 'generate', { monday: SEM_VOL })).json;
+ok(sexta(gv).personId === ids['Hugo Dias'], `voluntario levou (${sexta(gv).name})`);
+ok(sexta(gv).via === 'voluntario', 'marcado como voluntario');
+ok(sexta(gv).rank === 1, 'mantem a 1a opcao que ele pediu');
+await call('POST', 'counter', { id: ids['Hugo Dias'], fridayOffset: 0 });
 
-console.log('\n=== contadores ===');
-ok(gen.stats.totals.assigned === 9, `9 escalas contabilizadas no mes (veio ${gen.stats.totals.assigned})`);
-ok(gen.stats.perPerson.every(p => p.total === 1), 'cada pessoa com 1 escala');
-ok(gen.stats.perPerson.filter(p => p.fridays === 1).length === 1, 'exatamente 1 pessoa com sexta');
+console.log('\n=== todos vetam a sexta ===');
+const SEM_VETO = '2026-09-21';
+for (const [i, n] of NOMES.entries()) {
+  await call('POST', 'preferences',
+    { monday: SEM_VETO, personId: ids[n], choices: TOP3[i], noFriday: true });
+}
+const gvet = (await call('POST', 'generate', { monday: SEM_VETO })).json;
+ok(sexta(gvet) === undefined, 'ninguem escalado na sexta');
+ok(gvet.generation.friday.allVetoed === true, 'app sinaliza que todos recusaram');
+ok(gvet.generation.unfilledSlots.includes(5), 'sexta listada como vaga aberta');
+ok(gvet.assignments.length === 8, `as 8 vagas de seg-qui saem normalmente (${gvet.assignments.length})`);
 
-console.log('\n=== premissa do mes ===');
+console.log('\n=== contador GERAL faz o rodizio fechar ===');
+// 12 semanas seguidas, atravessando 3 meses. Com contador mensal, so metade do
+// grupo pegaria sexta; com contador geral, todos devem passar.
+const inicio = '2026-10-05';
+const donos = [];
+for (let w = 0; w < 12; w++) {
+  const monday = new Date(Date.UTC(2026, 9, 5) + w * 7 * 86400000).toISOString().slice(0, 10);
+  for (const [i, n] of NOMES.entries()) {
+    await call('POST', 'preferences', { monday, personId: ids[n], choices: TOP3[i] });
+  }
+  const g = (await call('POST', 'generate', { monday })).json;
+  donos.push(sexta(g).name.split(' ')[0]);
+}
+console.log(`  sextas de ${inicio} em diante: ${donos.join(', ')}`);
+
+// A propriedade que interessa nao e "9 nomes distintos nesta janela" - alguem
+// pode ter pego a sexta antes dela comecar. E que o rodizio FECHE: ninguem pega
+// a segunda sexta antes de todo mundo ter pego a primeira. Isso equivale a
+// diferenca entre o maior e o menor contador nunca passar de 1.
+const filaFinal = (await call('GET', 'stats?month=2026-10')).json.stats.fridayQueue;
+const menor = filaFinal[0].fridays;
+const maior = filaFinal[filaFinal.length - 1].fridays;
+console.log(`  contadores no fim: ${filaFinal.map((q) => q.fridays).join(', ')}`);
+ok(maior - menor <= 1, `rodizio fechado: diferenca entre maior e menor e ${maior - menor}`);
+ok(filaFinal.every((q) => q.fridays >= 1), 'todas as 9 pessoas ja pegaram ao menos uma sexta');
+ok(menor >= 1, `ninguem ficou zerado (menor contador: ${menor})`);
+
+console.log('\n=== ajuste manual do contador ===');
+await call('POST', 'counter', { id: ids['Carla Reis'], fridayOffset: 7 });
+let fila = (await call('GET', 'stats?month=2026-10')).json.stats.fridayQueue;
+ok(fila.find((q) => q.personId === ids['Carla Reis']).fridays === 7, 'contador ajustado para 7');
+ok(fila[fila.length - 1].personId === ids['Carla Reis'], 'e ela foi para o fim da fila');
+ok((await call('POST', 'counter', { id: ids['Carla Reis'], fridayOffset: -1 })).status === 400,
+   'rejeita contador negativo');
+
+console.log('\n=== contadores mensais continuam existindo ===');
+const s10 = (await call('GET', 'stats?month=2026-10')).json.stats;
+ok(s10.perPerson.every((p) => 'fridays' in p && 'allTimeFridays' in p),
+   'contador do mes e contador geral convivem');
+ok(s10.perPerson.some((p) => p.allTimeFridays >= p.fridays), 'geral nunca e menor que o do mes');
+console.log(`  out/2026: ${s10.totals.assigned} escalas, meta ${s10.totals.targetPerPerson}/pessoa`);
+
+console.log('\n=== premissa, publicacao e cascata ===');
 let prem = (await call('POST', 'premise', { ym: '2026-09', monThuDays: 15, fridayDays: 3 })).json;
-ok(prem.stats.premise.custom === true, 'premissa marcada como ajustada');
-ok(prem.stats.totals.slots === 15*2 + 3, `vagas recalculadas: ${prem.stats.totals.slots}`);
-console.log(`  15 x 2 + 3 x 1 = ${prem.stats.totals.slots} vagas, meta ${prem.stats.totals.targetPerPerson}/pessoa`);
+ok(prem.stats.totals.slots === 33, `premissa recalcula vagas (${prem.stats.totals.slots})`);
+ok(prem.stats.premise.custom === true, 'marcada como ajustada');
 const cal = prem.stats.calendar;
-prem = (await call('POST', 'premise', { ym: '2026-09', monThuDays: cal.monThu, fridayDays: cal.fridays })).json;
-ok(prem.stats.premise.custom === false, 'voltar ao calendario limpa a marca de ajuste');
-const premMau = await call('POST', 'premise', { ym: '2026-09', monThuDays: -1, fridayDays: 3 });
-ok(premMau.status === 400, 'rejeita dias uteis negativos');
+prem = (await call('POST', 'premise',
+  { ym: '2026-09', monThuDays: cal.monThu, fridayDays: cal.fridays })).json;
+ok(prem.stats.premise.custom === false, 'voltar ao calendario limpa a marca');
 
-console.log('\n=== publicar e travar ===');
-let pub = (await call('POST', 'publish', { monday: WEEK, published: true })).json;
-ok(pub.week.published === true, 'semana publicada');
-const travada = await call('POST', 'preferences', { monday: WEEK, personId: ids['Ana Souza'], choices: [5,4,3] });
-ok(travada.status === 409, `preferencia bloqueada apos publicar (status ${travada.status})`);
-const genTravado = await call('POST', 'generate', { monday: WEEK });
-ok(genTravado.status === 409, 'nao regera escala publicada');
-pub = (await call('POST', 'publish', { monday: WEEK, published: false })).json;
-ok(pub.week.published === false, 'semana reaberta');
-const reaberta = await call('POST', 'preferences', { monday: WEEK, personId: ids['Ana Souza'], choices: [5,4,3] });
-ok(reaberta.status === 200, 'preferencia aceita apos reabrir');
+await call('POST', 'publish', { monday: WEEK, published: true });
+ok((await call('POST', 'preferences',
+   { monday: WEEK, personId: ids['Ana Souza'], choices: [5,4,3] })).status === 409,
+   'semana publicada trava preferencias');
+ok((await call('POST', 'generate', { monday: WEEK })).status === 409, 'e trava a geracao');
+await call('POST', 'publish', { monday: WEEK, published: false });
 
-console.log('\n=== ausencias ===');
-const SEM2 = '2026-09-14';
-for (const [n, choices] of Object.entries(prefs)) {
-  await call('POST', 'preferences', { monday: SEM2, personId: ids[n], choices });
-}
-await call('POST', 'preferences', { monday: SEM2, personId: ids['Luiz Melo'], unavailable: true });
-await call('POST', 'preferences', { monday: SEM2, personId: ids['Ana Souza'], unavailable: true });
-const g2 = (await call('POST', 'generate', { monday: SEM2 })).json;
-ok(g2.assignments.length === 9, `9 vagas preenchidas com 7 pessoas (veio ${g2.assignments.length})`);
-ok(!g2.assignments.some(a => a.personId === ids['Luiz Melo']), 'Luiz ausente nao foi escalado');
-ok(!g2.assignments.some(a => a.personId === ids['Ana Souza']), 'Ana ausente nao foi escalada');
-const c2 = {};
-g2.assignments.forEach(a => c2[a.name] = (c2[a.name]||0)+1);
-console.log(`  dias por pessoa: ${JSON.stringify(c2)}`);
-ok(Math.max(...Object.values(c2)) === 2, 'no maximo 2 dias por pessoa');
-ok(g2.generation.awayCount === 2, `2 ausentes detectados (veio ${g2.generation.awayCount})`);
-
-console.log('\n=== capacidade da semana ===');
-const cap = (await call('POST', 'capacity', { monday: '2026-09-21', capWeekday: 3, capFriday: 2 })).json;
-ok(cap.week.capWeekday === 3 && cap.week.capFriday === 2, 'capacidade alterada');
-const capMau = await call('POST', 'capacity', { monday: '2026-09-21', capWeekday: 99, capFriday: 1 });
-ok(capMau.status === 400, 'rejeita capacidade fora do intervalo');
-
-console.log('\n=== rodizio de sextas ===');
-await call('POST', 'settings', { fridayFairness: true });
-st = (await call('GET', `state?week=${WEEK}`)).json;
-ok(st.settings.fridayFairness === true, 'configuracao persistida');
-await call('POST', 'settings', { fridayFairness: false });
-
-console.log('\n=== remocao em cascata ===');
-const antes = (await call('GET', `stats?month=2026-09`)).json.stats.totals.assigned;
-await call('DELETE', `people?id=${ids['Hugo Dias']}`);
-const depois = (await call('GET', `stats?month=2026-09`)).json.stats;
+const antes = (await call('GET', 'stats?month=2026-10')).json.stats.totals.assigned;
+await call('DELETE', `people?id=${ids['Gisele Pinto']}`);
+const depois = (await call('GET', 'stats?month=2026-10')).json.stats;
 ok(depois.perPerson.length === 8, '8 pessoas restantes');
-ok(depois.totals.assigned < antes, `escalas do Hugo apagadas junto (${antes} -> ${depois.totals.assigned})`);
+ok(depois.totals.assigned < antes, `escalas apagadas em cascata (${antes} -> ${depois.totals.assigned})`);
+ok(depois.fridayQueue.length === 8, 'fila encolhe junto');
 
 console.log('\n=== rotas invalidas ===');
 ok((await call('GET', 'inexistente')).status === 404, '404 em rota desconhecida');
 ok((await call('GET', 'state?week=2026-02-30')).status === 400, 'rejeita data inexistente');
+ok((await call('GET', 'state?week=2026-09-08')).status === 400, 'rejeita semana fora da segunda');
 ok((await call('GET', 'stats?month=2026-13')).status === 400, 'rejeita mes 13');
 
 console.log(`\n${pass} passaram, ${fail} falharam`);

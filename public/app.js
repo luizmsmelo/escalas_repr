@@ -2,7 +2,8 @@
 
 const DAY_NAMES  = { 1: 'Segunda', 2: 'Terça', 3: 'Quarta', 4: 'Quinta', 5: 'Sexta' };
 const DAY_SHORT  = { 1: 'SEG', 2: 'TER', 3: 'QUA', 4: 'QUI', 5: 'SEX' };
-const ORDINAL    = { 1: '1ª', 2: '2ª', 3: '3ª' };
+const ORDINAL    = { 1: '1ª', 2: '2ª', 3: '3ª', 4: '4ª' };
+const FRIDAY     = 5;
 const STORAGE_ME = 'escalas.personId';
 
 const state = {
@@ -13,6 +14,7 @@ const state = {
   stats: null,
   draft: [],         // dias escolhidos, em ordem, ainda nao salvos
   away: false,
+  noFriday: false,   // veto pontual da sexta nesta semana
   tab: 'escolher',
   busy: false,
 };
@@ -159,6 +161,7 @@ function syncDraftFromServer() {
   const mine = state.data.preferences.find((p) => p.personId === state.me?.id);
   state.draft = mine ? [...mine.choices] : [];
   state.away = mine ? mine.unavailable : false;
+  state.noFriday = mine ? !!mine.noFriday : false;
 }
 
 /* ------------------------------------------------------------ identidade -- */
@@ -226,17 +229,25 @@ function renderPicker() {
   $('#awayToggle').disabled = locked;
   $('#pickPrefs').hidden = state.away;
 
+  const fridayPicked = state.draft.includes(FRIDAY);
+
   const picker = $('#dayPicker');
   picker.innerHTML = week.dates
     .map(({ day, date }) => {
       const rank = state.draft.indexOf(day) + 1;
       const full = state.draft.length >= 3 && !rank;
+      // Sexta nao escolhida no top 3 e a 4a opcao automatica de todo mundo -
+      // por isso ela nunca aparece como "sem opção", e sim como "4ª".
+      const auto = day === FRIDAY && !rank && !state.noFriday;
+      const badge = rank ? ORDINAL[rank] : auto ? '4ª' : '·';
       return `<button class="daybtn" type="button" data-day="${day}"
-                      data-picked="${rank ? 1 : 0}"
+                      data-picked="${rank ? 1 : 0}" data-auto="${auto ? 1 : 0}"
                       ${locked || full ? 'disabled' : ''}
                       aria-pressed="${rank ? 'true' : 'false'}"
-                      aria-label="${DAY_NAMES[day]} ${fmtDay(date)}${rank ? `, ${ORDINAL[rank]} opção` : ''}">
-        <span class="daybtn-rank">${rank ? ORDINAL[rank] : '·'}</span>
+                      aria-label="${DAY_NAMES[day]} ${fmtDay(date)}${
+                        rank ? `, ${ORDINAL[rank]} opção`
+                             : auto ? ', 4ª opção automática' : ''}">
+        <span class="daybtn-rank">${badge}</span>
         <span class="daybtn-name">${DAY_SHORT[day]}</span>
         <span class="daybtn-date">${fmtDay(date)}</span>
       </button>`;
@@ -248,11 +259,39 @@ function renderPicker() {
     ? `Faltam ${missing} ${missing === 1 ? 'dia' : 'dias'}. Toque de novo num dia escolhido para desfazer.`
     : 'Pronto. Toque num dia escolhido para desfazer.';
 
+  renderFridayBox(fridayPicked, locked);
+
   const save = $('#savePrefs');
   save.disabled = locked || (!state.away && state.draft.length !== 3);
   save.textContent = state.away ? 'Salvar ausência' : 'Salvar preferência';
 
   renderRespondedList();
+}
+
+/** Explica a posicao da pessoa na fila da sexta e oferece o veto da semana. */
+function renderFridayBox(fridayPicked, locked) {
+  const box = $('#fridayBox');
+  const toggle = $('#noFridayToggle');
+  const queue = state.stats?.fridayQueue ?? [];
+  const mine = queue.find((q) => q.personId === state.me?.id);
+  const position = mine ? queue.indexOf(mine) + 1 : null;
+
+  toggle.checked = state.noFriday;
+  // Quem pediu sexta no top 3 esta se voluntariando: vetar seria contraditorio.
+  toggle.disabled = locked || fridayPicked;
+  box.dataset.state = fridayPicked ? 'voluntario' : state.noFriday ? 'veto' : 'fila';
+
+  $('#fridayPos').textContent = mine
+    ? `${mine.fridays} ${mine.fridays === 1 ? 'sexta' : 'sextas'} no total`
+    : '';
+
+  $('#fridayText').innerHTML = fridayPicked
+    ? 'Você colocou sexta no seu top 3, então está <b>se voluntariando</b> e passa na frente da fila.'
+    : state.noFriday
+      ? 'Você está <b>fora da sexta</b> nesta semana. Se todo mundo fizer o mesmo, a vaga fica vazia.'
+      : position
+        ? `Sexta é sua <b>4ª opção automática</b>. Você está em <b>${position}º</b> de ${queue.length} na fila.`
+        : 'Sexta é sua <b>4ª opção automática</b>.';
 }
 
 function renderRespondedList() {
@@ -304,8 +343,8 @@ function renderSchedule(generation) {
                 (a) => `<div class="slot" data-me="${a.personId === state.me?.id ? 1 : 0}">
                   <span class="avatar">${esc(initials(a.name))}</span>
                   <span class="slot-name">${esc(a.name)}</span>
-                  <span class="slot-rank" data-rank="${a.rank ?? 'none'}">${
-                    a.rank ? `${ORDINAL[a.rank]} opção` : 'fora das opções'
+                  <span class="slot-rank" data-rank="${slotRankTone(a)}">${
+                    slotRankLabel(a)
                   }</span>
                 </div>`,
               )
@@ -326,10 +365,11 @@ function renderSchedule(generation) {
 
   const summary = $('#schedSummary');
   if (hasAny) {
-    const ranks = { 1: 0, 2: 0, 3: 0, none: 0 };
+    const ranks = { 1: 0, 2: 0, 3: 0, 4: 0, none: 0 };
     assignments.forEach((a) => { ranks[a.rank ?? 'none']++; });
     const parts = [`<b>${assignments.length}</b> ${assignments.length === 1 ? 'vaga preenchida' : 'vagas preenchidas'}`];
     [1, 2, 3].forEach((r) => { if (ranks[r]) parts.push(`<b>${ranks[r]}</b> na ${ORDINAL[r]} opção`); });
+    if (ranks[4]) parts.push(`<b>${ranks[4]}</b> na sexta automática`);
     if (ranks.none) parts.push(`<b>${ranks.none}</b> fora das opções pedidas`);
     summary.innerHTML = parts.join(' · ');
     summary.hidden = false;
@@ -340,6 +380,15 @@ function renderSchedule(generation) {
   const notice = $('#schedNotice');
   const messages = [];
   if (week.published) messages.push('Escala <b>publicada</b>. Reabra para poder alterar.');
+  const fri = generation?.friday;
+  if (fri?.allVetoed) {
+    messages.push(
+      'Ninguém ficou na <b>sexta</b>: todo mundo marcou que não podia. ' +
+        'A vaga está em aberto e precisa ser resolvida no grupo.',
+    );
+  } else if (fri?.vetoed?.length) {
+    messages.push(`Fora da sexta nesta semana: <b>${esc(fri.vetoed.join(', '))}</b>.`);
+  }
   if (generation?.missingPreferences?.length) {
     messages.push(
       `Sem preferência registrada: <b>${esc(generation.missingPreferences.join(', '))}</b>. ` +
@@ -360,6 +409,19 @@ function renderSchedule(generation) {
   $('#publishBtn').disabled = !hasAny && !week.published;
 }
 
+/** Rotulo da etiqueta a direita de cada nome na escala. */
+function slotRankLabel(a) {
+  if (a.via === 'fila') return '4ª opção · fila';
+  if (a.via === 'voluntario') return `${ORDINAL[a.rank] ?? '4ª'} opção · voluntário`;
+  return a.rank ? `${ORDINAL[a.rank]} opção` : 'fora das opções';
+}
+
+function slotRankTone(a) {
+  if (a.via === 'voluntario') return '1';
+  if (a.via === 'fila') return 'fila';
+  return a.rank ?? 'none';
+}
+
 /* --- aba: contadores ------------------------------------------------------ */
 
 function renderCounters() {
@@ -371,12 +433,21 @@ function renderCounters() {
   const target = s.totals.targetPerPerson;
   const fridayTarget = s.totals.fridayTargetPerPerson;
 
+  const queue = s.fridayQueue ?? [];
+  const myPos = queue.findIndex((q) => q.personId === state.me?.id) + 1;
+
   $('#myStats').innerHTML = [
-    statCard('Minhas escalas', mine?.total ?? 0, `meta ${fmtNum(target)}`, diffTone(mine?.total ?? 0, target)),
-    statCard('Minhas sextas', mine?.fridays ?? 0, `meta ${fmtNum(fridayTarget)}`, diffTone(mine?.fridays ?? 0, fridayTarget)),
-    statCard('Vagas no mês', s.totals.slots, `${s.headcount} ${s.headcount === 1 ? 'pessoa' : 'pessoas'}`),
-    statCard('Já escaladas', s.totals.assigned, `de ${s.totals.slots}`),
+    statCard('Escalas no mês', mine?.total ?? 0, `meta ${fmtNum(target)}`,
+      diffTone(mine?.total ?? 0, target)),
+    statCard('Sextas no mês', mine?.fridays ?? 0, `meta ${fmtNum(fridayTarget)}`,
+      diffTone(mine?.fridays ?? 0, fridayTarget)),
+    statCard('Sextas no total', mine?.allTimeFridays ?? 0,
+      myPos ? `${myPos}º na fila de ${queue.length}` : 'fora da fila'),
+    statCard('Vagas no mês', s.totals.slots,
+      `${s.totals.assigned} já escaladas`),
   ].join('');
+
+  renderFridayQueue(queue);
 
   const names = shortNames(s.perPerson);
   const totalData = s.perPerson.map((p, i) => ({ label: names[i], full: p.name, value: p.total, id: p.personId }));
@@ -400,6 +471,24 @@ function renderCounters() {
   $('#premiseFriday').value = s.premise.fridayDays;
   $('#premiseReset').hidden = !s.premise.custom;
   renderPremiseMath(s);
+}
+
+function renderFridayQueue(queue) {
+  const el = $('#fridayQueue');
+  if (!queue.length) {
+    el.innerHTML = '<li class="empty">Nenhuma pessoa ativa cadastrada.</li>';
+    return;
+  }
+  const menor = queue[0].fridays;
+  el.innerHTML = queue
+    .map((q, i) => `<li class="queue-row" data-next="${q.fridays === menor ? 1 : 0}"
+                        data-me="${q.personId === state.me?.id ? 1 : 0}">
+      <span class="queue-pos">${i + 1}</span>
+      <span class="avatar">${esc(initials(q.name))}</span>
+      <span class="queue-name">${esc(q.name)}</span>
+      <span class="queue-count">${q.fridays} ${q.fridays === 1 ? 'sexta' : 'sextas'}</span>
+    </li>`)
+    .join('');
 }
 
 function statCard(label, value, note, tone = '') {
@@ -594,7 +683,14 @@ function renderSettings() {
         .join('')
     : '<li class="empty">Ninguém cadastrado ainda.</li>';
 
-  $('#fairnessToggle').checked = !!state.data.settings?.fridayFairness;
+  $('#counterList').innerHTML = (state.stats?.fridayQueue ?? [])
+    .map((q) => `<li class="person-row" data-person="${q.personId}">
+      <span class="avatar">${esc(initials(q.name))}</span>
+      <span class="counter-name">${esc(q.name)}</span>
+      <input type="number" min="0" max="999" inputmode="numeric" value="${q.fridays}"
+             class="counter-input" aria-label="Sextas de ${esc(q.name)}">
+    </li>`)
+    .join('') || '<li class="empty">Ninguém cadastrado ainda.</li>';
 
   $('#capacityWeekLabel').textContent =
     `Aplica-se à semana de ${weekLabel(state.data.week.monday)}.`;
@@ -663,11 +759,18 @@ function wireEvents() {
     const at = state.draft.indexOf(day);
     if (at >= 0) state.draft.splice(at, 1);
     else if (state.draft.length < 3) state.draft.push(day);
+    // Voluntariar-se para a sexta e vetar a sexta sao coisas incompativeis.
+    if (state.draft.includes(FRIDAY)) state.noFriday = false;
     renderPicker();
   });
 
   $('#awayToggle').addEventListener('change', (e) => {
     state.away = e.target.checked;
+    renderPicker();
+  });
+
+  $('#noFridayToggle').addEventListener('change', (e) => {
+    state.noFriday = e.target.checked;
     renderPicker();
   });
 
@@ -678,6 +781,7 @@ function wireEvents() {
         personId: state.me.id,
         choices: state.draft,
         unavailable: state.away,
+        noFriday: state.noFriday,
       });
       state.stats = state.data.stats;
       syncDraftFromServer();
@@ -793,14 +897,13 @@ function wireEvents() {
     });
   });
 
-  $('#fairnessToggle').addEventListener('change', (e) => {
-    const on = e.target.checked;
+  $('#counterList').addEventListener('change', (e) => {
+    if (!e.target.classList.contains('counter-input')) return;
+    const id = Number(e.target.closest('[data-person]').dataset.person);
     run(async () => {
-      await post('/settings', { fridayFairness: on });
-      state.data.settings.fridayFairness = on;
-      toast(on
-        ? 'Rodízio ligado. Gere a escala de novo para aplicar.'
-        : 'Rodízio desligado. Vale só a preferência.');
+      await post('/counter', { id, fridayOffset: Number(e.target.value) });
+      await loadWeek(state.week);
+      toast('Contador atualizado.');
     });
   });
 

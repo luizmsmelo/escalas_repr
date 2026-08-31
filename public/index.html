@@ -73,6 +73,19 @@
             toque vira sua 1ª opção.</p>
           <div id="dayPicker" class="daypicker" role="group" aria-label="Dias de preferência"></div>
           <p id="pickHelp" class="hint hint-muted"></p>
+
+          <div id="fridayBox" class="fridaybox">
+            <div class="fridaybox-head">
+              <span class="fridaybox-title">Sexta-feira</span>
+              <span id="fridayPos" class="fridaybox-pos"></span>
+            </div>
+            <p id="fridayText" class="hint"></p>
+            <label class="switch switch-plain">
+              <input id="noFridayToggle" type="checkbox">
+              <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              <span class="switch-label">Não posso esta sexta</span>
+            </label>
+          </div>
         </div>
 
         <button id="savePrefs" class="btn btn-primary btn-block" type="button">Salvar preferência</button>
@@ -114,6 +127,16 @@
       </nav>
 
       <div id="myStats" class="mystats"></div>
+
+      <section class="card">
+        <h2 class="card-title">
+          Fila da sexta
+          <span class="card-sub">contagem geral, não do mês</span>
+        </h2>
+        <p class="hint hint-muted">Quem tem menos sextas no histórico leva a próxima.
+          Quem se voluntaria passa na frente.</p>
+        <ol id="fridayQueue" class="queue"></ol>
+      </section>
 
       <figure class="card chart-card">
         <figcaption class="card-title">
@@ -189,30 +212,28 @@
       </section>
 
       <section class="card">
-        <h2 class="card-title">Como os conflitos são resolvidos</h2>
+        <h2 class="card-title">Como a escala é montada</h2>
         <p class="hint">
-          O app testa todas as combinações possíveis e escolhe a que deixa o grupo
-          <strong>como um todo</strong> mais perto das primeiras opções &mdash; não é ordem de
-          chegada. Quando duas escalas empatam em preferência, ganha o dia quem tem menos
-          escalas (e menos sextas) acumuladas no mês.
+          <strong>A sexta primeiro.</strong> Ninguém escolhe sexta por gosto, então
+          preferência não serve de critério: leva quem tem menos sextas no histórico.
+          Quem colocar sexta no próprio top 3 está se voluntariando e passa na frente da
+          fila. Quem apertar &ldquo;não posso esta sexta&rdquo; sai da conta &mdash; e se
+          todos saírem, a vaga fica vazia e a tela avisa.
+        </p>
+        <p class="hint">
+          <strong>Depois, de segunda a quinta.</strong> O app testa todas as combinações
+          possíveis e escolhe a que deixa o grupo <strong>como um todo</strong> mais perto
+          das primeiras opções &mdash; não é ordem de chegada. Empates vão para quem tem
+          menos escalas acumuladas.
         </p>
       </section>
 
       <section class="card">
-        <h2 class="card-title">Rodízio de sextas-feiras</h2>
-        <label class="switch switch-plain">
-          <input id="fairnessToggle" type="checkbox">
-          <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-          <span class="switch-label">Forçar rodízio das sextas</span>
-        </label>
-        <p class="hint" style="margin-top:10px">
-          <strong>Desligado:</strong> vale só a preferência. Se apenas uma pessoa costuma
-          pedir sexta, ela pode acabar pegando quase todas.<br><br>
-          <strong>Ligado:</strong> cada sexta já cumprida no mês empurra a pessoa para o fim
-          da fila, mesmo que isso troque a 1ª opção de alguém pela 2ª. Em simulação de 16
-          semanas, no cenário em que só uma pessoa pede sexta, o pior caso cai de
-          <b>16 sextas</b> para <b>4</b>.
-        </p>
+        <h2 class="card-title">Contador geral de sextas</h2>
+        <p class="hint">É este número que decide a fila. Quem entra na equipe começa em 0 e
+          por isso pega várias sextas seguidas até emparelhar &mdash; se quiser evitar isso,
+          ajuste aqui na mão.</p>
+        <ul id="counterList" class="people-edit"></ul>
       </section>
 
       <button id="switchUser" class="btn btn-ghost btn-block" type="button">Trocar de pessoa</button>

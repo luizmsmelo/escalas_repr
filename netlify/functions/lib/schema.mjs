@@ -38,15 +38,21 @@ export const SCHEMA = [
 
   `create index if not exists assignments_work_date_idx on assignments (work_date)`,
 
-  `create table if not exists settings (
-     key   text primary key,
-     value text not null
-   )`,
-
   `create table if not exists month_premises (
      ym           text primary key,
      mon_thu_days int not null,
      friday_days  int not null,
      updated_at   timestamptz not null default now()
    )`,
+
+  // Como a pessoa chegou naquele dia: 'preferencia', 'voluntario' ou 'fila'.
+  // Guardado para a tela conseguir explicar cada linha da escala.
+  `alter table assignments add column if not exists via text`,
+
+  // Veto pontual da sexta: "nao posso esta sexta", valido so naquela semana.
+  `alter table preferences add column if not exists no_friday boolean not null default false`,
+
+  // Ajuste manual do contador geral de sextas. Serve para quem entra na equipe
+  // depois: por padrao comeca em 0, mas da para emparelhar com o grupo aqui.
+  `alter table people add column if not exists friday_offset int not null default 0`,
 ];

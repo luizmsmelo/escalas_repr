@@ -1,5 +1,5 @@
 import { sql, ensureSchema } from './lib/db.mjs';
-import { solveWeek, DAYS } from './lib/solver.mjs';
+import { solveWeek, DAYS, FRIDAY } from './lib/solver.mjs';
 import {
   todayISO, mondayOf, nextMonday, addDays, weekDates, monthOf,
   calendarWorkingDays, isValidISO, isValidMonth,
@@ -43,7 +43,7 @@ async function dispatch(route, method, params, body) {
     case 'POST publish':    return publish(body);
     case 'POST capacity':   return setCapacity(body);
     case 'POST premise':    return setPremise(body);
-    case 'POST settings':   return saveSettings(body);
+    case 'POST counter':    return setFridayOffset(body);
     default:
       throw new HttpError(404, `Rota desconhecida: ${method} /api/${route}`);
   }
@@ -56,17 +56,16 @@ async function getState(weekParam) {
     ? requireMonday(weekParam)
     : nextMonday();
 
-  const [people, week, prefs, assignments, fridayFairness] = await Promise.all([
-    sql`select id, name, active from people`.then(byName),
+  const [people, week, prefs, assignments] = await Promise.all([
+    sql`select id, name, active, friday_offset from people`.then(byName),
     ensureWeek(monday),
-    sql`select person_id, choice1, choice2, choice3, unavailable
+    sql`select person_id, choice1, choice2, choice3, unavailable, no_friday
           from preferences where monday = ${monday}`,
-    sql`select a.person_id, a.day, a.rank, a.work_date, p.name
+    sql`select a.person_id, a.day, a.rank, a.via, a.work_date, p.name
           from assignments a join people p on p.id = a.person_id
          where a.monday = ${monday}
          order by a.day`.then((rows) =>
            rows.sort((a, b) => a.day - b.day || collator.compare(a.name, b.name))),
-    getSetting('friday_fairness', false),
   ]);
 
   const today = todayISO();
@@ -83,16 +82,16 @@ async function getState(weekParam) {
       prevMonday: addDays(monday, -7),
       nextMonday: addDays(monday, 7),
     },
-    settings: { fridayFairness },
     people,
     preferences: prefs.map((p) => ({
       personId: p.person_id,
       choices: [p.choice1, p.choice2, p.choice3].filter((d) => d != null),
       unavailable: p.unavailable,
+      noFriday: p.no_friday,
     })),
     assignments: assignments.map((a) => ({
       personId: a.person_id, name: a.name, day: a.day,
-      rank: a.rank, date: isoOf(a.work_date),
+      rank: a.rank, via: a.via, date: isoOf(a.work_date),
     })),
     stats: await computeStats(monthOf(monday)),
   };
@@ -109,7 +108,8 @@ async function createPerson({ name }) {
   if (existing.length) throw bad(`Ja existe alguem cadastrado como "${clean}".`);
 
   const [person] = await sql`
-    insert into people (name) values (${clean}) returning id, name, active`;
+    insert into people (name) values (${clean})
+    returning id, name, active, friday_offset`;
   return { person };
 }
 
@@ -126,7 +126,8 @@ async function updatePerson({ id, name, active }) {
   if (active !== undefined) {
     await sql`update people set active = ${!!active} where id = ${personId}`;
   }
-  const [person] = await sql`select id, name, active from people where id = ${personId}`;
+  const [person] = await sql`
+    select id, name, active, friday_offset from people where id = ${personId}`;
   if (!person) throw new HttpError(404, 'Pessoa nao encontrada.');
   return { person };
 }
@@ -139,7 +140,7 @@ async function deletePerson(idParam) {
 
 /* ------------------------------------------------------------- preferencias */
 
-async function savePreferences({ monday, personId, choices, unavailable }) {
+async function savePreferences({ monday, personId, choices, unavailable, noFriday }) {
   const week = requireMonday(monday);
   const id = requireId(personId);
   await assertOpen(week);
@@ -148,6 +149,7 @@ async function savePreferences({ monday, personId, choices, unavailable }) {
   if (!person) throw new HttpError(404, 'Pessoa nao encontrada.');
 
   const away = !!unavailable;
+  let veto = !!noFriday;
   let picks = [null, null, null];
 
   if (!away) {
@@ -156,15 +158,23 @@ async function savePreferences({ monday, personId, choices, unavailable }) {
     if (list.some((d) => !DAYS.includes(d))) throw bad('Dia invalido: use de segunda a sexta.');
     if (new Set(list).size !== 3) throw bad('Os 3 dias precisam ser diferentes entre si.');
     picks = list;
+    // Pedir sexta e vetar sexta na mesma semana e contraditorio; a tela nem
+    // oferece as duas coisas juntas, mas a API nao pode aceitar o estado misto.
+    if (veto && list.includes(FRIDAY)) {
+      throw bad('Voce colocou sexta no seu top 3 - tire de la antes de marcar que nao pode.');
+    }
+  } else {
+    veto = false; // quem esta fora da semana ja nao entra na fila da sexta
   }
 
   await sql`
-    insert into preferences (monday, person_id, choice1, choice2, choice3, unavailable, updated_at)
-    values (${week}, ${id}, ${picks[0]}, ${picks[1]}, ${picks[2]}, ${away}, now())
+    insert into preferences
+      (monday, person_id, choice1, choice2, choice3, unavailable, no_friday, updated_at)
+    values (${week}, ${id}, ${picks[0]}, ${picks[1]}, ${picks[2]}, ${away}, ${veto}, now())
     on conflict (monday, person_id) do update
       set choice1 = excluded.choice1, choice2 = excluded.choice2,
           choice3 = excluded.choice3, unavailable = excluded.unavailable,
-          updated_at = now()`;
+          no_friday = excluded.no_friday, updated_at = now()`;
 
   return getState(week);
 }
@@ -177,9 +187,10 @@ async function generate({ monday }) {
   const cfg = await ensureWeek(week);
 
   const rows = await sql`
-    select p.id, p.name,
+    select p.id, p.name, p.friday_offset,
            pr.choice1, pr.choice2, pr.choice3,
-           coalesce(pr.unavailable, false) as unavailable
+           coalesce(pr.unavailable, false) as unavailable,
+           coalesce(pr.no_friday, false)   as no_friday
       from people p
       left join preferences pr on pr.person_id = p.id and pr.monday = ${week}
      where p.active = true
@@ -190,16 +201,18 @@ async function generate({ monday }) {
     throw bad('Ninguem disponivel nesta semana - nao ha escala para montar.');
   }
 
-  // Contadores do mes ate agora (excluindo a propria semana) alimentam so o
-  // criterio de desempate entre solucoes empatadas em preferencia.
-  const history = await monthCounts(monthOf(week), week);
+  // Historico GERAL, nao mensal: e ele que faz a fila da sexta girar. Com 4 ou
+  // 5 sextas por mes para 9 pessoas, um contador mensal zera antes de o rodizio
+  // fechar e metade do grupo nunca pegaria sexta.
+  const history = await allTimeCounts(week);
 
   const input = participants.map((r) => ({
     id: r.id,
     name: r.name,
     choices: [r.choice1, r.choice2, r.choice3].filter((d) => d != null),
-    totalShifts: history.get(r.id)?.total ?? 0,
-    fridayShifts: history.get(r.id)?.fridays ?? 0,
+    noFriday: r.no_friday,
+    totalCount: history.get(r.id)?.total ?? 0,
+    fridayCount: history.get(r.id)?.fridays ?? 0,
   }));
 
   const capacity = {
@@ -207,16 +220,15 @@ async function generate({ monday }) {
     3: cfg.cap_weekday, 4: cfg.cap_weekday, 5: cfg.cap_friday,
   };
 
-  const fridayFairness = await getSetting('friday_fairness', false);
-  const result = solveWeek(input, capacity, { fridayFairness });
+  const result = solveWeek(input, capacity);
   const dates = Object.fromEntries(weekDates(week).map((d) => [d.day, d.date]));
 
   await sql.transaction([
     sql`delete from assignments where monday = ${week}`,
     ...result.assignments.map(
       (a) => sql`
-        insert into assignments (monday, person_id, day, rank, work_date)
-        values (${week}, ${a.personId}, ${a.day}, ${a.rank}, ${dates[a.day]})`,
+        insert into assignments (monday, person_id, day, rank, via, work_date)
+        values (${week}, ${a.personId}, ${a.day}, ${a.rank}, ${a.via}, ${dates[a.day]})`,
     ),
     sql`update weeks set generated_at = now() where monday = ${week}`,
   ]);
@@ -231,15 +243,21 @@ async function generate({ monday }) {
         .filter((r) => !r.unavailable && r.choice1 == null)
         .map((r) => r.name),
       awayCount: rows.length - participants.length,
-      fridayFairness,
+      friday: result.friday,
     },
   };
 }
 
-async function saveSettings({ fridayFairness }) {
-  if (fridayFairness !== undefined) {
-    await putSetting('friday_fairness', !!fridayFairness);
-  }
+/** Ajuste manual do contador geral de sextas de uma pessoa. */
+async function setFridayOffset({ id, fridayOffset }) {
+  const personId = requireId(id);
+  const offset = clampInt(fridayOffset, 0, 999, 'Contador de sextas');
+  const done = await sql`
+    select count(*)::int as n from assignments where person_id = ${personId} and day = ${FRIDAY}`;
+  // O ajuste e o total que a pessoa deve mostrar; guardamos so a diferenca em
+  // relacao as sextas que ela ja tem registradas.
+  const delta = Math.max(0, offset - done[0].n);
+  await sql`update people set friday_offset = ${delta} where id = ${personId}`;
   return { ok: true };
 }
 
@@ -294,13 +312,14 @@ async function setPremise({ ym, monThuDays, fridayDays }) {
 }
 
 async function computeStats(ym) {
-  const [people, rows, premiseRows, weekRows] = await Promise.all([
+  const [people, rows, premiseRows, weekRows, allTime] = await Promise.all([
     sql`select id, name, active from people`.then(byName),
     sql`select person_id, day, work_date from assignments
          where to_char(work_date, 'YYYY-MM') = ${ym}`,
     sql`select mon_thu_days, friday_days from month_premises where ym = ${ym}`,
     sql`select cap_weekday, cap_friday from weeks
          where to_char(monday, 'YYYY-MM') = ${ym} order by monday limit 1`,
+    allTimeCounts(),
   ]);
 
   const calendar = calendarWorkingDays(ym);
@@ -311,12 +330,13 @@ async function computeStats(ym) {
   const capWeekday = weekRows[0]?.cap_weekday ?? 2;
   const capFriday = weekRows[0]?.cap_friday ?? 1;
 
-  const counts = new Map();
+  // Contadores do mes (os graficos), separados do historico geral (a fila).
+  const monthly = new Map();
   for (const r of rows) {
-    const c = counts.get(r.person_id) ?? { total: 0, fridays: 0 };
+    const c = monthly.get(r.person_id) ?? { total: 0, fridays: 0 };
     c.total++;
-    if (r.day === 5) c.fridays++;
-    counts.set(r.person_id, c);
+    if (r.day === FRIDAY) c.fridays++;
+    monthly.set(r.person_id, c);
   }
 
   const activePeople = people.filter((p) => p.active);
@@ -341,26 +361,51 @@ async function computeStats(ym) {
     perPerson: activePeople.map((p) => ({
       personId: p.id,
       name: p.name,
-      total: counts.get(p.id)?.total ?? 0,
-      fridays: counts.get(p.id)?.fridays ?? 0,
+      total: monthly.get(p.id)?.total ?? 0,
+      fridays: monthly.get(p.id)?.fridays ?? 0,
+      allTimeFridays: allTime.get(p.id)?.fridays ?? 0,
+      allTimeTotal: allTime.get(p.id)?.total ?? 0,
     })),
+    // A fila da sexta e geral e independente do mes que estiver na tela.
+    fridayQueue: buildFridayQueue(activePeople, allTime),
   };
 }
 
-/** Escalas do mes por pessoa, opcionalmente ignorando uma semana. */
-async function monthCounts(ym, excludeMonday) {
-  const rows = await sql`
-    select person_id, day from assignments
-     where to_char(work_date, 'YYYY-MM') = ${ym}
-       and monday <> ${excludeMonday}`;
-  const map = new Map();
+/**
+ * Historico GERAL por pessoa: sextas e escalas de todas as semanas ja geradas,
+ * somado ao ajuste manual do contador. `excludeMonday` tira a propria semana da
+ * conta, para que regerar uma escala nao conte duas vezes.
+ */
+async function allTimeCounts(excludeMonday = null) {
+  const [rows, people] = await Promise.all([
+    excludeMonday
+      ? sql`select person_id, day from assignments where monday <> ${excludeMonday}`
+      : sql`select person_id, day from assignments`,
+    sql`select id, friday_offset from people`,
+  ]);
+
+  const map = new Map(
+    people.map((p) => [p.id, { total: 0, fridays: p.friday_offset ?? 0 }]),
+  );
   for (const r of rows) {
-    const c = map.get(r.person_id) ?? { total: 0, fridays: 0 };
+    const c = map.get(r.person_id);
+    if (!c) continue;
     c.total++;
-    if (r.day === 5) c.fridays++;
-    map.set(r.person_id, c);
+    if (r.day === FRIDAY) c.fridays++;
   }
   return map;
+}
+
+/** A fila da sexta como ela sera avaliada na proxima geracao. */
+function buildFridayQueue(people, counts) {
+  return people
+    .map((p) => ({
+      personId: p.id,
+      name: p.name,
+      fridays: counts.get(p.id)?.fridays ?? 0,
+      total: counts.get(p.id)?.total ?? 0,
+    }))
+    .sort((a, b) => a.fridays - b.fridays || a.total - b.total || a.personId - b.personId);
 }
 
 /* ------------------------------------------------------------------ helpers */
@@ -369,24 +414,6 @@ async function monthCounts(ym, excludeMonday) {
 // uma collation ICU especifica estar disponivel no Postgres.
 const collator = new Intl.Collator('pt-BR', { sensitivity: 'base' });
 const byName = (rows) => rows.sort((a, b) => collator.compare(a.name, b.name));
-
-
-async function getSetting(key, fallback) {
-  const [row] = await sql`select value from settings where key = ${key}`;
-  if (!row) return fallback;
-  try {
-    return JSON.parse(row.value);
-  } catch {
-    return fallback;
-  }
-}
-
-async function putSetting(key, value) {
-  const serialized = JSON.stringify(value);
-  await sql`
-    insert into settings (key, value) values (${key}, ${serialized})
-    on conflict (key) do update set value = excluded.value`;
-}
 
 async function ensureWeek(monday) {
   const [row] = await sql`

@@ -1,53 +1,78 @@
 # Escala 18h
 
 App de celular para nove colegas escolherem, semana a semana, em que dia ficam
-até as 18h. Cada um marca três dias em ordem de preferência; o app resolve os
-conflitos sozinho e mantém os contadores do mês.
+até as 18h. Cada um marca três dias em ordem de preferência, e a sexta é a 4ª
+opção automática de todo mundo — quem leva é quem tem menos sextas no histórico.
+O app resolve os conflitos sozinho e mantém os contadores.
 
 Padrão de vagas: **2 pessoas de segunda a quinta, 1 pessoa na sexta** — 9 vagas
 por semana para 9 pessoas, ou seja, cada um fica um dia por semana. Quem estiver
 de férias marca "não participo" e o app redistribui as vagas entre os presentes.
 
-## Como funciona a resolução de conflitos
+## Como a escala é montada
 
-O app **não** usa ordem de chegada. Ele monta um problema de *fluxo de custo
-mínimo* (`netlify/functions/lib/solver.mjs`): cada vaga da semana é uma unidade
-de fluxo que precisa passar por uma pessoa e por um dia, e o custo de colocar
-alguém num dia é a posição daquele dia na lista de preferências dessa pessoa.
+O app resolve a semana em duas fases, porque sexta e os outros dias são problemas
+diferentes.
+
+### Fase 1 — a sexta
+
+Ninguém escolhe sexta por gosto, então preferência não serve de critério. **Leva
+quem tem menos sextas no histórico** — uma fila que qualquer pessoa confere de
+cabeça na aba Contadores. Duas exceções:
+
+- **Voluntário passa na frente.** Quem coloca sexta no próprio top 3 leva, mesmo
+  tendo mais sextas acumuladas. Ninguém sai perdendo: o voluntário queria, e quem
+  estava na fila foi poupado.
+- **"Não posso esta sexta" é veto, não preferência.** Quem aperta sai da conta
+  daquela semana. Se todos apertarem, a vaga fica vazia e a tela avisa — o app
+  não escala alguém que disse que não podia.
+
+Para todo mundo que não pediu nem vetou, sexta é a **4ª opção automática**: é o
+que aparece na tela, e é como a alocação fica registrada.
+
+### Fase 2 — de segunda a quinta
+
+Com a sexta resolvida, sobra um problema puro de preferência. O app monta um
+*fluxo de custo mínimo* (`netlify/functions/lib/solver.mjs`): cada vaga é uma
+unidade de fluxo que passa por uma pessoa e um dia, e o custo da aresta é a
+posição daquele dia na lista da pessoa.
 
 | situação | custo |
 | --- | --- |
 | 1ª opção | 0 |
 | 2ª opção | 1.000 |
 | 3ª opção | 2.000 |
-| dia que a pessoa não pediu | 8.000 |
+| dia de seg–qui que a pessoa não pediu | 8.000 |
 | segundo dia na mesma semana | +50.000 |
 
 Minimizar o custo total é o mesmo que deixar **o grupo inteiro** o mais perto
-possível das primeiras opções. O resultado é o ótimo global e é determinístico:
-a mesma entrada sempre produz a mesma escala.
+possível das primeiras opções — não é ordem de chegada. O resultado é o ótimo
+global e é determinístico: a mesma entrada sempre produz a mesma escala. Empates
+vão para quem tem menos escalas acumuladas, por um termo sempre menor que 1.000
+— incapaz, portanto, de trocar uma 1ª opção por uma 2ª.
 
-Empates são desfeitos por um termo sempre menor que 1.000 — ou seja, incapaz de
-trocar uma 1ª opção por uma 2ª — que favorece quem tem menos escalas e menos
-sextas acumuladas no mês.
+## Por que o contador de sextas é geral, e não mensal
 
-### Rodízio de sextas (opcional, em Ajustes)
+O mês tem 4 ou 5 sextas para 9 pessoas. Um contador que zera todo mês **nunca
+fecha o rodízio**: quando ele reseta, quem nunca pegou volta a empatar com quem
+acabou de pegar, e o desempate cai na ordem de cadastro. Simulação de um ano:
 
-Com a resolução puramente por preferência, se só uma pessoa costuma pedir sexta,
-ela pode acabar pegando quase todas. Ligando o rodízio, cada sexta já cumprida
-no mês encarece a próxima em 3.000 — o bastante para, a partir da terceira,
-superar até o custo de escalar alguém num dia que não pediu.
+| memória do contador | sextas por pessoa em 1 ano |
+| --- | --- |
+| mensal | `12, 12, 12, 12, 4, 0, 0, 0, 0` |
+| geral | `6, 6, 6, 6, 6, 6, 6, 5, 5` |
 
-Simulação de 16 semanas, quatro perfis de grupo:
+Com contador geral, ninguém pega a segunda sexta antes de todos terem pego a
+primeira — a diferença entre o maior e o menor contador nunca passa de 1. Há um
+teste que verifica exatamente isso ao longo de 12 semanas.
 
-| cenário | rodízio desligado | rodízio ligado |
-| --- | --- | --- |
-| só uma pessoa pede sexta | **16** sextas numa pessoa só | no máximo **4** |
-| ninguém pede sexta | já equilibrado (1–2 cada) | igual |
-| preferências livres | até 3 numa pessoa | no máximo 2 |
+Os gráficos mensais continuam existindo (é o recorte do mês corrente), mas quem
+decide a fila é o contador geral.
 
-O preço é escalar mais gente fora das opções pedidas: no cenário ruim, 12 de 144
-escalas do período, contra 0 com o rodízio desligado.
+### Quem entra na equipe depois
+
+Começa em 0 e por isso pega várias sextas seguidas até emparelhar com o grupo.
+Se não for o que vocês querem, o contador é editável na aba Ajustes.
 
 ## Meta do mês
 
@@ -115,4 +140,9 @@ um Postgres acessível:
 ```bash
 npm install
 npx netlify dev          # precisa de DATABASE_URL no ambiente
+npm test                 # não precisa de banco: sobe um Postgres em WASM
 ```
+
+`npm test` roda duas suítes: o solver (fila da sexta, veto, voluntário, casos
+limite) e a API inteira contra um Postgres de verdade compilado para WASM, com o
+mesmo `lib/schema.mjs` que roda em produção.

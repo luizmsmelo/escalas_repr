@@ -1,38 +1,42 @@
-// Resolucao automatica de conflitos.
+// Montagem da escala da semana, em duas fases independentes.
 //
-// Modelo: fluxo de custo minimo (min-cost max-flow). Cada vaga da semana e uma
-// unidade de fluxo que sai da origem, passa por uma pessoa, por um dia, e chega
-// ao destino. O custo de cada aresta pessoa->dia e a posicao daquele dia na
-// lista de preferencias da pessoa. Minimizar o custo total = maximizar a
-// satisfacao das preferencias do grupo como um todo.
+// FASE 1 - A SEXTA. Ninguem escolhe sexta por gosto, entao preferencia nao
+// serve de criterio. Quem leva e quem tem menos sextas no historico - uma fila
+// que qualquer pessoa consegue conferir de cabeca. Duas excecoes:
+//   * quem colocou sexta no proprio top 3 esta se voluntariando e passa na
+//     frente da fila (ninguem sai perdendo: o voluntario queria, e quem estava
+//     na fila foi poupado);
+//   * quem apertou "nao posso esta sexta" sai da conta por completo. E um veto,
+//     nao uma preferencia: se todos vetarem, a vaga fica vazia e a tela avisa.
 //
-// Escala de custos (tudo x1000 para sobrar espaco de desempate abaixo):
-//   1a opcao = 0 | 2a opcao = 1000 | 3a opcao = 2000 | dia nao escolhido = 8000
+// FASE 2 - SEGUNDA A QUINTA. Com a sexta ja resolvida, sobra um problema puro
+// de preferencia entre as pessoas restantes. Resolvido por fluxo de custo
+// minimo: cada vaga e uma unidade de fluxo que passa por uma pessoa e um dia, e
+// o custo de cada aresta e a posicao daquele dia na lista da pessoa. Minimizar
+// o custo total = deixar o grupo INTEIRO o mais perto possivel da 1a opcao.
 //
-// Desempate: entre duas escalas EMPATADAS em preferencia, vence a que da o dia
-// para quem tem menos escalas acumuladas (e menos sextas, com peso maior). Como
-// o desempate nunca passa de 999, ele jamais troca uma 1a opcao por uma 2a - so
-// escolhe entre solucoes igualmente boas.
+// O contador que alimenta a fila da sexta e GERAL, nao mensal. O mes tem 4 ou 5
+// sextas para 9 pessoas: um contador que zera todo mes nunca fecha o rodizio, e
+// a mesma metade do grupo acaba pegando todas.
 
 export const DAYS = [1, 2, 3, 4, 5];
+export const WEEKDAYS = [1, 2, 3, 4];
+export const FRIDAY = 5;
 export const DAY_NAMES = {
-  1: 'Segunda', 2: 'Terca', 3: 'Quarta', 4: 'Quinta', 5: 'Sexta',
+  1: 'Segunda', 2: 'Terça', 3: 'Quarta', 4: 'Quinta', 5: 'Sexta',
 };
-export const DAY_SHORT = { 1: 'SEG', 2: 'TER', 3: 'QUA', 4: 'QUI', 5: 'SEX' };
 
+// Custos da fase 2. A escala x1000 deixa espaco livre abaixo para o desempate.
 const RANK_COST = [0, 1000, 2000];
-// Peso do rodizio de sextas quando o modo equilibrio esta ligado. Cada sexta ja
-// cumprida no mes encarece a proxima. Sendo maior que um degrau de preferencia
-// (1000), ele pode trocar uma 1a opcao por uma 2a; a partir de 3 sextas ele
-// supera ate o custo de escalar alguem num dia que nao pediu (8000), que e o
-// unico jeito de quebrar o caso em que so uma pessoa pede sexta.
-// Calibrado por simulacao de 16 semanas x 4 perfis de grupo: no cenario ruim
-// (uma unica pessoa pedindo sexta) o pior caso cai de 16 sextas para 4, e nos
-// demais cenarios o resultado praticamente nao muda.
-const FRIDAY_FAIRNESS_WEIGHT = 3000;
-const NO_PREFERENCE_COST = 8000;
-const EXTRA_SHIFT_COST = 50000; // penalidade por um 2o dia na mesma semana
-const MAX_TIEBREAK = 999;
+const NO_PREFERENCE_COST = 8000;   // dia de seg-qui que a pessoa nao pediu
+const EXTRA_SHIFT_COST = 50000;    // cada dia a mais na mesma semana
+const MAX_TIEBREAK = 999;          // sempre menor que um degrau de preferencia
+
+/** Posicao do dia na lista da pessoa: 1, 2, 3 - ou null se nao foi pedido. */
+export function rankOf(person, day) {
+  const idx = (person.choices || []).indexOf(day);
+  return idx === -1 ? null : idx + 1;
+}
 
 class MinCostFlow {
   constructor(n) {
@@ -57,12 +61,9 @@ class MinCostFlow {
     this.head[from] = this.to.length - 1;
   }
 
-  // Caminhos minimos sucessivos (SPFA). O grafo aqui tem ~20 nos, entao a
-  // escolha do algoritmo e irrelevante para performance - importa ser exato.
+  // Caminhos minimos sucessivos (SPFA). O grafo tem ~15 nos: a escolha do
+  // algoritmo e irrelevante para performance, importa ser exato.
   run(source, sink) {
-    let totalFlow = 0;
-    let totalCost = 0;
-
     for (;;) {
       const dist = new Array(this.n).fill(Infinity);
       const inQueue = new Array(this.n).fill(false);
@@ -89,9 +90,8 @@ class MinCostFlow {
         }
       }
 
-      if (dist[sink] === Infinity) break;
+      if (dist[sink] === Infinity) return;
 
-      // Empurra o maximo possivel por este caminho.
       let push = Infinity;
       for (let v = sink; v !== source; ) {
         const e = prevEdge[v];
@@ -104,135 +104,179 @@ class MinCostFlow {
         this.cap[e ^ 1] += push;
         v = this.to[e ^ 1];
       }
-      totalFlow += push;
-      totalCost += push * dist[sink];
     }
-
-    return { totalFlow, totalCost };
   }
 }
 
 /**
- * @param {object[]} participants  [{ id, name, choices: [dia,dia,dia], totalShifts, fridayShifts }]
- * @param {object}   capacity      { 1: 2, 2: 2, 3: 2, 4: 2, 5: 1 }
- * @param {object}   options       { fridayFairness: boolean }
- * @returns {{ assignments, unfilledSlots, summary }}
+ * @param {object[]} participants pessoas presentes na semana:
+ *   { id, name, choices: [dia,dia,dia], fridayCount, totalCount, noFriday }
+ *   fridayCount e totalCount sao GERAIS (historico inteiro).
+ * @param {object} capacity { 1: 2, 2: 2, 3: 2, 4: 2, 5: 1 }
+ * @returns {{ assignments, unfilledSlots, friday, summary }}
  */
-export function solveWeek(participants, capacity, options = {}) {
+export function solveWeek(participants, capacity) {
   const people = [...participants].sort((a, b) => a.id - b.id); // determinismo
-  const P = people.length;
-  const totalSlots = DAYS.reduce((sum, d) => sum + (capacity[d] || 0), 0);
+  const friday = pickFriday(people, capacity[FRIDAY] ?? 0);
+  const busy = new Set(friday.picked.map((p) => p.person.id));
 
-  if (P === 0 || totalSlots === 0) {
+  const weekdays = solveWeekdays(people, capacity, busy);
+
+  const assignments = [
+    ...weekdays.assignments,
+    ...friday.picked.map(({ person, via }) => ({
+      personId: person.id,
+      name: person.name,
+      day: FRIDAY,
+      // Voluntario mantem a posicao que ele mesmo deu; quem vem da fila entra
+      // na 4a opcao automatica.
+      rank: via === 'voluntario' ? rankOf(person, FRIDAY) : 4,
+      via,
+    })),
+  ].sort((a, b) => a.day - b.day || a.name.localeCompare(b.name, 'pt-BR'));
+
+  const unfilledSlots = [...weekdays.unfilledSlots, ...friday.unfilled];
+
+  return {
+    assignments,
+    unfilledSlots,
+    friday: {
+      picked: friday.picked.map(({ person, via }) => ({
+        personId: person.id, name: person.name, via, fridayCount: person.fridayCount ?? 0,
+      })),
+      vetoed: people.filter((p) => p.noFriday).map((p) => p.name),
+      queue: friday.queue.map((p) => ({
+        personId: p.id, name: p.name, fridayCount: p.fridayCount ?? 0,
+      })),
+      allVetoed: friday.unfilled.length > 0 && friday.candidates === 0,
+    },
+    summary: buildSummary(assignments, capacity),
+  };
+}
+
+/* ------------------------------------------------------------------ fase 1 */
+
+function pickFriday(people, slots) {
+  const candidates = people.filter((p) => !p.noFriday);
+
+  // Quem pediu sexta explicitamente: melhor posicao primeiro.
+  const volunteers = candidates
+    .filter((p) => rankOf(p, FRIDAY) !== null)
+    .sort((a, b) =>
+      rankOf(a, FRIDAY) - rankOf(b, FRIDAY) || byQueue(a, b));
+
+  // O resto: fila pelo contador geral de sextas.
+  const queue = candidates
+    .filter((p) => rankOf(p, FRIDAY) === null)
+    .sort(byQueue);
+
+  const ordered = [
+    ...volunteers.map((person) => ({ person, via: 'voluntario' })),
+    ...queue.map((person) => ({ person, via: 'fila' })),
+  ];
+  const picked = ordered.slice(0, slots);
+
+  return {
+    picked,
+    queue,
+    candidates: candidates.length,
+    unfilled: Array(Math.max(0, slots - picked.length)).fill(FRIDAY),
+  };
+}
+
+/** Menos sextas primeiro; depois menos escalas; depois ordem estavel por id. */
+function byQueue(a, b) {
+  return (a.fridayCount ?? 0) - (b.fridayCount ?? 0)
+    || (a.totalCount ?? 0) - (b.totalCount ?? 0)
+    || a.id - b.id;
+}
+
+/* ------------------------------------------------------------------ fase 2 */
+
+function solveWeekdays(people, capacity, busy) {
+  const slots = WEEKDAYS.reduce((sum, d) => sum + (capacity[d] || 0), 0);
+  const P = people.length;
+  if (P === 0 || slots === 0) {
     return {
       assignments: [],
-      unfilledSlots: DAYS.flatMap((d) => Array(capacity[d] || 0).fill(d)),
-      summary: emptySummary(totalSlots),
+      unfilledSlots: WEEKDAYS.flatMap((d) => Array(capacity[d] || 0).fill(d)),
     };
   }
 
   const SOURCE = 0;
   const personNode = (i) => 1 + i;
   const dayNode = (d) => 1 + P + (d - 1);
-  const SINK = 1 + P + 5;
+  const SINK = 1 + P + WEEKDAYS.length;
   const graph = new MinCostFlow(SINK + 1);
 
-  // Quantos dias no maximo uma pessoa pode pegar nesta semana.
-  const maxPerPerson = Math.max(1, Math.ceil(totalSlots / P));
+  const maxPerPerson = Math.max(1, Math.ceil(slots / P));
 
   for (let i = 0; i < P; i++) {
-    // Arestas paralelas com custo crescente: o 2o dia so e usado se nao houver
-    // outro jeito de preencher a escala.
+    // Quem ja pegou a sexta entra na fase 2 como se ja tivesse um dia: a
+    // primeira aresta dele ja custa a penalidade de dia extra, entao so recebe
+    // um segundo dia se nao houver outro jeito de fechar a escala.
+    const already = busy.has(people[i].id) ? 1 : 0;
     for (let k = 0; k < maxPerPerson; k++) {
-      graph.addEdge(SOURCE, personNode(i), 1, k * EXTRA_SHIFT_COST);
+      graph.addEdge(SOURCE, personNode(i), 1, (k + already) * EXTRA_SHIFT_COST);
     }
-    for (const d of DAYS) {
+    for (const d of WEEKDAYS) {
       if (!capacity[d]) continue;
-      graph.addEdge(personNode(i), dayNode(d), 1, edgeCost(people[i], d, options));
+      graph.addEdge(personNode(i), dayNode(d), 1, weekdayCost(people[i], d));
     }
   }
-  for (const d of DAYS) {
+  for (const d of WEEKDAYS) {
     if (capacity[d]) graph.addEdge(dayNode(d), SINK, capacity[d], 0);
   }
 
   graph.run(SOURCE, SINK);
 
-  // Le o fluxo de volta: aresta pessoa->dia saturada = escala atribuida.
   const assignments = [];
-  const filledPerDay = Object.fromEntries(DAYS.map((d) => [d, 0]));
+  const filled = Object.fromEntries(WEEKDAYS.map((d) => [d, 0]));
 
   for (let i = 0; i < P; i++) {
     for (let e = graph.head[personNode(i)]; e !== -1; e = graph.next[e]) {
-      const v = graph.to[e];
-      const isForward = e % 2 === 0;
-      if (!isForward || graph.cap[e] !== 0) continue;
-      const d = v - (1 + P) + 1;
-      if (d < 1 || d > 5) continue;
+      if (e % 2 !== 0 || graph.cap[e] !== 0) continue; // so arestas de ida saturadas
+      const d = graph.to[e] - P;
+      if (!WEEKDAYS.includes(d)) continue;
       assignments.push({
         personId: people[i].id,
         name: people[i].name,
         day: d,
-        rank: rankOf(people[i], d), // 1, 2, 3 ou null (dia nao pedido)
+        rank: rankOf(people[i], d),
+        via: 'preferencia',
       });
-      filledPerDay[d]++;
+      filled[d]++;
     }
   }
 
-  assignments.sort((a, b) => a.day - b.day || a.name.localeCompare(b.name, 'pt-BR'));
-
   const unfilledSlots = [];
-  for (const d of DAYS) {
-    for (let k = filledPerDay[d]; k < (capacity[d] || 0); k++) unfilledSlots.push(d);
+  for (const d of WEEKDAYS) {
+    for (let k = filled[d]; k < (capacity[d] || 0); k++) unfilledSlots.push(d);
   }
 
+  return { assignments, unfilledSlots };
+}
+
+function weekdayCost(person, day) {
+  const rank = rankOf(person, day);
+  const base = rank === null ? NO_PREFERENCE_COST : RANK_COST[rank - 1];
+  // Desempate: entre escalas empatadas em preferencia, prefere quem tem menos
+  // escalas no historico. Nunca chega a 1000, entao nao troca uma 1a por uma 2a.
+  return base + Math.min(MAX_TIEBREAK, (person.totalCount ?? 0) * 9);
+}
+
+/* ---------------------------------------------------------------- resumo -- */
+
+function buildSummary(assignments, capacity) {
+  const byRank = { 1: 0, 2: 0, 3: 0, 4: 0, none: 0 };
+  for (const a of assignments) byRank[a.rank ?? 'none']++;
   return {
-    assignments,
-    unfilledSlots,
-    summary: buildSummary(assignments, totalSlots),
-  };
-}
-
-function rankOf(person, day) {
-  const idx = (person.choices || []).indexOf(day);
-  return idx === -1 ? null : idx + 1;
-}
-
-function edgeCost(person, day, options = {}) {
-  const idx = (person.choices || []).indexOf(day);
-  const base = idx === -1 ? NO_PREFERENCE_COST : RANK_COST[idx];
-  const fairness =
-    options.fridayFairness && day === 5
-      ? (person.fridayShifts || 0) * FRIDAY_FAIRNESS_WEIGHT
-      : 0;
-  return base + fairness + tiebreak(person, day);
-}
-
-// Sempre < 1000, entao nunca sobrepoe uma diferenca de preferencia.
-function tiebreak(person, day) {
-  const fridayWeight = day === 5 ? (person.fridayShifts || 0) * 90 : 0;
-  const totalWeight = (person.totalShifts || 0) * 9;
-  return Math.min(MAX_TIEBREAK, fridayWeight + totalWeight);
-}
-
-function buildSummary(assignments, totalSlots) {
-  const byRank = { 1: 0, 2: 0, 3: 0, none: 0 };
-  for (const a of assignments) {
-    if (a.rank) byRank[a.rank]++;
-    else byRank.none++;
-  }
-  return {
-    totalSlots,
+    totalSlots: DAYS.reduce((sum, d) => sum + (capacity[d] || 0), 0),
     filled: assignments.length,
     firstChoice: byRank[1],
     secondChoice: byRank[2],
     thirdChoice: byRank[3],
+    automaticFriday: byRank[4],
     outsidePreferences: byRank.none,
-  };
-}
-
-function emptySummary(totalSlots) {
-  return {
-    totalSlots, filled: 0, firstChoice: 0, secondChoice: 0,
-    thirdChoice: 0, outsidePreferences: 0,
   };
 }

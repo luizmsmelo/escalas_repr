@@ -556,6 +556,80 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
   .mystats { grid-template-columns: repeat(4, 1fr); }
 }
 
+/* ------------------------------------------------------------ sexta-feira - */
+.fridaybox {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+}
+.fridaybox[data-state="voluntario"] { border-left-color: var(--good); }
+.fridaybox[data-state="veto"]       { border-left-color: var(--warn); }
+.fridaybox[data-state="fila"]       { border-left-color: var(--accent); }
+.fridaybox-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 10px; margin-bottom: 4px;
+}
+.fridaybox-title {
+  font-size: .72rem; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.fridaybox-pos {
+  font-size: .74rem; color: var(--text-muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.fridaybox .switch { margin-top: 10px; }
+.fridaybox .switch input:disabled + .switch-track { opacity: .45; }
+
+/* A sexta como 4a opcao automatica: presente, mas visivelmente nao escolhida. */
+.daybtn[data-auto="1"] { border-style: dashed; }
+.daybtn[data-auto="1"] .daybtn-rank { color: var(--text-secondary); }
+
+.slot-rank[data-rank="fila"] {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+}
+
+/* ------------------------------------------------------ fila da sexta ----- */
+.queue { display: grid; gap: 2px; margin-top: 10px; counter-reset: none; }
+.queue-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px 7px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+}
+.queue-row[data-next="1"] {
+  background: var(--accent-soft);
+}
+.queue-pos {
+  flex: none; width: 20px; text-align: right;
+  font-size: .74rem; font-weight: 700;
+  color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
+.queue-row[data-next="1"] .queue-pos { color: var(--accent); }
+.queue-row .avatar { width: 28px; height: 28px; font-size: .68rem; }
+.queue-name { flex: 1; min-width: 0; font-size: .9rem; }
+.queue-row[data-me="1"] .queue-name { font-weight: 700; }
+.queue-count {
+  font-size: .78rem; color: var(--text-secondary);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+.counter-name { flex: 1; min-width: 0; font-size: .9rem; }
+.counter-input {
+  flex: none; width: 74px; text-align: right;
+  padding: 8px 10px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px; font-size: .9rem;
+  font-variant-numeric: tabular-nums;
+}
+.counter-input:focus { border-color: var(--accent); outline: none; }
+
 body.is-busy .main, body.is-busy .identity-card { opacity: .6; pointer-events: none; }
 body.is-busy { cursor: progress; }
 
