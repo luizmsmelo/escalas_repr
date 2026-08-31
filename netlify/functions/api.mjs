@@ -11,6 +11,10 @@ export default async function handler(request) {
   const url = new URL(request.url);
   const route = url.pathname.replace(/^\/api\/?/, '').replace(/\/$/, '');
 
+  // O diagnostico precisa responder mesmo com o banco fora do ar - e justamente
+  // para isso que ele existe. Por isso vem antes do ensureSchema().
+  if (route === 'health') return json(health());
+
   try {
     await ensureSchema();
     const body = request.method === 'GET' ? {} : await readJson(request);
@@ -21,6 +25,37 @@ export default async function handler(request) {
     if (status === 500) console.error('[api]', route, err);
     return json({ error: err.message || 'Erro inesperado' }, status);
   }
+}
+
+/**
+ * Diagnostico de configuracao. Reporta apenas NOMES de variaveis de ambiente e
+ * se elas estao definidas - nunca o valor, que e uma credencial de banco.
+ */
+function health() {
+  const esperadas = ['NETLIFY_DATABASE_URL', 'NETLIFY_DATABASE_URL_UNPOOLED', 'DATABASE_URL'];
+  const encontradas = Object.keys(process.env)
+    .filter((k) => /DATABASE|NEON|POSTGRES/i.test(k))
+    .sort();
+
+  const configurado = esperadas.some((k) => !!process.env[k]);
+
+  return {
+    ok: configurado,
+    banco: configurado ? 'configurado' : 'NAO configurado',
+    variaveisEsperadas: Object.fromEntries(
+      esperadas.map((k) => [k, process.env[k] ? 'definida' : 'ausente']),
+    ),
+    // Nomes de variaveis relacionadas a banco que existem neste ambiente.
+    outrasVariaveisDeBancoPresentes: encontradas.filter((k) => !esperadas.includes(k)),
+    contexto: process.env.CONTEXT ?? null,
+    deploy: process.env.DEPLOY_ID ?? null,
+    node: process.version,
+    dica: configurado
+      ? 'Variavel encontrada. Se ainda houver erro, ele vem da conexao, nao da configuracao.'
+      : 'Nenhuma variavel de banco visivel PARA A FUNCAO. Se voce ja criou a variavel no '
+        + 'painel, confira o escopo dela: precisa incluir Functions, nao so Builds. '
+        + 'Depois de mexer, e preciso um novo deploy.',
+  };
 }
 
 class HttpError extends Error {

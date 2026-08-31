@@ -8,8 +8,8 @@ function connectionString() {
     process.env.DATABASE_URL;
   if (!url) {
     throw new Error(
-      'Banco de dados nao configurado. Instale a extensao Neon no Netlify ou defina ' +
-        'DATABASE_URL nas variaveis de ambiente do projeto.',
+      'Banco de dados nao configurado. Abra /api/health neste mesmo site para ver ' +
+        'exatamente qual variavel de ambiente esta faltando.',
     );
   }
   return url;

@@ -114,9 +114,29 @@ O schema é criado sozinho na primeira requisição — não há passo de migra�
    variável de ambiente.
 4. Abra o site, cadastre as nove pessoas e mande o link para o grupo.
 
-Alternativa ao passo 2: crie um banco em [neon.tech](https://neon.tech) e cole a
-connection string em *Site configuration → Environment variables* como
-`DATABASE_URL`.
+Alternativa ao passo 2 (funciona sempre): crie um banco grátis em
+[neon.tech](https://neon.tech), copie a connection string e cole em
+*Site configuration → Environment variables* como `DATABASE_URL`. **Marque o
+escopo Functions** — uma variável escopada só para *Builds* não é enxergada pela
+função, e esse é o erro mais comum. Depois, um novo deploy.
+
+### Quando der "Banco de dados não configurado"
+
+Abra `/api/health` no próprio site (ex.: `https://seusite.netlify.app/api/health`).
+Ele responde quais variáveis a **função** está enxergando, sem nunca mostrar o
+valor delas:
+
+```json
+{ "ok": false,
+  "variaveisEsperadas": { "NETLIFY_DATABASE_URL": "ausente", "DATABASE_URL": "ausente" },
+  "outrasVariaveisDeBancoPresentes": [] }
+```
+
+- Todas `ausente` e a lista vazia → a variável não existe, ou existe sem o escopo
+  *Functions*.
+- Aparece um nome em `outrasVariaveisDeBancoPresentes` → o banco existe, mas com
+  outro nome; renomeie para `DATABASE_URL`.
+- `"ok": true` e ainda assim erro → aí o problema é a conexão, não a configuração.
 
 ### Custo
 
