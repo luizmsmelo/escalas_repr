@@ -8,7 +8,7 @@
     "@neondatabase/serverless": "^0.10.4"
   },
   "scripts": {
-    "test": "node test/solver.test.mjs && node test/api.test.mjs"
+    "test": "node test/driver.test.mjs && node test/solver.test.mjs && node test/api.test.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.2.17"

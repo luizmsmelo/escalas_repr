@@ -1,30 +1,21 @@
-import { neon } from '@neondatabase/serverless';
+import { createDriver } from './driver.mjs';
 import { SCHEMA } from './schema.mjs';
-
-function connectionString() {
-  const url =
-    process.env.NETLIFY_DATABASE_URL ||
-    process.env.NETLIFY_DATABASE_URL_UNPOOLED ||
-    process.env.DATABASE_URL;
-  if (!url) {
-    throw new Error(
-      'Banco de dados nao configurado. Abra /api/health neste mesmo site para ver ' +
-        'exatamente qual variavel de ambiente esta faltando.',
-    );
-  }
-  return url;
-}
 
 // A conexao e criada na primeira consulta, e nao no import: assim uma variavel
 // de ambiente faltando vira uma mensagem legivel na tela, e nao um 500 opaco.
-let client = null;
-const db = () => (client ??= neon(connectionString()));
+let driver = null;
+const db = () => (driver ??= createDriver());
 
-/** Template tag: sql`select ... ${valor}` */
+/** Template tag com parametros ligados: sql`select ... ${valor}` */
 export const sql = (...args) => db()(...args);
-/** SQL cru, sem interpolacao (usado so para o schema). */
-sql.query = (text, params) => db().query(text, params);
-/** Varias consultas num unico round-trip, de forma atomica. */
+
+/**
+ * SQL cru, sem interpolacao de parametros. Usado so para o schema - nunca
+ * passe entrada de usuario por aqui.
+ */
+sql.query = (text, params = []) => db()(text, params);
+
+/** Varias consultas num unico round-trip, na ordem dada e de forma atomica. */
 sql.transaction = (queries) => db().transaction(queries);
 
 // O schema e criado sob demanda, uma vez por instancia da funcao. Assim nao

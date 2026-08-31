@@ -97,7 +97,8 @@ netlify/functions/
   lib/solver.mjs      resolução de conflitos (fluxo de custo mínimo)
   lib/dates.mjs       aritmética de datas, feita em UTC
   lib/schema.mjs      schema SQL
-  lib/db.mjs          conexão e migração automática
+  lib/db.mjs          consultas, transação e migração automática
+  lib/driver.mjs      conexão com o Neon (único ponto trocado nos testes)
 ```
 
 O schema é criado sozinho na primeira requisição — não há passo de migração.
@@ -163,6 +164,14 @@ npx netlify dev          # precisa de DATABASE_URL no ambiente
 npm test                 # não precisa de banco: sobe um Postgres em WASM
 ```
 
-`npm test` roda duas suítes: o solver (fila da sexta, veto, voluntário, casos
-limite) e a API inteira contra um Postgres de verdade compilado para WASM, com o
-mesmo `lib/schema.mjs` que roda em produção.
+`npm test` roda três suítes:
+
+- **driver** — confere que o pacote `@neondatabase/serverless` instalado tem a
+  forma que `lib/db.mjs` assume. Não precisa de rede.
+- **solver** — fila da sexta, veto, voluntário, preferências e casos limite.
+- **api** — a API inteira contra um Postgres de verdade compilado para WASM.
+
+Os testes substituem **apenas** `lib/driver.mjs` (a conexão). Todo o resto roda
+como em produção, de propósito: uma versão anterior dublava o `lib/db.mjs`
+inteiro, o dublê inventou um método que o driver real não tinha, e o bug passou
+pela suíte e chegou no ar.
