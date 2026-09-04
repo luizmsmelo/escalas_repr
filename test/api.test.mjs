@@ -155,6 +155,76 @@ await call('POST', 'reset', {});
 ok((await call('POST', 'counter', { id: 1, fridayOffset: 5 })).status === 404,
    'edicao manual do contador por pessoa foi removida');
 
+console.log('\n=== edicao manual da escala ===');
+const stM = (await call('GET', `state?week=${WEEK}`)).json;
+ok(stM.assignments.length > 0, 'semana de 02/03 tem escala gerada');
+
+// Tira uma pessoa do dia dela e coloca na quarta, deixando o resto como esta.
+const alvo = stM.assignments.find((a) => a.day !== 3);
+const semAlvo = stM.assignments
+  .filter((a) => a.personId !== alvo.personId)
+  .map((a) => ({ day: a.day, personId: a.personId }));
+const edicao = await call('POST', 'assignments',
+  { monday: WEEK, slots: [...semAlvo, { day: 3, personId: alvo.personId }] });
+ok(edicao.status === 200, `edicao aceita: ${JSON.stringify(edicao.json.error ?? '')}`);
+
+const movido = edicao.json.assignments.find((a) => a.personId === alvo.personId);
+ok(movido.day === 3, `${alvo.name} passou da ${alvo.day}a para a quarta`);
+ok(movido.via === 'manual', `a linha movida vira manual (via=${movido.via})`);
+ok(movido.date === '2026-03-04', `com a data da quarta (${movido.date})`);
+
+const escolhasAlvo = edicao.json.preferences.find((p) => p.personId === alvo.personId).choices;
+const posicao = escolhasAlvo.indexOf(3);
+ok(movido.rank === (posicao === -1 ? null : posicao + 1),
+   `rank herdado da lista da propria pessoa (rank=${movido.rank})`);
+
+const intocado = edicao.json.assignments.find((a) => a.personId !== alvo.personId);
+ok(intocado.via !== 'manual', `quem nao foi mexido mantem a origem (via=${intocado.via})`);
+console.log(`  ${alvo.name} movido para a quarta; ${intocado.name} segue via ${intocado.via}`);
+
+// Duas linhas iguais nao existem: a chave da tabela e (semana, pessoa, dia).
+ok((await call('POST', 'assignments', { monday: WEEK, slots: [
+  { day: 1, personId: ids['Ana Souza'] }, { day: 1, personId: ids['Ana Souza'] },
+] })).status === 400, 'rejeita a mesma pessoa duas vezes no mesmo dia');
+
+// Mas a mesma pessoa em dois dias diferentes e legitimo - alguem cobrindo o
+// colega que faltou. O solver evita; a mao pode.
+const atual = (await call('GET', `state?week=${WEEK}`)).json.assignments
+  .map((a) => ({ day: a.day, personId: a.personId }));
+const dobra = await call('POST', 'assignments',
+  { monday: WEEK, slots: [...atual, { day: 2, personId: alvo.personId }] });
+ok(dobra.status === 200, 'aceita a mesma pessoa em dois dias diferentes');
+ok(dobra.json.assignments.filter((a) => a.personId === alvo.personId).length === 2,
+   'as duas escalas da pessoa ficam registradas');
+
+// Dia sem expediente nao tem vaga nem para a mao.
+const noRecesso = await call('POST', 'assignments',
+  { monday: '2026-12-21', slots: [{ day: 1, personId: ids['Ana Souza'] }] });
+ok(noRecesso.status === 400, 'rejeita escalar em dia sem expediente');
+console.log(`  ${noRecesso.json.error}`);
+
+// Quem esta inativo saiu da escala.
+await call('PATCH', 'people', { id: ids['Bruno Lima'], active: false });
+ok((await call('POST', 'assignments',
+   { monday: WEEK, slots: [{ day: 1, personId: ids['Bruno Lima'] }] })).status === 400,
+   'rejeita escalar pessoa inativa');
+await call('PATCH', 'people', { id: ids['Bruno Lima'], active: true });
+
+// Lista vazia limpa a semana, e os totais do mes acompanham.
+const marCheio = (await call('GET', 'stats?month=2026-03')).json.stats.totals.assigned;
+const limpa = await call('POST', 'assignments', { monday: WEEK, slots: [] });
+ok(limpa.status === 200 && limpa.json.assignments.length === 0, 'lista vazia limpa a semana');
+const marLimpo = (await call('GET', 'stats?month=2026-03')).json.stats.totals.assigned;
+ok(marLimpo < marCheio, `os totais do mes acompanham (${marCheio} -> ${marLimpo})`);
+ok((await call('POST', 'publish', { monday: WEEK, published: true })).status === 400,
+   'semana sem escala nao pode ser publicada');
+
+// Gerar de novo remonta tudo pelas preferencias e descarta os ajustes.
+const regerada = await call('POST', 'generate', { monday: WEEK });
+ok(regerada.status === 200, 'gerar de novo remonta a semana');
+ok(regerada.json.assignments.every((a) => a.via !== 'manual'),
+   'gerar de novo descarta os ajustes manuais');
+
 console.log('\n=== publicacao e cascata ===');
 
 await call('POST', 'publish', { monday: WEEK, published: true });
@@ -162,6 +232,8 @@ ok((await call('POST', 'preferences',
    { monday: WEEK, personId: ids['Ana Souza'], choices: [5,4,3] })).status === 409,
    'semana publicada trava preferencias');
 ok((await call('POST', 'generate', { monday: WEEK })).status === 409, 'e trava a geracao');
+ok((await call('POST', 'assignments', { monday: WEEK, slots: [] })).status === 409,
+   'e trava a edicao manual');
 await call('POST', 'publish', { monday: WEEK, published: false });
 
 const antes = (await call('GET', 'stats?month=2026-07')).json.stats.totals.assigned;

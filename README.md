@@ -63,6 +63,34 @@ já custam o mesmo.
 
 ---
 
+## Editar a escala à mão
+
+A escala que o app monta é um ponto de partida, não uma sentença. Na aba Escala,
+o botão **Editar escala** abre a semana para ajuste: em cada dia dá para tirar
+quem está e acrescentar quem falta, e **Salvar escala** grava tudo de uma vez.
+
+O que a edição faz e o que ela não faz:
+
+- **Não mexe na preferência de ninguém.** O top 3 de cada um continua onde
+  estava; muda só quem fica em qual dia *nesta* semana.
+- **Conta nos contadores.** Quem entrou pela mão conta escala — e sexta, se for
+  o caso — como qualquer outro. É o mesmo histórico.
+- **Marca o que foi mexido.** A linha ajustada aparece como *ajuste manual*;
+  quem o app escalou continua mostrando a opção de origem. Olhando a escala, dá
+  para separar o que saiu da conta do que saiu de um acordo.
+- **Escreve os dois descuidos comuns** antes de salvar: alguém sem nenhum dia na
+  semana, e alguém em mais de um. Nenhum dos dois é proibido — às vezes é
+  exatamente o que se quer —, mas nenhum dos dois passa despercebido.
+
+O que ela recusa: dia sem expediente, pessoa inativa e a mesma pessoa duas vezes
+no mesmo dia. Semana publicada fica travada, como já ficava para preferência e
+geração — reabra antes de editar.
+
+**Gerar escala de novo descarta os ajustes**, porque remonta a semana inteira
+pelas preferências. O app pergunta antes de fazer isso.
+
+---
+
 ## Os contadores
 
 São dois, por pessoa: **escalas** e **sextas**. Ambos são acumulados e **nunca

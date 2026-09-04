@@ -1,5 +1,5 @@
 import { sql, ensureSchema } from './lib/db.mjs';
-import { solveWeek, DAYS, FRIDAY } from './lib/solver.mjs';
+import { solveWeek, rankOf, DAYS, DAY_NAMES, FRIDAY } from './lib/solver.mjs';
 import {
   todayISO, mondayOf, nextMonday, addDays, weekDates, monthOf,
   isValidISO, isValidMonth,
@@ -77,6 +77,7 @@ async function dispatch(route, method, params, body) {
     case 'DELETE people':   return deletePerson(params.get('id'));
     case 'POST preferences':return savePreferences(body);
     case 'POST generate':   return generate(body);
+    case 'POST assignments':return setAssignments(body);
     case 'POST publish':    return publish(body);
     case 'POST capacity':   return setCapacity(body);
     case 'POST reset':      return resetCounters(body);
@@ -310,6 +311,85 @@ async function generate({ monday }) {
       })),
     },
   };
+}
+
+/**
+ * Escala editada a mao. Recebe a semana inteira como ela deve ficar - nao um
+ * delta - porque assim a tela e o banco nunca discordam sobre quem esta em que
+ * dia, e uma edicao concorrente perde por inteiro em vez de deixar meia escala.
+ *
+ * Linhas que ja existiam com a mesma dupla (dia, pessoa) mantem o `via` e o
+ * `rank` originais: quem foi escalado pelo solver continua aparecendo como 1a
+ * opcao ou como fila da sexta, e so o que a mao mexeu vira 'manual'.
+ */
+async function setAssignments({ monday, slots }) {
+  const week = requireMonday(monday);
+  await ensureWeek(week);
+  await assertOpen(week);
+
+  if (!Array.isArray(slots)) throw bad('Envie a escala da semana como uma lista de vagas.');
+
+  const [people, atuais, prefs, overrides] = await Promise.all([
+    sql`select id, name, active from people`,
+    sql`select person_id, day, rank, via from assignments where monday = ${week}`,
+    sql`select person_id, choice1, choice2, choice3 from preferences where monday = ${week}`,
+    loadOverrides(),
+  ]);
+
+  const pessoas = new Map(people.map((p) => [p.id, p]));
+  const antes = new Map(atuais.map((a) => [`${a.day}:${a.person_id}`, a]));
+  const escolhas = new Map(prefs.map((p) => [
+    p.person_id, [p.choice1, p.choice2, p.choice3].filter((d) => d != null),
+  ]));
+
+  const situacao = weekDayStatus(week, overrides);
+  const dates = Object.fromEntries(situacao.map((d) => [d.day, d.date]));
+  const aberto = new Map(situacao.map((d) => [d.day, d.works]));
+
+  const vistos = new Set();
+  const linhas = [];
+
+  for (const slot of slots) {
+    const day = Number(slot?.day);
+    if (!DAYS.includes(day)) throw bad('Dia invalido: use de segunda a sexta.');
+    if (!aberto.get(day)) {
+      throw bad(`${DAY_NAMES[day]} nao tem expediente nesta semana - nao da para escalar ninguem.`);
+    }
+
+    const id = requireId(slot?.personId);
+    const pessoa = pessoas.get(id);
+    if (!pessoa) throw new HttpError(404, 'Pessoa nao encontrada.');
+    if (!pessoa.active) throw bad(`${pessoa.name} esta inativo(a) e nao entra na escala.`);
+
+    const chave = `${day}:${id}`;
+    if (vistos.has(chave)) throw bad(`${pessoa.name} aparece duas vezes na ${DAY_NAMES[day].toLowerCase()}.`);
+    vistos.add(chave);
+
+    const anterior = antes.get(chave);
+    linhas.push(anterior
+      ? { day, personId: id, rank: anterior.rank, via: anterior.via }
+      // Quem a mao colocou herda a posicao que o dia tem na lista da propria
+      // pessoa - se ela pediu aquele dia, continua sendo a 1a opcao dela.
+      : { day, personId: id, via: 'manual', rank: manualRank(escolhas.get(id) ?? [], day) });
+  }
+
+  await sql.transaction([
+    sql`delete from assignments where monday = ${week}`,
+    ...linhas.map(
+      (a) => sql`
+        insert into assignments (monday, person_id, day, rank, via, work_date)
+        values (${week}, ${a.personId}, ${a.day}, ${a.rank}, ${a.via}, ${dates[a.day]})`,
+    ),
+  ]);
+
+  return getState(week);
+}
+
+/** Posicao do dia na lista da pessoa; sexta nao pedida e a 4a opcao de todo mundo. */
+function manualRank(choices, day) {
+  const rank = rankOf({ choices }, day);
+  if (rank !== null) return rank;
+  return day === FRIDAY ? 4 : null;
 }
 
 async function publish({ monday, published }) {

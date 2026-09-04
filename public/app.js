@@ -18,6 +18,7 @@ const state = {
   data: null,        // resposta de /api/state
   stats: null,
   draft: [],         // dias escolhidos, em ordem, ainda nao salvos
+  edit: null,        // rascunho da escala editada a mao: { dia: [personId] }
   away: false,
   noFriday: false,   // veto pontual da sexta nesta semana
   tab: 'escolher',
@@ -176,6 +177,9 @@ function syncDraftFromServer() {
   state.draft = mine ? [...mine.choices] : [];
   state.away = mine ? mine.unavailable : false;
   state.noFriday = mine ? !!mine.noFriday : false;
+  // Toda resposta do servidor descarta a edicao manual em andamento: a escala
+  // que esta na tela passou a ser outra.
+  state.edit = null;
 }
 
 /* ------------------------------------------------------------ identidade -- */
@@ -371,6 +375,8 @@ function renderSchedule(generation) {
   $('#schedWeekLabel').textContent = weekLabel(week.monday);
   applyWeekBadge($('#schedWeekBadge'), week.monday);
 
+  if (state.edit) return renderScheduleEditor();
+
   const byDay = new Map([1, 2, 3, 4, 5].map((d) => [d, []]));
   assignments.forEach((a) => byDay.get(a.day).push(a));
 
@@ -380,20 +386,7 @@ function renderSchedule(generation) {
   $('#schedule').innerHTML = hasAny
     ? week.dates
         .map(({ day, date, works, holiday }) => {
-          if (!works) {
-            return `<div class="dayrow" data-closed="1">
-              <div class="dayrow-when">
-                <span class="dayrow-day">${DAY_SHORT[day]}</span>
-                <span class="dayrow-date">${fmtDay(date)}</span>
-              </div>
-              <div class="dayrow-people">
-                <div class="slot slot-closed">
-                  <span class="slot-name">${esc(holiday?.name ?? 'Sem expediente')}</span>
-                  <span class="slot-rank">${esc(holiday?.label ?? 'sem expediente')}</span>
-                </div>
-              </div>
-            </div>`;
-          }
+          if (!works) return closedRow(day, date, holiday);
           const slots = byDay.get(day);
           const empty = Math.max(0, capOf(day) - slots.length);
           const rows =
@@ -468,23 +461,148 @@ function renderSchedule(generation) {
   notice.hidden = messages.length === 0;
   notice.className = `notice${week.published && messages.length === 1 ? ' notice-lock' : ' notice-warn'}`;
 
+  $('#schedActions').hidden = false;
+  $('#editActions').hidden = true;
+
   $('#generateBtn').textContent = hasAny ? 'Gerar escala de novo' : 'Gerar escala';
   $('#generateBtn').disabled = week.published;
+  $('#editBtn').textContent = hasAny ? 'Editar escala' : 'Montar escala à mão';
+  // Sem nenhum dia com expediente nao ha o que editar.
+  $('#editBtn').disabled = week.published || !week.dates.some((d) => d.works);
   $('#publishBtn').textContent = week.published ? 'Reabrir escala' : 'Publicar escala';
   $('#publishBtn').disabled = !hasAny && !week.published;
 }
 
+/** Linha de um dia sem expediente - igual na escala e no editor. */
+function closedRow(day, date, holiday) {
+  return `<div class="dayrow" data-closed="1">
+    <div class="dayrow-when">
+      <span class="dayrow-day">${DAY_SHORT[day]}</span>
+      <span class="dayrow-date">${fmtDay(date)}</span>
+    </div>
+    <div class="dayrow-people">
+      <div class="slot slot-closed">
+        <span class="slot-name">${esc(holiday?.name ?? 'Sem expediente')}</span>
+        <span class="slot-rank">${esc(holiday?.label ?? 'sem expediente')}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
 /** Rotulo da etiqueta a direita de cada nome na escala. */
 function slotRankLabel(a) {
+  if (a.via === 'manual') return a.rank ? `${ORDINAL[a.rank]} opção · manual` : 'ajuste manual';
   if (a.via === 'fila') return '4ª opção · fila';
   if (a.via === 'voluntario') return `${ORDINAL[a.rank] ?? '4ª'} opção · voluntário`;
   return a.rank ? `${ORDINAL[a.rank]} opção` : 'fora das opções';
 }
 
 function slotRankTone(a) {
+  if (a.via === 'manual') return 'manual';
   if (a.via === 'voluntario') return '1';
   if (a.via === 'fila') return 'fila';
   return a.rank ?? 'none';
+}
+
+/* --- aba: escala, edicao manual ------------------------------------------- */
+
+/**
+ * Copia editavel da escala que esta na tela: { dia: [personId, ...] }. So os
+ * dias com expediente entram - num feriado nao existe vaga para preencher.
+ */
+function buildEditDraft() {
+  const draft = {};
+  state.data.week.dates.forEach(({ day, works }) => { if (works) draft[day] = []; });
+  state.data.assignments.forEach((a) => { draft[a.day]?.push(a.personId); });
+  return draft;
+}
+
+function renderScheduleEditor() {
+  const { week } = state.data;
+  const pessoas = new Map(state.data.people.map((p) => [p.id, p]));
+  const fora = new Set(
+    state.data.preferences.filter((p) => p.unavailable).map((p) => p.personId));
+  const ativos = state.data.people.filter((p) => p.active);
+  const capOf = (d) => (d === FRIDAY ? week.capFriday : week.capWeekday);
+
+  $('#schedule').innerHTML = week.dates
+    .map(({ day, date, works, holiday }) => {
+      if (!works) return closedRow(day, date, holiday);
+
+      const ids = state.edit[day] ?? [];
+      const cap = capOf(day);
+      const escalados = ids
+        .map((id) => {
+          const p = pessoas.get(id);
+          const nome = p?.name ?? 'Desconhecido';
+          return `<div class="slot" data-me="${id === state.me?.id ? 1 : 0}">
+            <span class="avatar">${esc(initials(nome))}</span>
+            <span class="slot-name">${esc(nome)}</span>
+            <button class="iconbtn" type="button" data-danger="1" data-remove="${day}:${id}"
+                    aria-label="Tirar ${esc(nome)} de ${DAY_NAMES[day].toLowerCase()}">×</button>
+          </div>`;
+        })
+        .join('');
+
+      const livres = ativos.filter((p) => !ids.includes(p.id));
+      const adicionar = livres.length
+        ? `<select class="editadd" data-add-day="${day}"
+                   aria-label="Acrescentar alguém em ${DAY_NAMES[day].toLowerCase()}">
+             <option value="">+ Acrescentar pessoa</option>
+             ${livres.map((p) => `<option value="${p.id}">${esc(p.name)}${
+                 fora.has(p.id) ? ' · fora esta semana' : ''}</option>`).join('')}
+           </select>`
+        : '';
+
+      const tom = ids.length === cap ? 'ok' : ids.length > cap ? 'over' : 'under';
+      const conta = ids.length === cap
+        ? `${ids.length} de ${cap} ${cap === 1 ? 'vaga' : 'vagas'}`
+        : ids.length < cap
+          ? `${ids.length} de ${cap} — ${cap - ids.length} em aberto`
+          : `${ids.length} pessoas para ${cap} ${cap === 1 ? 'vaga' : 'vagas'}`;
+
+      return `<div class="dayrow" data-editing="1" data-friday="${day === FRIDAY ? 1 : 0}">
+        <div class="dayrow-when">
+          <span class="dayrow-day">${DAY_SHORT[day]}</span>
+          <span class="dayrow-date">${fmtDay(date)}</span>
+        </div>
+        <div class="dayrow-people">
+          ${escalados}${adicionar}
+          <p class="editcount" data-tone="${tom}">${conta}</p>
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  // Quem ficou de fora e quem ficou com dois dias: sao os dois descuidos que
+  // uma edicao a mao comete, e o solver nunca cometeria.
+  const vezes = new Map();
+  Object.values(state.edit).flat()
+    .forEach((id) => vezes.set(id, (vezes.get(id) ?? 0) + 1));
+  const semDia = ativos.filter((p) => !vezes.has(p.id) && !fora.has(p.id));
+  const repetidos = ativos.filter((p) => (vezes.get(p.id) ?? 0) > 1);
+
+  const partes = [];
+  if (semDia.length) {
+    partes.push(`Sem nenhum dia: <b>${esc(semDia.map((p) => p.name).join(', '))}</b>`);
+  }
+  if (repetidos.length) {
+    partes.push(`Em mais de um dia: <b>${esc(repetidos.map((p) => p.name).join(', '))}</b>`);
+  }
+  const summary = $('#schedSummary');
+  summary.innerHTML = partes.join(' · ') || 'Cada pessoa ativa está em exatamente um dia.';
+  summary.hidden = false;
+
+  const notice = $('#schedNotice');
+  notice.className = 'notice notice-warn';
+  notice.innerHTML =
+    'Você está <b>editando a escala</b> desta semana. Tire ou acrescente gente em cada dia '
+    + 'e depois salve. As preferências de ninguém mudam &mdash; muda só quem fica em cada '
+    + 'dia, e os contadores acompanham o que for salvo.';
+  notice.hidden = false;
+
+  $('#schedActions').hidden = true;
+  $('#editActions').hidden = false;
 }
 
 /* --- aba: contadores ------------------------------------------------------ */
@@ -943,7 +1061,13 @@ function wireEvents() {
     }));
 
   // escala
-  $('#generateBtn').addEventListener('click', () =>
+  $('#generateBtn').addEventListener('click', () => {
+    // Gerar de novo reescreve a semana inteira: um ajuste feito a mao seria
+    // desfeito sem aviso.
+    if (state.data.assignments.some((a) => a.via === 'manual')
+        && !confirm('Esta escala tem ajustes manuais.\n\n'
+                    + 'Gerar de novo monta tudo outra vez pelas preferências e '
+                    + 'descarta esses ajustes. Continuar?')) return;
     run(async () => {
       const result = await post('/generate', { monday: state.week });
       state.data = result;
@@ -957,7 +1081,48 @@ function wireEvents() {
       goTab('escala');
       const g = result.generation;
       toast(`Escala pronta: ${g.firstChoice} de ${g.filled} na 1ª opção.`);
+    });
+  });
+
+  // edicao manual da escala
+  $('#editBtn').addEventListener('click', () => {
+    state.edit = buildEditDraft();
+    renderSchedule();
+  });
+
+  $('#cancelEditBtn').addEventListener('click', () => {
+    state.edit = null;
+    renderSchedule();
+  });
+
+  $('#saveEditBtn').addEventListener('click', () =>
+    run(async () => {
+      const slots = Object.entries(state.edit).flatMap(([day, ids]) =>
+        ids.map((personId) => ({ day: Number(day), personId })));
+      state.data = await post('/assignments', { monday: state.week, slots });
+      state.stats = state.data.stats;
+      syncDraftFromServer();   // encerra o modo de edicao
+      renderAll();
+      toast('Escala atualizada.');
     }));
+
+  $('#schedule').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-remove]');
+    if (!btn || !state.edit) return;
+    const [day, id] = btn.dataset.remove.split(':').map(Number);
+    state.edit[day] = (state.edit[day] ?? []).filter((p) => p !== id);
+    renderSchedule();
+  });
+
+  $('#schedule').addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-add-day]');
+    if (!sel || !state.edit) return;
+    const id = Number(sel.value);
+    if (!id) return;
+    const day = Number(sel.dataset.addDay);
+    state.edit[day] = [...(state.edit[day] ?? []), id];
+    renderSchedule();
+  });
 
   $('#publishBtn').addEventListener('click', () =>
     run(async () => {

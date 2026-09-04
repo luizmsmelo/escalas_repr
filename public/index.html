@@ -112,9 +112,15 @@
       <div id="schedule" class="schedule"></div>
       <div id="schedSummary" class="summary" hidden></div>
 
-      <div class="actions">
+      <div id="schedActions" class="actions">
         <button id="generateBtn" class="btn btn-primary btn-block" type="button">Gerar escala</button>
+        <button id="editBtn" class="btn btn-ghost btn-block" type="button">Editar escala</button>
         <button id="publishBtn" class="btn btn-ghost btn-block" type="button">Publicar escala</button>
+      </div>
+
+      <div id="editActions" class="actions" hidden>
+        <button id="saveEditBtn" class="btn btn-primary btn-block" type="button">Salvar escala</button>
+        <button id="cancelEditBtn" class="btn btn-ghost btn-block" type="button">Cancelar</button>
       </div>
     </section>
 
@@ -201,6 +207,12 @@
           possíveis e escolhe a que deixa o grupo <strong>como um todo</strong> mais perto
           das primeiras opções &mdash; não é ordem de chegada. Empates vão para quem tem
           menos escalas acumuladas.
+        </p>
+        <p class="hint">
+          <strong>E quando precisar mexer.</strong> O botão <em>Editar escala</em>, na aba
+          Escala, abre a semana para ajuste à mão: dá para tirar e acrescentar gente em
+          cada dia. Isso não altera a preferência de ninguém, e as escalas ajustadas contam
+          nos contadores como todas as outras.
         </p>
       </section>
 

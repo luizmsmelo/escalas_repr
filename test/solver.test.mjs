@@ -39,9 +39,9 @@ ok(mar.closed.length === 0, 'mar/2026 não tem dia fechado');
 ok(dayStatus('2026-12-25').works === false, '25/12 é feriado');
 ok(dayStatus('2026-02-16').works === false, '16/02 é Carnaval');
 ok(dayStatus('2026-03-10').works === true, '10/03 é dia normal');
-ok(dayStatus('2026-02-16', { '2026-02-16': true }).works === true,
+ok(dayStatus('2026-02-16', { '2026-02-16': { works: true } }).works === true,
    'exceção manual devolve o expediente a um facultativo');
-ok(dayStatus('2026-03-10', { '2026-03-10': false }).works === false,
+ok(dayStatus('2026-03-10', { '2026-03-10': { works: false } }).works === false,
    'exceção manual tira o expediente de um dia comum');
 
 // Ano sem calendário carregado: assume expediente normal, mas sinaliza.
