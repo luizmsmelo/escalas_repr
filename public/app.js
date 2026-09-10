@@ -242,13 +242,20 @@ function renderPicker() {
   applyWeekBadge($('#pickWeekBadge'), week.monday);
 
   const locked = week.published;
+  // Dia fixo so dispensa a escolha nas semanas em que ele tem expediente.
+  const meuFixo = myFixedDay();
+  const fixoVale = meuFixo != null
+    && week.dates.find((d) => d.day === meuFixo)?.works === true;
+
   $('#pickLocked').hidden = !locked;
   $('#awayToggle').checked = state.away;
   $('#awayToggle').disabled = locked;
-  $('#pickPrefs').hidden = state.away;
+  $('#pickPrefs').hidden = state.away || fixoVale;
 
   const fridayPicked = state.draft.includes(FRIDAY);
   const fridayOpen = week.dates.find((d) => d.day === FRIDAY)?.works !== false;
+
+  renderFixedBox(meuFixo, fixoVale);
 
   // Numa semana encurtada por feriado pode nao haver 3 dias para escolher.
   const abertos = week.dates.filter((d) => d.works).length;
@@ -298,10 +305,55 @@ function renderPicker() {
   renderFridayBox(fridayPicked, locked, fridayOpen);
 
   const save = $('#savePrefs');
-  save.disabled = locked || (!state.away && state.draft.length !== exigidos);
-  save.textContent = state.away ? 'Salvar ausência' : 'Salvar preferência';
+  // Com dia fixo valendo nao ha o que escolher: o botao so faz sentido para
+  // desfazer uma ausencia ja salva, e some quando nao ha nada a salvar.
+  const soDesfazerAusencia = fixoVale && !state.away;
+  save.hidden = soDesfazerAusencia && !storedAway();
+  if (soDesfazerAusencia) {
+    save.disabled = locked;
+    save.textContent = 'Voltar a participar desta semana';
+  } else {
+    save.disabled = locked || (!state.away && state.draft.length !== exigidos);
+    save.textContent = state.away ? 'Salvar ausência' : 'Salvar preferência';
+  }
 
   renderRespondedList();
+}
+
+/** Dia fixo de quem esta usando o app, ou null. */
+function myFixedDay() {
+  return state.data.people.find((p) => p.id === state.me?.id)?.fixedDay ?? null;
+}
+
+/** Ausencia desta semana como esta gravada no servidor (nao o rascunho). */
+function storedAway() {
+  return state.data.preferences.find((p) => p.personId === state.me?.id)?.unavailable ?? false;
+}
+
+/** Explica o dia fixo de quem tem um - e o que muda quando ele cai em feriado. */
+function renderFixedBox(fixedDay, fixoVale) {
+  const box = $('#fixedBox');
+  if (fixedDay == null || state.away) { box.hidden = true; return; }
+  box.hidden = false;
+
+  const info = state.data.week.dates.find((d) => d.day === fixedDay);
+  box.dataset.state = fixoVale ? 'ativo' : 'fechado';
+  box.innerHTML = fixoVale
+    ? `<div class="fixedbox-head">
+         <span class="fixedbox-title">Seu dia fixo</span>
+         <span class="fixedbox-day">${DAY_NAMES[fixedDay]} ${fmtDay(info.date)}</span>
+       </div>
+       <p class="hint">Sua vaga desta semana já está reservada &mdash; você não escolhe
+         preferência e fica fora da fila da sexta. Se não puder vir, marque a ausência
+         acima.</p>`
+    : `<div class="fixedbox-head">
+         <span class="fixedbox-title">Seu dia fixo</span>
+         <span class="fixedbox-day">${DAY_NAMES[fixedDay]}</span>
+       </div>
+       <p class="hint">Nesta semana <b>a ${DAY_NAMES[fixedDay].toLowerCase()}-feira não tem
+         expediente</b>${info?.holiday?.name ? ` (${esc(info.holiday.name)})` : ''}, então
+         você escolhe seus dias como todo mundo. Você continua fora da fila da sexta: só
+         pega sexta se colocá-la no seu top 3.</p>`;
 }
 
 /** Explica a posicao da pessoa na fila da sexta e oferece o veto da semana. */
@@ -324,6 +376,7 @@ function renderFridayBox(fridayPicked, locked, fridayOpen = true) {
   const queue = state.stats?.fridayQueue ?? [];
   const mine = queue.find((q) => q.personId === state.me?.id);
   const position = mine ? queue.indexOf(mine) + 1 : null;
+  const temFixo = myFixedDay() != null;
 
   toggle.checked = state.noFriday;
   // Quem pediu sexta no top 3 esta se voluntariando: vetar seria contraditorio.
@@ -338,21 +391,32 @@ function renderFridayBox(fridayPicked, locked, fridayOpen = true) {
     ? 'Você colocou sexta no seu top 3, então está <b>se voluntariando</b> e passa na frente da fila.'
     : state.noFriday
       ? 'Você está <b>fora da sexta</b> nesta semana. Se todo mundo fizer o mesmo, a vaga fica vazia.'
-      : position
-        ? `Sexta é sua <b>4ª opção automática</b>. Você está em <b>${position}º</b> de ${queue.length} na fila.`
-        : 'Sexta é sua <b>4ª opção automática</b>.';
+      : temFixo
+        ? 'Como você tem <b>dia fixo</b>, fica fora da fila da sexta. Se quiser a sexta '
+          + 'desta semana, coloque-a no seu top 3.'
+        : position
+          ? `Sexta é sua <b>4ª opção automática</b>. Você está em <b>${position}º</b> de ${queue.length} na fila.`
+          : 'Sexta é sua <b>4ª opção automática</b>.';
 }
 
 function renderRespondedList() {
   const byId = new Map(state.data.preferences.map((p) => [p.personId, p]));
   const active = state.data.people.filter((p) => p.active);
+  const aberto = new Set(state.data.week.dates.filter((d) => d.works).map((d) => d.day));
 
   $('#responded').innerHTML = active.length
     ? active
         .map((p) => {
           const pref = byId.get(p.id);
-          const state_ = !pref ? 'pending' : pref.unavailable ? 'away' : 'done';
-          const suffix = state_ === 'away' ? ' · fora' : state_ === 'pending' ? ' · pendente' : '';
+          // Quem tem dia fixo valendo nesta semana nunca fica "pendente": nao ha
+          // o que ele responder.
+          const fixo = p.fixedDay != null && aberto.has(p.fixedDay);
+          const state_ = pref?.unavailable ? 'away'
+            : fixo ? 'fixed'
+            : pref ? 'done' : 'pending';
+          const suffix = state_ === 'away' ? ' · fora'
+            : state_ === 'fixed' ? ` · fixo ${DAY_SHORT[p.fixedDay].toLowerCase()}`
+            : state_ === 'pending' ? ' · pendente' : '';
           return `<li class="chip" data-state="${state_}">
             <span class="chip-dot"></span>${esc(p.name)}${suffix}</li>`;
         })
@@ -417,9 +481,12 @@ function renderSchedule(generation) {
 
   const summary = $('#schedSummary');
   if (hasAny) {
-    const ranks = { 1: 0, 2: 0, 3: 0, 4: 0, none: 0 };
-    assignments.forEach((a) => { ranks[a.rank ?? 'none']++; });
+    const ranks = { 1: 0, 2: 0, 3: 0, 4: 0, none: 0, fixo: 0 };
+    // Dia fixo nao tem posicao de preferencia - contar como "fora das opcoes"
+    // acusaria um problema onde nao ha nenhum.
+    assignments.forEach((a) => { ranks[a.via === 'fixo' ? 'fixo' : (a.rank ?? 'none')]++; });
     const parts = [`<b>${assignments.length}</b> ${assignments.length === 1 ? 'vaga preenchida' : 'vagas preenchidas'}`];
+    if (ranks.fixo) parts.push(`<b>${ranks.fixo}</b> em dia fixo`);
     [1, 2, 3].forEach((r) => { if (ranks[r]) parts.push(`<b>${ranks[r]}</b> na ${ORDINAL[r]} opção`); });
     if (ranks[4]) parts.push(`<b>${ranks[4]}</b> na sexta automática`);
     if (ranks.none) parts.push(`<b>${ranks.none}</b> fora das opções pedidas`);
@@ -440,6 +507,14 @@ function renderSchedule(generation) {
     );
   } else if (fri?.vetoed?.length) {
     messages.push(`Fora da sexta nesta semana: <b>${esc(fri.vetoed.join(', '))}</b>.`);
+  }
+  if (generation?.fixed?.spill?.length) {
+    const lista = generation.fixed.spill
+      .map((f) => `${f.name} (${DAY_NAMES[f.day].toLowerCase()}, ${
+        f.reason === 'sem-expediente' ? 'sem expediente' : 'sem vaga livre'})`)
+      .join(', ');
+    messages.push(`Dia fixo sem vaga nesta semana: <b>${esc(lista)}</b>. `
+      + 'Essas pessoas entraram pela preferência, como todo mundo.');
   }
   if (generation?.missingPreferences?.length) {
     messages.push(
@@ -492,6 +567,7 @@ function closedRow(day, date, holiday) {
 /** Rotulo da etiqueta a direita de cada nome na escala. */
 function slotRankLabel(a) {
   if (a.via === 'manual') return a.rank ? `${ORDINAL[a.rank]} opção · manual` : 'ajuste manual';
+  if (a.via === 'fixo') return 'dia fixo';
   if (a.via === 'fila') return '4ª opção · fila';
   if (a.via === 'voluntario') return `${ORDINAL[a.rank] ?? '4ª'} opção · voluntário`;
   return a.rank ? `${ORDINAL[a.rank]} opção` : 'fora das opções';
@@ -499,6 +575,7 @@ function slotRankLabel(a) {
 
 function slotRankTone(a) {
   if (a.via === 'manual') return 'manual';
+  if (a.via === 'fixo') return 'fixo';
   if (a.via === 'voluntario') return '1';
   if (a.via === 'fila') return 'fila';
   return a.rank ?? 'none';
@@ -626,12 +703,14 @@ function renderCounters() {
     statCard('Minhas sextas', mine?.fridays ?? 0, `média ${fmtNum(c.avgFridays)}`,
       diffTone(mine?.fridays ?? 0, c.avgFridays)),
     statCard('Posição na fila', myPos || '—',
-      myPos ? `de ${queue.length} pessoas` : 'fora da fila'),
+      myPos ? `de ${queue.length} pessoas`
+        : myFixedDay() != null ? 'fora da fila: dia fixo' : 'fora da fila'),
     statCard('Total do grupo', c.grandTotal,
       `${c.grandFridays} ${c.grandFridays === 1 ? 'sexta' : 'sextas'}`),
   ].join('');
 
   renderFridayQueue(queue);
+  renderFridayQueueFixed();
 
   const names = shortNames(c.perPerson);
   const totalData = c.perPerson.map((p, i) =>
@@ -673,10 +752,25 @@ function renderFridayQueue(queue) {
     .join('');
 }
 
+/** Quem esta fora da fila por ter dia fixo - senao a lista pareceria incompleta. */
+function renderFridayQueueFixed() {
+  const el = $('#fridayQueueFixed');
+  const fixos = (state.data?.people ?? [])
+    .filter((p) => p.active && p.fixedDay != null);
+  el.hidden = fixos.length === 0;
+  if (!fixos.length) return;
+  el.innerHTML = 'Fora da fila por ter dia fixo: '
+    + fixos.map((p) => `${esc(p.name)} (${DAY_NAMES[p.fixedDay].toLowerCase()})`).join(', ')
+    + '.';
+}
+
 function statCard(label, value, note, tone = '') {
+  // `value` pode ser um traco ('—') quando nao ha numero a mostrar: passar isso
+  // por fmtNum daria NaN na tela.
+  const shown = typeof value === 'number' ? fmtNum(value) : String(value);
   return `<div class="stat">
     <div class="stat-label">${esc(label)}</div>
-    <div class="stat-value">${fmtNum(value)}</div>
+    <div class="stat-value">${esc(shown)}</div>
     <div class="stat-note"${tone ? ` data-tone="${tone}"` : ''}>${esc(note)}</div>
   </div>`;
 }
@@ -837,6 +931,12 @@ function renderSettings() {
                 aria-label="${p.active ? 'Desativar' : 'Reativar'} ${esc(p.name)}">${p.active ? '◉' : '○'}</button>
         <button class="iconbtn" type="button" data-action="remove" data-danger="1"
                 title="Remover" aria-label="Remover ${esc(p.name)}">✕</button>
+        <select class="person-fixed" data-action="fixed" data-set="${p.fixedDay ? 1 : 0}"
+                title="Dia fixo" aria-label="Dia fixo de ${esc(p.name)}">
+          <option value=""${p.fixedDay == null ? ' selected' : ''}>fixo: —</option>
+          ${[1, 2, 3, 4, 5].map((d) =>
+            `<option value="${d}"${p.fixedDay === d ? ' selected' : ''}>${DAY_SHORT[d]}</option>`).join('')}
+        </select>
       </li>`,
         )
         .join('')
@@ -1179,8 +1279,27 @@ function wireEvents() {
   });
 
   $('#peopleList').addEventListener('change', (e) => {
+    const id = Number(e.target.closest('[data-person]')?.dataset.person);
+    if (!id) return;
+
+    if (e.target.dataset.action === 'fixed') {
+      const escolha = e.target.value;
+      run(async () => {
+        try {
+          await post('/people', { id, fixedDay: escolha === '' ? null : Number(escolha) }, 'PATCH');
+        } catch (err) {
+          renderSettings();   // devolve o select ao valor que o servidor aceita
+          throw err;
+        }
+        await loadWeek(state.week);
+        toast(escolha === ''
+          ? 'Dia fixo removido.'
+          : `Dia fixo: ${DAY_NAMES[Number(escolha)].toLowerCase()}-feira.`);
+      });
+      return;
+    }
+
     if (e.target.tagName !== 'INPUT') return;
-    const id = Number(e.target.closest('[data-person]').dataset.person);
     const name = e.target.value;
     run(async () => {
       await post('/people', { id, name }, 'PATCH');

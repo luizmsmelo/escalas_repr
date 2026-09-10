@@ -359,6 +359,85 @@ ok((await call('POST', 'preferences',
    { monday: curta, personId: ids['Luiz Melo'], choices: [1, 2, 3] })).status === 200,
    'semana de 14/12 é normal e aceita 3 dias');
 
+console.log('\n=== dia fixo ===');
+// Maio/2026 tem 04, 11 e 18 como segundas cheias - nenhum feriado no meio.
+const FIXA = '2026-05-04';
+const fx = await call('PATCH', 'people', { id: ids['Luiz Melo'], fixedDay: 3 });
+ok(fx.status === 200 && fx.json.person.fixedDay === 3, `dia fixo gravado: ${JSON.stringify(fx.json)}`);
+
+let stF = (await call('GET', `state?week=${FIXA}`)).json;
+ok(stF.people.find((p) => p.id === ids['Luiz Melo']).fixedDay === 3, 'dia fixo volta no estado');
+ok(!stF.stats.fridayQueue.some((q) => q.personId === ids['Luiz Melo']),
+   'quem tem dia fixo sai da fila da sexta');
+ok(stF.stats.fridayQueue.length === 7, `fila cai de 8 para 7 (${stF.stats.fridayQueue.length})`);
+
+// A quarta tem 2 vagas: cabe mais um fixo, mas nao um terceiro.
+ok((await call('PATCH', 'people', { id: ids['Ana Souza'], fixedDay: 3 })).status === 200,
+   'segunda pessoa fixa na quarta cabe');
+const terceiro = await call('PATCH', 'people', { id: ids['Bruno Lima'], fixedDay: 3 });
+ok(terceiro.status === 400, 'terceira pessoa na quarta e recusada');
+ok(/2 vagas e ja tem 2 pessoas fixas/.test(terceiro.json.error),
+   `o aviso diz a conta, sem "(s)": ${terceiro.json.error}`);
+console.log(`  ${terceiro.json.error}`);
+ok((await call('PATCH', 'people', { id: ids['Bruno Lima'], fixedDay: 9 })).status === 400,
+   'rejeita dia fora de segunda a sexta');
+
+// Quem tem dia fixo salva sem escolher nada; o resto escolhe como sempre.
+ok((await call('POST', 'preferences',
+   { monday: FIXA, personId: ids['Luiz Melo'], choices: [] })).status === 200,
+   'fixo salva preferencia vazia');
+for (const [i, n] of NOMES.entries()) {
+  if (!ids[n] || n === 'Luiz Melo' || n === 'Ana Souza') continue;
+  await call('POST', 'preferences', { monday: FIXA, personId: ids[n], choices: TOP3[i] });
+}
+
+const gF = (await call('POST', 'generate', { monday: FIXA })).json;
+const dele = gF.assignments.filter((a) => a.personId === ids['Luiz Melo']);
+ok(dele.length === 1 && dele[0].day === 3, `Luiz so na quarta (dias: ${dele.map((a) => a.day)})`);
+ok(dele[0].via === 'fixo', `marcado como dia fixo (via=${dele[0].via})`);
+ok(gF.assignments.filter((a) => a.day === 3).length === 2, 'a quarta ficou com os dois fixos');
+ok(![ids['Luiz Melo'], ids['Ana Souza']].includes(sexta(gF).personId),
+   `nenhum fixo pegou a sexta (levou ${sexta(gF).name})`);
+ok(!gF.generation.missingPreferences.includes('Ana Souza'),
+   'fixo sem preferencia nao e cobrado por isso');
+ok(gF.generation.fixed.placed.length === 2, 'os 2 fixos sao reportados');
+console.log(`  quarta: ${gF.assignments.filter((a) => a.day === 3).map((a) => a.name).join(' e ')}`);
+
+console.log('\n=== dia fixo em semana sem aquele dia ===');
+const FECHADA = '2026-05-11';
+await call('POST', 'day', { date: '2026-05-13', works: false, note: 'Recesso do órgão' });
+// Vagas de sobra para as 8 pessoas, para o teste medir a regra e nao a lotacao.
+await call('POST', 'capacity', { monday: FECHADA, capWeekday: 3, capFriday: 1 });
+
+const semDia = await call('POST', 'preferences',
+  { monday: FECHADA, personId: ids['Luiz Melo'], choices: [] });
+ok(semDia.status === 400, 'sem o dia fixo, escolher volta a ser obrigatorio');
+console.log(`  ${semDia.json.error}`);
+for (const n of NOMES) {
+  if (!ids[n]) continue;
+  await call('POST', 'preferences', { monday: FECHADA, personId: ids[n], choices: [1, 2, 4] });
+}
+
+const gFe = (await call('POST', 'generate', { monday: FECHADA })).json;
+ok(gFe.generation.fixed.placed.length === 0, 'ninguem fixado num dia sem expediente');
+ok(gFe.generation.fixed.spill.some(
+     (f) => f.personId === ids['Luiz Melo'] && f.reason === 'sem-expediente'),
+   'o app avisa que o dia fixo nao existia nesta semana');
+ok(!gFe.assignments.some((a) => a.day === 3), 'ninguem na quarta fechada');
+ok(gFe.assignments.some((a) => a.personId === ids['Luiz Melo'] && a.via !== 'fixo'),
+   'e o fixo entra pela preferencia, como todo mundo');
+ok(![ids['Luiz Melo'], ids['Ana Souza']].includes(sexta(gFe).personId),
+   `mas segue fora da FILA da sexta (levou ${sexta(gFe).name})`);
+
+// Tirar o dia fixo devolve a pessoa a fila.
+ok((await call('PATCH', 'people', { id: ids['Luiz Melo'], fixedDay: null })).status === 200,
+   'dia fixo removido');
+await call('PATCH', 'people', { id: ids['Ana Souza'], fixedDay: null });
+await call('POST', 'day', { date: '2026-05-13', works: true });
+const volta = (await call('GET', `state?week=${FIXA}`)).json;
+ok(volta.people.find((p) => p.id === ids['Luiz Melo']).fixedDay === null, 'sem dia fixo de novo');
+ok(volta.stats.fridayQueue.length === 8, `fila volta a ter 8 (${volta.stats.fridayQueue.length})`);
+
 console.log('\n=== rotas invalidas ===');
 ok((await call('GET', 'inexistente')).status === 404, '404 em rota desconhecida');
 ok((await call('GET', 'state?week=2026-02-30')).status === 400, 'rejeita data inexistente');

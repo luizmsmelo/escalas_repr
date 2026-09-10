@@ -39,9 +39,10 @@ ok(mar.closed.length === 0, 'mar/2026 não tem dia fechado');
 ok(dayStatus('2026-12-25').works === false, '25/12 é feriado');
 ok(dayStatus('2026-02-16').works === false, '16/02 é Carnaval');
 ok(dayStatus('2026-03-10').works === true, '10/03 é dia normal');
+// `overrides` chega no formato que loadOverrides() monta: { works, note }.
 ok(dayStatus('2026-02-16', { '2026-02-16': { works: true } }).works === true,
    'exceção manual devolve o expediente a um facultativo');
-ok(dayStatus('2026-03-10', { '2026-03-10': { works: false } }).works === false,
+ok(dayStatus('2026-03-10', { '2026-03-10': { works: false, note: 'Recesso do órgão' } }).works === false,
    'exceção manual tira o expediente de um dia comum');
 
 // Ano sem calendário carregado: assume expediente normal, mas sinaliza.
@@ -140,6 +141,98 @@ console.log('\n--- fase 2: segunda a quinta ---');
   ok(Math.max(...Object.values(cont)) === 2, 'ninguem com mais de 2 dias');
   ok(cont[sexta(r).name] === 1, 'quem pegou a sexta nao dobrou');
   console.log(`  dias por pessoa: ${JSON.stringify(cont)}`);
+}
+
+console.log('\n--- fase 0: dia fixo ---');
+{
+  // Quem tem dia fixo cai nele, sem passar por preferencia nenhuma.
+  const povo = NOMES.map((_, i) => mk(i, i === 0 ? { fixedDay: 3 } : {}));
+  const r = solveWeek(povo, CAP);
+  const dele = r.assignments.filter((a) => a.name === 'Luiz');
+  ok(dele.length === 1 && dele[0].day === 3, `fixo na quarta (dias: ${dele.map((a) => a.day)})`);
+  ok(dele[0].via === 'fixo', 'marcado como dia fixo');
+  ok(r.summary.fixedDay === 1, `contabilizado a parte no resumo (${r.summary.fixedDay})`);
+  ok(r.assignments.length === 9, `as 9 vagas continuam preenchidas (${r.assignments.length})`);
+  const soma = r.summary.fixedDay + r.summary.firstChoice + r.summary.secondChoice
+    + r.summary.thirdChoice + r.summary.automaticFriday + r.summary.outsidePreferences;
+  ok(soma === r.summary.filled, `o resumo fecha com as vagas (${soma} de ${r.summary.filled})`);
+}
+{
+  // Dia fixo que a pessoa nunca pediu no top 3 nao pode ser lido como "fora das
+  // opcoes pedidas" - a tela acusaria um problema onde nao ha nenhum.
+  const r = solveWeek([mk(0, { fixedDay: 1, choices: [2, 3, 4] })],
+                      { 1: 1, 2: 0, 3: 0, 4: 0, 5: 0 });
+  ok(r.summary.fixedDay === 1 && r.summary.outsidePreferences === 0,
+     `fixo=${r.summary.fixedDay}, fora=${r.summary.outsidePreferences}`);
+}
+{
+  // Dia fixo tira da fila da sexta - mesmo sendo quem tem menos sextas.
+  const povo = NOMES.map((_, i) =>
+    i === 0 ? mk(i, { fixedDay: 1, fridayCount: 0 }) : mk(i, { fridayCount: 10 }));
+  const r = solveWeek(povo, CAP);
+  ok(sexta(r).name !== 'Luiz', `quem tem dia fixo nao entra na fila (levou ${sexta(r).name})`);
+  ok(!r.friday.queue.some((q) => q.name === 'Luiz'), 'e nem aparece nela');
+}
+{
+  // Fixo na sexta: leva a sexta e ninguem mais disputa.
+  const povo = NOMES.map((_, i) => mk(i, i === 0 ? { fixedDay: FRIDAY } : {}));
+  const r = solveWeek(povo, CAP);
+  ok(sexta(r).name === 'Luiz', `fixo na sexta leva a sexta (${sexta(r).name})`);
+  ok(sexta(r).via === 'fixo', 'via fixo, nao pela fila');
+  ok(r.friday.queue.every((q) => q.name !== 'Luiz'), 'fora da fila mesmo fixo na sexta');
+}
+{
+  // Mais fixos que vagas: quem nao coube volta a disputar como todo mundo.
+  const povo = NOMES.map((_, i) => mk(i, i < 3 ? { fixedDay: 1 } : {}));
+  const r = solveWeek(povo, CAP);
+  ok(r.fixed.placed.length === 2, `so 2 cabem na segunda (${r.fixed.placed.length})`);
+  ok(r.fixed.spill.length === 1 && r.fixed.spill[0].name === 'Bruno',
+     `o terceiro sobra (${r.fixed.spill.map((f) => f.name)})`);
+  ok(r.fixed.spill[0].reason === 'sem-vaga', 'motivo: nao havia vaga livre');
+  ok(r.assignments.some((a) => a.name === 'Bruno' && a.via !== 'fixo'),
+     'e entra pela preferencia');
+  ok(r.assignments.filter((a) => a.day === 1).length === 2, 'a segunda nao estoura a capacidade');
+}
+{
+  // Dia fixo em feriado: a pessoa escolhe como todo mundo naquela semana.
+  const SEM_QUARTA = { 1: 2, 2: 2, 3: 0, 4: 2, 5: 1 };
+  const povo = NOMES.map((_, i) =>
+    i === 0 ? mk(i, { fixedDay: 3, choices: [1, 2, 4], fridayCount: 0 })
+            : mk(i, { fridayCount: 10 }));
+  const r = solveWeek(povo, SEM_QUARTA);
+  ok(r.fixed.placed.length === 0, 'ninguem fixado num dia sem expediente');
+  ok(r.fixed.spill[0]?.reason === 'sem-expediente', `motivo: ${r.fixed.spill[0]?.reason}`);
+  ok(!r.assignments.some((a) => a.day === 3), 'ninguem na quarta fechada');
+  ok(sexta(r).name !== 'Luiz',
+     `mesmo sem o dia fixo, ele segue fora da FILA da sexta (levou ${sexta(r).name})`);
+}
+{
+  // ... mas pode se voluntariar para a sexta, como qualquer um.
+  const SEM_QUARTA = { 1: 2, 2: 2, 3: 0, 4: 2, 5: 1 };
+  const povo = NOMES.map((_, i) =>
+    i === 0 ? mk(i, { fixedDay: 3, choices: [FRIDAY, 1, 2] }) : mk(i));
+  const r = solveWeek(povo, SEM_QUARTA);
+  ok(sexta(r).name === 'Luiz', `voluntario com dia fixo leva a sexta (${sexta(r).name})`);
+  ok(sexta(r).via === 'voluntario', 'marcado como voluntario');
+}
+{
+  // Menos gente que vagas: quem tem dia fixo pode dobrar, mas nunca no MESMO
+  // dia - duas linhas na mesma data quebrariam a chave da tabela de escalas.
+  const povo = NOMES.slice(0, 7).map((_, i) => mk(i, i === 0 ? { fixedDay: 1 } : {}));
+  const r = solveWeek(povo, CAP);
+  const chaves = r.assignments.map((a) => `${a.personId}-${a.day}`);
+  ok(new Set(chaves).size === chaves.length, 'ninguem aparece duas vezes no mesmo dia');
+  ok(r.assignments.length === 9, `9 vagas com 7 pessoas (${r.assignments.length})`);
+  ok(r.assignments.some((a) => a.name === 'Luiz' && a.day === 1 && a.via === 'fixo'),
+     'o fixo continua na segunda');
+}
+{
+  // Determinismo: a ordem de entrada nao muda nada.
+  const povo = NOMES.map((_, i) => mk(i, i < 3 ? { fixedDay: (i % 2) + 1 } : {}));
+  const a = solveWeek(povo, CAP);
+  const b = solveWeek([...povo].reverse(), CAP);
+  ok(JSON.stringify(a.assignments) === JSON.stringify(b.assignments),
+     'mesma entrada, mesma escala');
 }
 
 console.log('\n--- casos limite ---');

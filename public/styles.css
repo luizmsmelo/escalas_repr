@@ -815,3 +815,57 @@ body.is-busy { cursor: progress; }
   font-size: .82rem; color: var(--text-secondary);
   padding: 0 2px 2px;
 }
+
+/* ------------------------------------------------------------- dia fixo --- */
+/* Quem tem dia fixo nao escolhe preferencia: esta caixa ocupa o lugar do
+   seletor de dias e explica por que ele sumiu. */
+.fixedbox {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+}
+.fixedbox[data-state="fechado"] { border-left-color: var(--warn); }
+.fixedbox-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 10px; margin-bottom: 4px;
+}
+.fixedbox-title {
+  font-size: .72rem; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.fixedbox-day {
+  font-size: .82rem; font-weight: 650; color: var(--accent);
+  white-space: nowrap;
+}
+
+.chip[data-state="fixed"] { border-color: var(--accent); color: var(--text-primary); }
+.chip[data-state="fixed"] .chip-dot { background: var(--accent); }
+
+.slot-rank[data-rank="fixo"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+/* O seletor fica na mesma linha do nome. Com 9 pessoas, uma segunda linha por
+   pessoa viraria uma parede de "sem dia fixo" numa tela de celular. Em telas
+   muito estreitas o flex-wrap deixa ele cair sozinho para a linha de baixo. */
+.person-row { flex-wrap: wrap; }
+.person-row input { flex: 1 1 100px; }
+.person-fixed {
+  flex: none;
+  padding: 7px 2px 7px 6px;
+  background: var(--surface-1);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: .78rem;
+}
+.person-fixed[data-set="1"] {
+  color: var(--accent); font-weight: 650;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.person-fixed:focus { border-color: var(--accent); outline: none; }

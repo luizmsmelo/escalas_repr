@@ -54,6 +54,10 @@ export const SCHEMA = [
      updated_at timestamptz not null default now()
    )`,
 
+  // Dia fixo da semana: a pessoa fica sempre nesse dia (1=seg .. 5=sex) e sai do
+  // rodizio de preferencia. NULL = participa normalmente, como todo mundo.
+  `alter table people add column if not exists fixed_day int`,
+
   // Configuracoes gerais. Guarda, por ora, a data do ultimo zeramento dos
   // contadores - eles nunca zeram sozinhos.
   `create table if not exists settings (

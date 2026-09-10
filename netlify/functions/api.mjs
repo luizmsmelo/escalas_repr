@@ -95,7 +95,7 @@ async function getState(weekParam) {
     : nextMonday();
 
   const [people, week, prefs, overrides, assignments] = await Promise.all([
-    sql`select id, name, active from people`.then(byName),
+    loadPeople(),
     ensureWeek(monday),
     sql`select person_id, choice1, choice2, choice3, unavailable, no_friday
           from preferences where monday = ${monday}`,
@@ -149,11 +149,11 @@ async function createPerson({ name }) {
 
   const [person] = await sql`
     insert into people (name) values (${clean})
-    returning id, name, active`;
-  return { person };
+    returning id, name, active, fixed_day`;
+  return { person: toPerson(person) };
 }
 
-async function updatePerson({ id, name, active }) {
+async function updatePerson({ id, name, active, fixedDay }) {
   const personId = requireId(id);
   if (name !== undefined) {
     const clean = String(name).trim().replace(/\s+/g, ' ');
@@ -166,10 +166,15 @@ async function updatePerson({ id, name, active }) {
   if (active !== undefined) {
     await sql`update people set active = ${!!active} where id = ${personId}`;
   }
+  if (fixedDay !== undefined) {
+    const dia = parseFixedDay(fixedDay);
+    if (dia !== null) await assertFixedDayFits(personId, dia);
+    await sql`update people set fixed_day = ${dia} where id = ${personId}`;
+  }
   const [person] = await sql`
-    select id, name, active from people where id = ${personId}`;
+    select id, name, active, fixed_day from people where id = ${personId}`;
   if (!person) throw new HttpError(404, 'Pessoa nao encontrada.');
-  return { person };
+  return { person: toPerson(person) };
 }
 
 async function deletePerson(idParam) {
@@ -185,7 +190,7 @@ async function savePreferences({ monday, personId, choices, unavailable, noFrida
   const id = requireId(personId);
   await assertOpen(week);
 
-  const [person] = await sql`select id from people where id = ${id}`;
+  const [person] = await sql`select id, fixed_day from people where id = ${id}`;
   if (!person) throw new HttpError(404, 'Pessoa nao encontrada.');
 
   const away = !!unavailable;
@@ -198,17 +203,28 @@ async function savePreferences({ monday, personId, choices, unavailable, noFrida
     const abertos = weekDayStatus(week, overrides).filter((d) => d.works);
     const exigidos = Math.min(3, abertos.length);
 
+    // Quem tem dia fixo COM expediente nesta semana ja tem a vaga reservada e
+    // nao precisa escolher nada. Se o dia fixo cair num feriado, ela escolhe
+    // como todo mundo - por isso a dispensa e avaliada semana a semana.
+    const fixoVale = person.fixed_day != null
+      && abertos.some((d) => d.day === person.fixed_day);
+
     const list = Array.isArray(choices) ? choices.map(Number) : [];
-    if (list.length !== exigidos) {
-      throw bad(exigidos === 3
-        ? 'Escolha exatamente 3 dias, em ordem de preferencia.'
-        : `Esta semana so tem ${abertos.length} dia(s) com expediente: escolha ${exigidos}.`);
+    if (list.length !== exigidos && !(fixoVale && list.length === 0)) {
+      throw bad(fixoVale
+        ? `Voce fica sempre na ${DAY_NAMES[person.fixed_day].toLowerCase()}-feira: `
+          + `salve sem escolher dia, ou escolha ${exigidos}.`
+        : exigidos === 3
+          ? 'Escolha exatamente 3 dias, em ordem de preferencia.'
+          : `Esta semana so tem ${abertos.length} dia(s) com expediente: escolha ${exigidos}.`);
     }
-    if (list.some((d) => !DAYS.includes(d))) throw bad('Dia invalido: use de segunda a sexta.');
-    if (new Set(list).size !== exigidos) throw bad('Os dias precisam ser diferentes entre si.');
-    const fechado = list.find((d) => !abertos.some((a) => a.day === d));
-    if (fechado) throw bad('Um dos dias escolhidos nao tem expediente nesta semana.');
-    picks = list;
+    if (list.length) {
+      if (list.some((d) => !DAYS.includes(d))) throw bad('Dia invalido: use de segunda a sexta.');
+      if (new Set(list).size !== list.length) throw bad('Os dias precisam ser diferentes entre si.');
+      const fechado = list.find((d) => !abertos.some((a) => a.day === d));
+      if (fechado) throw bad('Um dos dias escolhidos nao tem expediente nesta semana.');
+      picks = list;
+    }
     // Pedir sexta e vetar sexta na mesma semana e contraditorio; a tela nem
     // oferece as duas coisas juntas, mas a API nao pode aceitar o estado misto.
     if (veto && list.includes(FRIDAY)) {
@@ -238,7 +254,7 @@ async function generate({ monday }) {
   const cfg = await ensureWeek(week);
 
   const rows = await sql`
-    select p.id, p.name,
+    select p.id, p.name, p.fixed_day,
            pr.choice1, pr.choice2, pr.choice3,
            coalesce(pr.unavailable, false) as unavailable,
            coalesce(pr.no_friday, false)   as no_friday
@@ -262,6 +278,7 @@ async function generate({ monday }) {
     name: r.name,
     choices: [r.choice1, r.choice2, r.choice3].filter((d) => d != null),
     noFriday: r.no_friday,
+    fixedDay: r.fixed_day ?? null,
     totalCount: history.get(r.id)?.total ?? 0,
     fridayCount: history.get(r.id)?.fridays ?? 0,
   }));
@@ -300,11 +317,15 @@ async function generate({ monday }) {
     generation: {
       ...result.summary,
       unfilledSlots: result.unfilledSlots,
+      // Quem ja tem a vaga garantida pelo dia fixo nao esta "sem preferencia":
+      // nao ha nada que ele devesse ter respondido.
       missingPreferences: rows
-        .filter((r) => !r.unavailable && r.choice1 == null)
+        .filter((r) => !r.unavailable && r.choice1 == null
+          && !result.fixed.placed.some((f) => f.personId === r.id))
         .map((r) => r.name),
       awayCount: rows.length - participants.length,
       friday: result.friday,
+      fixed: result.fixed,
       closedDays: fechados.map((d) => ({
         day: d.day, date: d.date, name: d.holiday?.name ?? 'Sem expediente',
         label: d.holiday?.label ?? 'Sem expediente',
@@ -423,7 +444,7 @@ async function getStats(monthParam) {
 async function computeStats(ym, overrides) {
   const excecoes = overrides ?? (await loadOverrides());
   const [people, rows, weekRows, allTime, resetAt] = await Promise.all([
-    sql`select id, name, active from people`.then(byName),
+    loadPeople(),
     sql`select person_id, day, work_date from assignments
          where to_char(work_date, 'YYYY-MM') = ${ym}`,
     sql`select cap_weekday, cap_friday from weeks
@@ -534,9 +555,14 @@ async function resetCounters({ undo } = {}) {
   return { ok: true, since: hoje };
 }
 
-/** A fila da sexta como ela sera avaliada na proxima geracao. */
+/**
+ * A fila da sexta como ela sera avaliada na proxima geracao. Quem tem dia fixo
+ * fica de fora: a vaga dele ja esta reservada em outro dia, e o contador de
+ * sextas dele nao anda - deixa-lo na fila o poria eternamente em primeiro.
+ */
 function buildFridayQueue(people, counts) {
   return people
+    .filter((p) => p.fixedDay == null)
     .map((p) => ({
       personId: p.id,
       name: p.name,
@@ -601,6 +627,47 @@ function weekDayStatus(monday, overrides) {
 // uma collation ICU especifica estar disponivel no Postgres.
 const collator = new Intl.Collator('pt-BR', { sensitivity: 'base' });
 const byName = (rows) => rows.sort((a, b) => collator.compare(a.name, b.name));
+
+const toPerson = (r) => ({
+  id: r.id, name: r.name, active: r.active, fixedDay: r.fixed_day ?? null,
+});
+
+const loadPeople = () =>
+  sql`select id, name, active, fixed_day from people`.then((rows) => byName(rows.map(toPerson)));
+
+/** Dia fixo vindo da tela: '' e 0 significam "sem dia fixo". */
+function parseFixedDay(value) {
+  if (value === null || value === undefined || value === '' || value === 0) return null;
+  const day = Number(value);
+  if (!DAYS.includes(day)) throw bad('Dia fixo invalido: use de segunda a sexta.');
+  return day;
+}
+
+/**
+ * Um dia fixo so vale se houver vaga para ele. Sem esta checagem daria para
+ * fixar tres pessoas na segunda, que tem duas vagas - e a terceira descobriria
+ * o problema so na hora de gerar a escala.
+ *
+ * A referencia e a capacidade da proxima semana, porque a capacidade e por
+ * semana e nao existe um valor "geral" para consultar. E uma barreira de bom
+ * senso no cadastro, nao uma garantia: se uma semana especifica tiver menos
+ * vagas, o solver devolve o excedente a disputa em vez de estourar o dia.
+ */
+async function assertFixedDayFits(personId, day) {
+  const week = await ensureWeek(nextMonday());
+  const vagas = day === FRIDAY ? week.cap_friday : week.cap_weekday;
+  const nome = DAY_NAMES[day].toLowerCase();
+  if (vagas < 1) throw bad(`Nao ha vaga na ${nome}-feira para fixar alguem.`);
+
+  const [{ n }] = await sql`
+    select count(*)::int as n from people
+     where fixed_day = ${day} and active = true and id <> ${personId}`;
+  if (n >= vagas) {
+    throw bad(`A ${nome}-feira tem ${vagas} ${vagas === 1 ? 'vaga' : 'vagas'} e ja tem `
+      + `${n} ${n === 1 ? 'pessoa fixa' : 'pessoas fixas'}. `
+      + 'Tire alguem de la, ou aumente as vagas da semana.');
+  }
+}
 
 async function ensureWeek(monday) {
   const [row] = await sql`

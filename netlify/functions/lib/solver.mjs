@@ -1,4 +1,13 @@
-// Montagem da escala da semana, em duas fases independentes.
+// Montagem da escala da semana, em tres fases independentes.
+//
+// FASE 0 - OS DIAS FIXOS. Quem tem um dia fixo cadastrado fica sempre naquele
+// dia e nao entra em disputa nenhuma: a vaga e reservada antes de tudo, e o que
+// sobra de capacidade e que vai para as outras duas fases. Quem tem dia fixo
+// tambem sai da fila da sexta - senao acumularia sexta sem nunca ter concorrido
+// aos outros dias. Duas situacoes devolvem a pessoa ao fluxo normal da semana:
+// o dia fixo dela cair num feriado, ou haver mais gente fixa naquele dia do que
+// vagas. Nesses casos ela escolhe como todo mundo, mas continua fora da FILA da
+// sexta (pode se voluntariar, se quiser).
 //
 // FASE 1 - A SEXTA. Ninguem escolhe sexta por gosto, entao preferencia nao
 // serve de criterio. Quem leva e quem tem menos sextas no historico - uma fila
@@ -110,19 +119,30 @@ class MinCostFlow {
 
 /**
  * @param {object[]} participants pessoas presentes na semana:
- *   { id, name, choices: [dia,dia,dia], fridayCount, totalCount, noFriday }
+ *   { id, name, choices: [dia,dia,dia], fridayCount, totalCount, noFriday, fixedDay }
  *   fridayCount e totalCount sao GERAIS (historico inteiro).
+ *   fixedDay e 1..5 para quem tem dia fixo, ou null/undefined para todo mundo.
  * @param {object} capacity { 1: 2, 2: 2, 3: 2, 4: 2, 5: 1 }
- * @returns {{ assignments, unfilledSlots, friday, summary }}
+ * @returns {{ assignments, unfilledSlots, fixed, friday, summary }}
  */
 export function solveWeek(participants, capacity) {
   const people = [...participants].sort((a, b) => a.id - b.id); // determinismo
-  const friday = pickFriday(people, capacity[FRIDAY] ?? 0);
-  const busy = new Set(friday.picked.map((p) => p.person.id));
 
-  const weekdays = solveWeekdays(people, capacity, busy);
+  const fixed = placeFixed(people, capacity);
+  // As fases seguintes so enxergam o que sobrou de vaga depois dos fixos.
+  const left = { ...capacity };
+  for (const a of fixed.placed) left[a.day]--;
+
+  const disputantes = people.filter((p) => !fixed.taken.has(p.id));
+  const friday = pickFriday(disputantes, left[FRIDAY] ?? 0);
+
+  // Quem ja tem vaga - por dia fixo ou pela sexta - so recebe um segundo dia se
+  // nao houver outro jeito de fechar a escala.
+  const busy = new Set([...fixed.taken, ...friday.picked.map((p) => p.person.id)]);
+  const weekdays = solveWeekdays(people, left, busy, fixed.dayOf);
 
   const assignments = [
+    ...fixed.placed,
     ...weekdays.assignments,
     ...friday.picked.map(({ person, via }) => ({
       personId: person.id,
@@ -140,6 +160,11 @@ export function solveWeek(participants, capacity) {
   return {
     assignments,
     unfilledSlots,
+    fixed: {
+      placed: fixed.placed.map((a) => ({ personId: a.personId, name: a.name, day: a.day })),
+      // Fixos que nao couberam nesta semana e voltaram a disputar como todo mundo.
+      spill: fixed.spill,
+    },
     friday: {
       picked: friday.picked.map(({ person, via }) => ({
         personId: person.id, name: person.name, via, fridayCount: person.fridayCount ?? 0,
@@ -148,10 +173,51 @@ export function solveWeek(participants, capacity) {
       queue: friday.queue.map((p) => ({
         personId: p.id, name: p.name, fridayCount: p.fridayCount ?? 0,
       })),
-      allVetoed: friday.unfilled.length > 0 && friday.candidates === 0,
+      // Vaga vazia por falta de candidato so e "todo mundo recusou" se alguem
+      // de fato recusou - com o grupo inteiro fixo em outros dias, tambem nao
+      // sobra candidato, e a explicacao e outra.
+      allVetoed: friday.unfilled.length > 0 && friday.candidates === 0
+        && people.some((p) => p.noFriday),
     },
     summary: buildSummary(assignments, capacity),
   };
+}
+
+/* ------------------------------------------------------------------ fase 0 */
+
+/**
+ * Reserva a vaga de quem tem dia fixo, antes de qualquer disputa. Se o dia fixo
+ * nao tem vaga nesta semana - feriado, ou mais gente fixa ali do que cabe - a
+ * pessoa vira `spill` e volta ao fluxo normal, para nao ficar sem escala.
+ */
+function placeFixed(people, capacity) {
+  const placed = [];
+  const taken = new Set();
+  const dayOf = new Map();   // pessoa -> dia ja reservado, para nao repetir
+  const spill = [];
+
+  for (const day of DAYS) {
+    const vagas = capacity[day] || 0;
+    // `people` ja vem ordenado por id: com mais fixos que vagas, quem cadastrou
+    // antes fica com o dia, e o resultado nao muda de uma geracao para a outra.
+    const fixos = people.filter((p) => p.fixedDay === day);
+    fixos.forEach((person, i) => {
+      if (i < vagas) {
+        placed.push({
+          personId: person.id, name: person.name, day, rank: null, via: 'fixo',
+        });
+        taken.add(person.id);
+        dayOf.set(person.id, day);
+      } else {
+        spill.push({
+          personId: person.id, name: person.name, day,
+          reason: vagas === 0 ? 'sem-expediente' : 'sem-vaga',
+        });
+      }
+    });
+  }
+
+  return { placed, taken, dayOf, spill };
 }
 
 /* ------------------------------------------------------------------ fase 1 */
@@ -159,15 +225,19 @@ export function solveWeek(participants, capacity) {
 function pickFriday(people, slots) {
   const candidates = people.filter((p) => !p.noFriday);
 
-  // Quem pediu sexta explicitamente: melhor posicao primeiro.
+  // Quem pediu sexta explicitamente: melhor posicao primeiro. Vale tambem para
+  // quem tem dia fixo mas ficou de fora nesta semana - voluntariar-se e um ato,
+  // nao um automatismo.
   const volunteers = candidates
     .filter((p) => rankOf(p, FRIDAY) !== null)
     .sort((a, b) =>
       rankOf(a, FRIDAY) - rankOf(b, FRIDAY) || byQueue(a, b));
 
-  // O resto: fila pelo contador geral de sextas.
+  // O resto: fila pelo contador geral de sextas. Quem tem dia fixo nunca entra
+  // aqui - o contador de sextas dele nao anda, entao ele seria sempre o
+  // primeiro da fila nas semanas em que o dia fixo cai em feriado.
   const queue = candidates
-    .filter((p) => rankOf(p, FRIDAY) === null)
+    .filter((p) => rankOf(p, FRIDAY) === null && p.fixedDay == null)
     .sort(byQueue);
 
   const ordered = [
@@ -179,7 +249,7 @@ function pickFriday(people, slots) {
   return {
     picked,
     queue,
-    candidates: candidates.length,
+    candidates: ordered.length,
     unfilled: Array(Math.max(0, slots - picked.length)).fill(FRIDAY),
   };
 }
@@ -193,7 +263,7 @@ function byQueue(a, b) {
 
 /* ------------------------------------------------------------------ fase 2 */
 
-function solveWeekdays(people, capacity, busy) {
+function solveWeekdays(people, capacity, busy, fixedOn = new Map()) {
   const slots = WEEKDAYS.reduce((sum, d) => sum + (capacity[d] || 0), 0);
   const P = people.length;
   if (P === 0 || slots === 0) {
@@ -221,6 +291,9 @@ function solveWeekdays(people, capacity, busy) {
     }
     for (const d of WEEKDAYS) {
       if (!capacity[d]) continue;
+      // Ja reservado neste dia pela fase 0: uma segunda aresta para o mesmo dia
+      // colocaria a pessoa duas vezes na mesma data.
+      if (fixedOn.get(people[i].id) === d) continue;
       graph.addEdge(personNode(i), dayNode(d), 1, weekdayCost(people[i], d));
     }
   }
@@ -269,7 +342,13 @@ function weekdayCost(person, day) {
 
 function buildSummary(assignments, capacity) {
   const byRank = { 1: 0, 2: 0, 3: 0, 4: 0, none: 0 };
-  for (const a of assignments) byRank[a.rank ?? 'none']++;
+  let fixedDay = 0;
+  for (const a of assignments) {
+    // Dia fixo nao tem posicao de preferencia: contar como "fora das opcoes
+    // pedidas" faria a tela acusar um problema onde nao ha nenhum.
+    if (a.via === 'fixo') fixedDay++;
+    else byRank[a.rank ?? 'none']++;
+  }
   return {
     totalSlots: DAYS.reduce((sum, d) => sum + (capacity[d] || 0), 0),
     filled: assignments.length,
@@ -277,6 +356,7 @@ function buildSummary(assignments, capacity) {
     secondChoice: byRank[2],
     thirdChoice: byRank[3],
     automaticFriday: byRank[4],
+    fixedDay,
     outsidePreferences: byRank.none,
   };
 }

@@ -2,7 +2,8 @@
 
 Nove colegas escolhem, semana a semana, em que dia ficam até as 18h. Cada um
 marca três dias em ordem de preferência; o app resolve os conflitos e mantém os
-contadores.
+contadores. Quem preferir sempre o mesmo dia pode ter um **dia fixo** e sair da
+escolha semanal.
 
 **Vagas por semana:** 2 pessoas de segunda a quinta, 1 pessoa na sexta. São 9
 vagas para 9 pessoas — cada um fica exatamente um dia por semana, e o que o app
@@ -12,8 +13,40 @@ decide é *qual* dia.
 
 ## Como a escala é montada
 
-A semana é resolvida em duas fases, porque sexta e os outros dias são problemas
-de natureza diferente.
+A semana é resolvida em três fases: primeiro quem tem dia fixo, depois a sexta,
+depois o resto — porque cada um desses é um problema de natureza diferente.
+
+### Fase 0 — os dias fixos
+
+Uma pessoa pode ter um **dia fixo** cadastrado na aba Ajustes: ela fica sempre
+naquele dia da semana. A vaga é reservada antes de qualquer disputa, e o que
+sobra de capacidade é que vai para as duas fases seguintes.
+
+Quem tem dia fixo:
+
+- **não escolhe preferência.** A tela de escolha mostra o dia fixo no lugar do
+  seletor de dias — não há nada a responder, e a pessoa não aparece como
+  "pendente" na lista de quem já respondeu;
+- **fica fora da fila da sexta.** O contador de sextas dela não anda, então
+  mantê-la na fila a deixaria eternamente em primeiro lugar;
+- **continua podendo marcar ausência.** "Não vou participar desta semana" libera
+  a vaga fixa para quem estiver disputando.
+
+Só cabe fixar tanta gente num dia quanto há vaga nele: com 2 vagas de segunda a
+quinta, no máximo duas pessoas por dia; com 1 vaga na sexta, uma pessoa. O app
+recusa o cadastro que estouraria a conta, em vez de deixar o problema aparecer
+só na hora de gerar a escala.
+
+Duas situações devolvem a pessoa ao fluxo normal **naquela semana**:
+
+| situação | o que acontece |
+| --- | --- |
+| o dia fixo cai num feriado | a pessoa escolhe 3 dias, como todo mundo |
+| há mais gente fixa no dia do que vagas | quem cadastrou depois volta a disputar |
+
+Nos dois casos ela **continua fora da fila da sexta**: só pega sexta se se
+voluntariar, colocando sexta no próprio top 3. Senão, ser fixo na segunda viraria
+uma garantia de pegar toda sexta em que a segunda fosse feriado.
 
 ### Fase 1 — a sexta
 
@@ -36,9 +69,9 @@ a mesma escala.
 
 ### Fase 2 — de segunda a quinta
 
-Com a sexta resolvida, sobra um problema puro de preferência. O app procura a
-distribuição que **minimiza o custo total do grupo**, onde o custo de colocar
-alguém num dia é a posição daquele dia na lista dessa pessoa:
+Com os dias fixos e a sexta resolvidos, sobra um problema puro de preferência.
+O app procura a distribuição que **minimiza o custo total do grupo**, onde o
+custo de colocar alguém num dia é a posição daquele dia na lista dessa pessoa:
 
 | situação | custo |
 | --- | --- |
