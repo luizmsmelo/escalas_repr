@@ -18,15 +18,26 @@
 //   * quem apertou "nao posso esta sexta" sai da conta por completo. E um veto,
 //     nao uma preferencia: se todos vetarem, a vaga fica vazia e a tela avisa.
 //
-// FASE 2 - SEGUNDA A QUINTA. Com a sexta ja resolvida, sobra um problema puro
-// de preferencia entre as pessoas restantes. Resolvido por fluxo de custo
-// minimo: cada vaga e uma unidade de fluxo que passa por uma pessoa e um dia, e
-// o custo de cada aresta e a posicao daquele dia na lista da pessoa. Minimizar
-// o custo total = deixar o grupo INTEIRO o mais perto possivel da 1a opcao.
+// FASE 2 - SEGUNDA A QUINTA. Com a sexta ja resolvida, sobram duas perguntas de
+// natureza diferente, e cada uma tem o seu criterio:
+//   * QUEM e escalado nesta semana - decide o contador de escalas acumuladas,
+//     igual a fila da sexta. So importa quando ha mais gente do que vagas, que
+//     e quando alguem fica de fora;
+//   * EM QUAL DIA essa pessoa cai - decide a preferencia dela.
+// Nessa ordem, e estrita: preferencia e um criterio ESTAVEL, entao deixa-la
+// decidir quem entra faz quem gosta do dia mais disputado perder toda semana e
+// quem gosta do dia mais vazio entrar toda semana. O contador nunca fecharia o
+// rodizio, e a diferenca entre o maior e o menor so cresceria.
 //
-// O contador que alimenta a fila da sexta e GERAL, nao mensal. O mes tem 4 ou 5
-// sextas para 9 pessoas: um contador que zera todo mes nunca fecha o rodizio, e
-// a mesma metade do grupo acaba pegando todas.
+// Resolvido por fluxo de custo minimo: cada vaga e uma unidade de fluxo que
+// passa por uma pessoa e um dia. O custo de sair da origem e o historico da
+// pessoa; o de chegar num dia e a posicao daquele dia na lista dela. Minimizar
+// o custo total = rodizio fechado, e dentro dele o grupo INTEIRO o mais perto
+// possivel da 1a opcao.
+//
+// Os dois contadores sao GERAIS, nao mensais. O mes tem 4 ou 5 sextas para 9
+// pessoas: um contador que zera todo mes nunca fecha o rodizio, e a mesma
+// metade do grupo acaba pegando todas.
 
 export const DAYS = [1, 2, 3, 4, 5];
 export const WEEKDAYS = [1, 2, 3, 4];
@@ -35,11 +46,11 @@ export const DAY_NAMES = {
   1: 'Segunda', 2: 'Terça', 3: 'Quarta', 4: 'Quinta', 5: 'Sexta',
 };
 
-// Custos da fase 2. A escala x1000 deixa espaco livre abaixo para o desempate.
+// Custo de preferencia da fase 2: so a posicao do dia na lista da pessoa. Os
+// outros dois criterios - historico e dia extra - sao degraus calculados em
+// solveWeekdays, porque dependem de quantas vagas a semana tem.
 const RANK_COST = [0, 1000, 2000];
 const NO_PREFERENCE_COST = 8000;   // dia de seg-qui que a pessoa nao pediu
-const EXTRA_SHIFT_COST = 50000;    // cada dia a mais na mesma semana
-const MAX_TIEBREAK = 999;          // sempre menor que um degrau de preferencia
 
 /** Posicao do dia na lista da pessoa: 1, 2, 3 - ou null se nao foi pedido. */
 export function rankOf(person, day) {
@@ -281,13 +292,31 @@ function solveWeekdays(people, capacity, busy, fixedOn = new Map()) {
 
   const maxPerPerson = Math.max(1, Math.ceil(slots / P));
 
+  // Tres criterios, em ordem ESTRITA de importancia:
+  //   1. quem tem menos escalas acumuladas entra primeiro;
+  //   2. ninguem pega dois dias na mesma semana enquanto alguem no mesmo pe do
+  //      historico ainda nao pegou nenhum;
+  //   3. preferencia.
+  // Cada degrau vale mais do que o degrau de baixo consegue somar na semana
+  // INTEIRA, entao um criterio nunca e trocado pelo outro: o de cima decide, e
+  // o de baixo so escolhe entre escalas que o de cima empatou. E o mesmo
+  // criterio da fila da sexta, agora valendo tambem de segunda a quinta.
+  const EXTRA_SHIFT_COST = slots * NO_PREFERENCE_COST + 1;
+  const HISTORY_COST = slots * maxPerPerson * EXTRA_SHIFT_COST + 1;
+
+  // So a diferenca entre as pessoas importa, nao o tamanho do historico.
+  const floor = Math.min(...people.map((p) => p.totalCount ?? 0));
+
   for (let i = 0; i < P; i++) {
-    // Quem ja pegou a sexta entra na fase 2 como se ja tivesse um dia: a
-    // primeira aresta dele ja custa a penalidade de dia extra, entao so recebe
-    // um segundo dia se nao houver outro jeito de fechar a escala.
+    // Quem ja pegou vaga nesta semana - dia fixo ou sexta - entra na fase 2
+    // como quem ja esta uma escala a frente no historico: so recebe um segundo
+    // dia depois de todo mundo no mesmo pe ter recebido o primeiro.
     const already = busy.has(people[i].id) ? 1 : 0;
+    const ahead = (people[i].totalCount ?? 0) - floor;
     for (let k = 0; k < maxPerPerson; k++) {
-      graph.addEdge(SOURCE, personNode(i), 1, (k + already) * EXTRA_SHIFT_COST);
+      const nth = already + k;   // a n-esima escala desta pessoa nesta semana
+      graph.addEdge(SOURCE, personNode(i), 1,
+        (ahead + nth) * HISTORY_COST + nth * EXTRA_SHIFT_COST);
     }
     for (const d of WEEKDAYS) {
       if (!capacity[d]) continue;
@@ -330,12 +359,11 @@ function solveWeekdays(people, capacity, busy, fixedOn = new Map()) {
   return { assignments, unfilledSlots };
 }
 
+// So a preferencia. O historico da pessoa nao entra aqui: ele decide QUEM e
+// escalado, na aresta que sai da origem, e nao em QUAL dia a pessoa cai.
 function weekdayCost(person, day) {
   const rank = rankOf(person, day);
-  const base = rank === null ? NO_PREFERENCE_COST : RANK_COST[rank - 1];
-  // Desempate: entre escalas empatadas em preferencia, prefere quem tem menos
-  // escalas no historico. Nunca chega a 1000, entao nao troca uma 1a por uma 2a.
-  return base + Math.min(MAX_TIEBREAK, (person.totalCount ?? 0) * 9);
+  return rank === null ? NO_PREFERENCE_COST : RANK_COST[rank - 1];
 }
 
 /* ---------------------------------------------------------------- resumo -- */

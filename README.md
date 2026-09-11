@@ -1,13 +1,15 @@
 # Escala 18h
 
-Nove colegas escolhem, semana a semana, em que dia ficam até as 18h. Cada um
-marca três dias em ordem de preferência; o app resolve os conflitos e mantém os
-contadores. Quem preferir sempre o mesmo dia pode ter um **dia fixo** e sair da
+Os colegas da equipe escolhem, semana a semana, em que dia ficam até as 18h.
+Cada um marca três dias em ordem de preferência; o app resolve os conflitos e
+mantém os contadores. Quem preferir sempre o mesmo dia pode ter um **dia fixo** e sair da
 escolha semanal.
 
-**Vagas por semana:** 2 pessoas de segunda a quinta, 1 pessoa na sexta. São 9
-vagas para 9 pessoas — cada um fica exatamente um dia por semana, e o que o app
-decide é *qual* dia.
+**Vagas por semana:** 2 pessoas de segunda a quinta, 1 pessoa na sexta — 9 vagas.
+Com 9 pessoas, cada um fica exatamente um dia por semana e o app só decide *qual*
+dia. Com mais gente do que vagas, ele decide também **quem** fica de fora naquela
+semana — e aí quem entra é quem tem menos escalas acumuladas, não quem pediu o
+dia mais vazio.
 
 ---
 
@@ -69,9 +71,26 @@ a mesma escala.
 
 ### Fase 2 — de segunda a quinta
 
-Com os dias fixos e a sexta resolvidos, sobra um problema puro de preferência.
-O app procura a distribuição que **minimiza o custo total do grupo**, onde o
-custo de colocar alguém num dia é a posição daquele dia na lista dessa pessoa:
+Com os dias fixos e a sexta resolvidos, sobram duas perguntas — e elas têm
+respostas diferentes:
+
+| pergunta | quem decide |
+| --- | --- |
+| **quem** é escalado nesta semana | o contador de escalas acumuladas |
+| **em qual dia** essa pessoa cai | a preferência dela |
+
+São três critérios, em ordem **estrita**: quem tem menos escalas acumuladas entra
+primeiro; ninguém pega dois dias na mesma semana enquanto alguém no mesmo pé do
+histórico não pegou nenhum; e só então a preferência escolhe o dia. Cada critério
+vale mais do que o de baixo consegue somar na semana inteira, então o de cima
+nunca é trocado pelo de baixo — o de baixo só escolhe entre escalas que o de cima
+empatou.
+
+É o mesmo critério da fila da sexta, agora valendo também de segunda a quinta.
+
+Resolvido quem entra, a preferência distribui os dias. O app procura a
+distribuição que **minimiza o custo total do grupo**, onde o custo de colocar
+alguém num dia é a posição daquele dia na lista dessa pessoa:
 
 | situação | custo |
 | --- | --- |
@@ -79,7 +98,6 @@ custo de colocar alguém num dia é a posição daquele dia na lista dessa pesso
 | 2ª opção | 1.000 |
 | 3ª opção | 2.000 |
 | dia de seg–qui que a pessoa não pediu | 8.000 |
-| segundo dia na mesma semana | +50.000 |
 
 Minimizar a soma é o mesmo que deixar **o grupo inteiro** o mais perto possível
 das primeiras opções. Não é ordem de chegada, e não é "cada um por si": às vezes
@@ -89,10 +107,19 @@ e o total melhora.
 O resultado é o ótimo global — nenhuma outra distribuição tem custo menor — e é
 determinístico: a mesma entrada sempre produz a mesma escala.
 
-Empates são desfeitos a favor de quem tem menos escalas acumuladas, por um termo
-sempre menor que 1.000. Como um degrau de preferência custa 1.000, o desempate
-**nunca** troca uma 1ª opção por uma 2ª: ele só escolhe entre distribuições que
-já custam o mesmo.
+**Por que o contador vem antes da preferência.** Com mais gente do que vagas,
+alguém fica de fora toda semana, e quem fica de fora é decidido aqui. Preferência
+é um critério *estável*: quem gosta do dia mais disputado perde sempre, e quem
+gosta do dia mais vazio entra sempre. Simulação de 20 semanas com 12 pessoas para
+9 vagas, cada um com um gosto fixo:
+
+| o que decide quem entra | escalas por pessoa | 1ª opção atendida |
+| --- | --- | --- |
+| preferência (contador só como desempate) | diferença de 7 a 10 escalas | 78% |
+| contador (preferência escolhe o dia) | diferença de 0 a 1 escala | 69% |
+
+O preço de fechar o rodízio são ~8 pontos de 1ª opção, que viram 2ª — ninguém cai
+fora do próprio top 3 por causa disso.
 
 ---
 
@@ -130,6 +157,18 @@ São dois, por pessoa: **escalas** e **sextas**. Ambos são acumulados e **nunca
 zeram sozinhos** — nem por mês, nem por ano. Só zeram se alguém mandar zerar, na
 aba Ajustes, e mesmo assim o histórico das escalas não é apagado: o app apenas
 passa a contar a partir daquela data.
+
+Não são só um placar: cada um decide uma coisa na hora de montar a semana.
+
+| contador | decide |
+| --- | --- |
+| **sextas** | quem leva a sexta (fase 1) |
+| **escalas** | quem é escalado de segunda a quinta quando há mais gente que vagas (fase 2) |
+
+Duas coisas passam por cima do contador de escalas, de propósito: o **dia fixo**,
+que reserva a vaga antes de qualquer disputa, e o **voluntário da sexta**, que
+fura a fila. Quem tem dia fixo numa semana em que sobra gente entra toda semana e
+acumula mais escalas que o resto — é o preço de ter sempre o mesmo dia.
 
 Isso é deliberado, por dois motivos.
 

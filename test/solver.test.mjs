@@ -142,6 +142,62 @@ console.log('\n--- fase 2: segunda a quinta ---');
   ok(cont[sexta(r).name] === 1, 'quem pegou a sexta nao dobrou');
   console.log(`  dias por pessoa: ${JSON.stringify(cont)}`);
 }
+{
+  // Mais gente que vagas: quem decide QUEM entra e o contador, nao a
+  // preferencia. Uma vaga na segunda; Luiz pediu segunda em 1a opcao mas ja tem
+  // 5 escalas, Ana nao pediu segunda e nao tem nenhuma. Entra Ana: preferencia
+  // escolhe o dia de quem entra, nao quem fica de fora.
+  const SO_SEGUNDA = { 1: 1, 2: 0, 3: 0, 4: 0, 5: 0 };
+  const povo = [
+    mk(0, { choices: [1, 2, 3], totalCount: 5 }),
+    mk(1, { choices: [2, 3, 4], totalCount: 0 }),
+  ];
+  const r = solveWeek(povo, SO_SEGUNDA);
+  ok(r.assignments.length === 1 && r.assignments[0].name === 'Ana',
+     `entra quem tem menos escalas (entrou ${r.assignments[0]?.name})`);
+}
+{
+  // Empatados no contador, decide a preferencia - o criterio de baixo escolhe
+  // entre as escalas que o de cima empatou.
+  const SO_SEGUNDA = { 1: 1, 2: 0, 3: 0, 4: 0, 5: 0 };
+  const povo = [
+    mk(0, { choices: [1, 2, 3], totalCount: 4 }),
+    mk(1, { choices: [2, 3, 4], totalCount: 4 }),
+  ];
+  const r = solveWeek(povo, SO_SEGUNDA);
+  ok(r.assignments[0]?.name === 'Luiz',
+     `no empate leva quem pediu o dia (entrou ${r.assignments[0]?.name})`);
+}
+{
+  // O rodizio fecha com mais gente que vagas: 12 pessoas para 9 vagas deixa 3
+  // de fora por semana, e em 8 semanas a diferenca entre o maior e o menor
+  // contador nao passa de 1. E o teste que o app nao passava: com o contador
+  // valendo so como desempate, os mesmos 3 ficavam de fora toda semana.
+  const DOZE = [...NOMES, 'Ivo', 'Joana', 'Kaue'];
+  // Gosto ESTAVEL e desigual, como na vida real: oito preferem o comeco da
+  // semana, quatro preferem a quinta. E a desigualdade que quebrava o rodizio -
+  // os quatro da quinta nunca disputavam vaga com ninguem e entravam sempre.
+  const gosto = (i) => (i < 8 ? [1, 2, 3] : [4, 3, 2]);
+  const total = new Map(DOZE.map((_, i) => [i + 1, 0]));
+  const sextas = new Map(DOZE.map((_, i) => [i + 1, 0]));
+
+  for (let semana = 0; semana < 8; semana++) {
+    const povo = DOZE.map((name, i) => ({
+      id: i + 1, name, choices: gosto(i), noFriday: false,
+      totalCount: total.get(i + 1), fridayCount: sextas.get(i + 1),
+    }));
+    for (const a of solveWeek(povo, CAP).assignments) {
+      total.set(a.personId, total.get(a.personId) + 1);
+      if (a.day === FRIDAY) sextas.set(a.personId, sextas.get(a.personId) + 1);
+    }
+  }
+
+  const n = [...total.values()];
+  const espalhamento = Math.max(...n) - Math.min(...n);
+  ok(espalhamento <= 1,
+     `8 semanas, 12 pessoas, 9 vagas: diferenca de ${espalhamento} escala(s) entre o maior e o menor`);
+  console.log(`  12 pessoas em 8 semanas: de ${Math.min(...n)} a ${Math.max(...n)} escalas por pessoa`);
+}
 
 console.log('\n--- fase 0: dia fixo ---');
 {
