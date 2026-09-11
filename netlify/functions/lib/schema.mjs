@@ -58,6 +58,12 @@ export const SCHEMA = [
   // rodizio de preferencia. NULL = participa normalmente, como todo mundo.
   `alter table people add column if not exists fixed_day int`,
 
+  // Por que a escala daquela semana ficou como ficou: o que cada pessoa pediu e
+  // com que contadores chegou na semana. Fica gravado junto com a semana porque
+  // e o registro de uma geracao - refazer a conta depois daria outro resultado,
+  // ja que os contadores andam a cada semana gerada.
+  `alter table weeks add column if not exists explain jsonb`,
+
   // Configuracoes gerais. Guarda, por ora, a data do ultimo zeramento dos
   // contadores - eles nunca zeram sozinhos.
   `create table if not exists settings (

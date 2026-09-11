@@ -445,6 +445,7 @@ function renderSchedule(generation) {
   $('#schedWeekLabel').textContent = weekLabel(week.monday);
   applyWeekBadge($('#schedWeekBadge'), week.monday);
 
+  renderWhy();
   if (state.edit) return renderScheduleEditor();
 
   const byDay = new Map([1, 2, 3, 4, 5].map((d) => [d, []]));
@@ -552,6 +553,382 @@ function renderSchedule(generation) {
   $('#editBtn').disabled = week.published || !week.dates.some((d) => d.works);
   $('#publishBtn').textContent = week.published ? 'Reabrir escala' : 'Publicar escala';
   $('#publishBtn').disabled = !hasAny && !week.published;
+}
+
+/* --- "Como essa escala foi gerada?" --------------------------------------- */
+/* Tudo aqui sai de `week.explain`, gravado na hora da geracao: o que cada
+ * pessoa pediu, com que contadores chegou na semana e em que posicao ficou na
+ * fila da sexta. Nenhuma frase e decorativa - cada uma cita o numero que a
+ * sustenta, para que qualquer pessoa possa conferir na aba Contadores.
+ *
+ * A secao explica a GERACAO, nao a escala que esta na tela agora: se alguem
+ * editou a semana a mao depois, as camadas continuam contando o que o app fez,
+ * e os ajustes aparecem listados a parte. Misturar as duas coisas faria o app
+ * dizer que o contador tirou alguem que na verdade uma pessoa tirou.          */
+
+const nomeDia = (d) => DAY_NAMES[d]?.toLowerCase() ?? '—';
+const plural = (n, um, muitos) => `${n} ${n === 1 ? um : muitos}`;
+const escalas = (n) => plural(n, 'escala', 'escalas');
+const sextasDe = (n) => plural(n, 'sexta', 'sextas');
+const listaNomes = (nomes) => (nomes.length < 2
+  ? (nomes[0] ?? '')
+  : `${nomes.slice(0, -1).join(', ')} e ${nomes[nomes.length - 1]}`);
+
+function renderWhy() {
+  const box = $('#whyBox');
+  const explain = state.data.week?.explain;
+  const assignments = state.data.assignments ?? [];
+  if (!explain?.people || !assignments.length || state.edit) { box.hidden = true; return; }
+
+  // A escala como o solver a montou - a base de tudo que a secao afirma.
+  const byDay = new Map([1, 2, 3, 4, 5].map((d) => [d, []]));
+  for (const p of explain.people) {
+    for (const d of p.days) {
+      byDay.get(d.day)?.push({ personId: p.personId, name: p.name, ...d });
+    }
+  }
+  for (const lista of byDay.values()) {
+    lista.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }
+
+  box.hidden = false;
+  $('#whyBody').innerHTML = [
+    whyIntro(explain, whyEdits(explain, assignments)),
+    whyRules(),
+    whyFixed(explain),
+    whyCut(explain),
+    whyFriday(explain, byDay),
+    whyWeekdays(explain, byDay),
+    whyPeople(explain, byDay, assignments),
+    whyCheck(),
+  ].join('');
+}
+
+/** O que a mao mudou depois da geracao, nos dois sentidos. */
+function whyEdits(explain, assignments) {
+  const geradas = new Set(explain.people
+    .flatMap((p) => p.days.map((d) => `${d.day}:${p.personId}`)));
+  const atuais = new Set(assignments.map((a) => `${a.day}:${a.personId}`));
+  return {
+    entraram: assignments.filter((a) => !geradas.has(`${a.day}:${a.personId}`)),
+    sairam: explain.people.flatMap((p) => p.days
+      .filter((d) => !atuais.has(`${d.day}:${p.personId}`))
+      .map((d) => ({ personId: p.personId, name: p.name, day: d.day }))),
+  };
+}
+
+function whyIntro(explain, edits) {
+  const d = explain.generatedAt ? new Date(explain.generatedAt) : null;
+  const quando = d
+    ? `${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR',
+      { hour: '2-digit', minute: '2-digit' })}`
+    : null;
+  const mexeu = edits.entraram.length || edits.sairam.length;
+
+  return `
+    <p class="why-lead">Não há sorteio nem ordem de chegada. São três camadas, nesta
+      ordem, e cada uma responde uma pergunta diferente. Com as mesmas preferências e os
+      mesmos contadores, o app produz <b>sempre a mesma escala</b> — a conta dá para
+      refazer à mão.</p>
+    <p class="why-meta">${quando ? `Gerada em ${esc(quando)} · ` : ''}
+      ${explain.totalSlots} ${explain.totalSlots === 1 ? 'vaga' : 'vagas'} ·
+      ${plural(explain.headcount, 'pessoa disponível', 'pessoas disponíveis')}
+      ${explain.away?.length ? ` · ${plural(explain.away.length, 'ausente', 'ausentes')}` : ''}</p>
+    ${mexeu ? `<p class="why-warn">Depois de gerada, esta escala foi <b>ajustada à
+      mão</b>: ${esc(listaNomes([
+        ...edits.entraram.map((a) => `${a.name} entrou na ${nomeDia(a.day)}`),
+        ...edits.sairam.map((a) => `${a.name} saiu da ${nomeDia(a.day)}`),
+      ]))}. As camadas abaixo explicam o que o <b>app</b> montou; o ajuste foi decisão de
+      quem editou. Ele conta nos contadores como qualquer outra escala.</p>` : ''}`;
+}
+
+function whyRules() {
+  return `
+    <h3 class="why-h">As três camadas, nesta ordem</h3>
+    <ol class="why-steps">
+      <li><b>Dia fixo.</b> Quem tem dia fixo cadastrado fica sempre nele, e a vaga é
+        reservada antes de qualquer disputa. É a <b>única</b> exceção ao contador.</li>
+      <li><b>Quem trabalha nesta semana.</b> Quando há mais gente do que vagas, alguém
+        fica de fora — e quem fica de fora é decidido pelo <b>contador de escalas
+        acumuladas</b>, nunca pela preferência. Quem tem menos escalas entra primeiro.</li>
+      <li><b>Em qual dia.</b> Só aqui a preferência entra. A sexta sai de uma fila pelo
+        contador de sextas; de segunda a quinta, o app procura a distribuição que deixa
+        o grupo <b>inteiro</b> o mais perto possível da 1ª opção.</li>
+    </ol>
+    <p class="why-note">A ordem importa: se a preferência decidisse quem entra, quem
+      gosta do dia mais disputado perderia toda semana e quem gosta do dia mais vazio
+      entraria toda semana — e a diferença entre os contadores só cresceria.</p>`;
+}
+
+function whyFixed(explain) {
+  const fixos = explain.people.filter((p) => p.fixedDay != null);
+  if (!fixos.length) {
+    return `<h3 class="why-h">Camada 1 — dia fixo</h3>
+      <p class="why-p">Ninguém tem dia fixo cadastrado, então esta camada não reservou
+        nenhuma vaga nesta semana.</p>`;
+  }
+  const linhas = fixos.map((p) => {
+    const coube = p.days.some((d) => d.via === 'fixo');
+    return `<li><b>${esc(p.name)}</b> — ${coube
+      ? `tem ${nomeDia(p.fixedDay)} como dia fixo; a vaga foi reservada antes de tudo`
+      : `tem ${nomeDia(p.fixedDay)} como dia fixo, mas ela <b>não coube</b> nesta semana
+         (feriado, ou a vaga já estava ocupada), então disputou como todo mundo`}</li>`;
+  }).join('');
+  return `<h3 class="why-h">Camada 1 — dia fixo</h3><ul class="why-list">${linhas}</ul>`;
+}
+
+/**
+ * Por que esta pessoa ficou de fora. Sao tres motivos diferentes, e chamar um
+ * de outro seria mentira: 'corte' e estar acima do contador que cabia na
+ * semana; 'empate' e ter o mesmo contador de gente que entrou, com mais gente
+ * do que vaga; 'frente' e estar a frente de todo mundo que entrou - o app
+ * preferiu dar um segundo dia a quem estava atras.
+ */
+function whyOutReason(p, explain) {
+  if (p.aboveCut) return 'corte';
+  const iguaisDentro = explain.people.some((q) =>
+    q.personId !== p.personId && q.totalBefore === p.totalBefore && q.days.length);
+  return iguaisDentro ? 'empate' : 'frente';
+}
+
+function whyCut(explain) {
+  const fora = explain.people.filter((p) => !p.days.length);
+  const dentro = explain.headcount - fora.length;
+
+  if (!fora.length) {
+    return `<h3 class="why-h">Camada 2 — quem trabalha nesta semana</h3>
+      <p class="why-p">Havia ${explain.totalSlots} vagas para
+        ${plural(explain.headcount, 'pessoa disponível', 'pessoas disponíveis')}:
+        <b>ninguém ficou de fora</b>, então o contador não precisou escolher ninguém.</p>`;
+  }
+
+  const contadores = explain.people.map((p) => p.totalBefore).sort((a, b) => a - b);
+  const grupo = (motivo) => fora.filter((p) => whyOutReason(p, explain) === motivo);
+  const nomes = (lista) => esc(listaNomes(lista.map((p) => p.name)));
+  const ficou = (lista) => (lista.length === 1 ? 'ficou' : 'ficaram');
+  const [porContador, porEmpate, porFrente] = ['corte', 'empate', 'frente'].map(grupo);
+
+  return `
+    <h3 class="why-h">Camada 2 — quem trabalha nesta semana</h3>
+    <p class="why-p">Havia <b>${explain.totalSlots} vagas</b> para
+      ${plural(explain.headcount, 'pessoa disponível', 'pessoas disponíveis')}, então
+      ${plural(fora.length, 'pessoa ficou', 'pessoas ficaram')} de fora. Quem entra é quem
+      tem <b>menos escalas acumuladas</b> — ao começar a semana, os contadores iam de
+      ${contadores[0]} a ${contadores[contadores.length - 1]}.</p>
+    ${porContador.length ? `<p class="why-p">${nomes(porContador)}
+      ${ficou(porContador)} de fora <b>pelo contador</b>: ${porContador.length === 1
+        ? 'chegou' : 'chegaram'} acima do corte de <b>${escalas(explain.cut)}</b>, que é o
+      contador da última pessoa que cabia nas vagas. Acima do corte não se disputa vaga
+      nenhuma — nem a sexta.</p>` : ''}
+    ${porEmpate.length ? `<p class="why-p">${nomes(porEmpate)} ${ficou(porEmpate)} de fora
+      <b>no desempate</b>: havia mais gente com o mesmo número de escalas do que vagas
+      sobrando. Aí, e só aí, o critério passa a ser a preferência do grupo — o app fica
+      com a combinação que deixa todo mundo mais perto da 1ª opção.</p>` : ''}
+    ${porFrente.length ? `<p class="why-p">${nomes(porFrente)} ${ficou(porFrente)} de fora
+      por estar <b>à frente no contador</b>: o app preferiu dar um segundo dia na semana a
+      quem estava atrás a dar mais uma escala a quem já tinha mais. É assim que a
+      diferença entre os contadores fecha quando há vaga para todo mundo.</p>` : ''}
+    <p class="why-p">Quem ficou de fora <b>não gastou escala</b>: o contador não andou, e
+      por isso essas pessoas entram na frente na próxima semana.</p>`;
+}
+
+function whyFriday(explain, byDay) {
+  if (!explain.capacity?.[FRIDAY]) {
+    return `<h3 class="why-h">Camada 3 — em qual dia: a sexta</h3>
+      <p class="why-p">Esta semana não tem expediente na sexta, então não houve vaga e a
+        fila não andou.</p>`;
+  }
+
+  const fila = explain.people
+    .filter((p) => p.fridayPos != null)
+    .sort((a, b) => a.fridayPos - b.fridayPos);
+  const levaram = new Set((byDay.get(FRIDAY) ?? []).map((a) => a.personId));
+  const vetaram = explain.people.filter((p) => p.noFriday).map((p) => p.name);
+
+  const linhas = fila.map((p) => {
+    const levou = levaram.has(p.personId);
+    const via = p.days.find((d) => d.day === FRIDAY)?.via;
+    return `<tr${levou ? ' class="why-hit"' : ''}>
+      <td>${p.fridayPos}º</td>
+      <td>${esc(p.name)}</td>
+      <td class="num">${p.fridayBefore}</td>
+      <td class="num">${p.totalBefore}</td>
+      <td>${levou
+        ? (via === 'voluntario' ? 'levou — pediu sexta' : 'levou a sexta')
+        : p.aboveCut ? 'fora da semana (contador)' : ''}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <h3 class="why-h">Camada 3 — em qual dia: a sexta</h3>
+    <p class="why-p">Ninguém escolhe sexta por gosto, então preferência não serve de
+      critério: leva <b>quem tem menos sextas acumuladas</b> entre quem está na semana.
+      Quem pede sexta no próprio top 3 passa na frente <b>só no empate</b> — senão pedir
+      sexta toda semana valeria como ter sexta de dia fixo, sem cadastrar dia fixo.</p>
+    <div class="why-tablewrap"><table class="why-table">
+      <thead><tr><th>#</th><th>Pessoa</th><th class="num">Sextas</th>
+        <th class="num">Escalas</th><th></th></tr></thead>
+      <tbody>${linhas}</tbody>
+    </table></div>
+    ${vetaram.length ? `<p class="why-note">Fora da conta da sexta por terem marcado
+      “não posso esta sexta”: ${esc(listaNomes(vetaram))}. É veto, não preferência.</p>` : ''}`;
+}
+
+function whyWeekdays(explain, byDay) {
+  const uteis = [1, 2, 3, 4].filter((d) => (explain.capacity?.[d] ?? 0) > 0);
+  const daSemana = uteis.flatMap((d) => byDay.get(d) ?? []);
+  if (!daSemana.length) {
+    return `<h3 class="why-h">Camada 3 — em qual dia: de segunda a quinta</h3>
+      <p class="why-p">Nenhum dia de segunda a quinta teve expediente nesta semana.</p>`;
+  }
+
+  const conta = { 1: 0, 2: 0, 3: 0, fora: 0, fixo: 0 };
+  for (const a of daSemana) {
+    if (a.via === 'fixo') conta.fixo++;
+    else if (conta[a.rank] != null) conta[a.rank]++;
+    else conta.fora++;
+  }
+  const resumo = [
+    conta[1] && `<b>${conta[1]}</b> na 1ª opção`,
+    conta[2] && `<b>${conta[2]}</b> na 2ª`,
+    conta[3] && `<b>${conta[3]}</b> na 3ª`,
+    conta.fixo && `<b>${conta.fixo}</b> em dia fixo`,
+    conta.fora && `<b>${conta.fora}</b> fora do top 3 pedido`,
+  ].filter(Boolean).join(', ');
+
+  const linhas = uteis.map((d) => {
+    const gente = (byDay.get(d) ?? []).map((a) => `${esc(a.name)} <span class="why-tag">${
+      a.via === 'fixo' ? 'dia fixo'
+        : a.rank ? `${ORDINAL[a.rank]} opção`
+        : 'fora do top 3'}</span>`).join('<br>');
+    return `<tr><td>${DAY_NAMES[d]}</td><td>${plural(explain.capacity[d], 'vaga', 'vagas')}</td>
+      <td>${gente || '<i>vaga em aberto</i>'}</td></tr>`;
+  }).join('');
+
+  return `
+    <h3 class="why-h">Camada 3 — em qual dia: de segunda a quinta</h3>
+    <p class="why-p">As vagas de segunda a quinta não são distribuídas por ordem de
+      chegada, uma de cada vez: o app resolve as ${plural(daSemana.length, 'vaga', 'vagas')}
+      <b>de uma vez só</b>, procurando a combinação que deixa o grupo inteiro o mais perto
+      possível da 1ª opção. Às vezes alguém fica com a 2ª porque isso permite que dois
+      outros fiquem com a 1ª, e o total do grupo melhora.</p>
+    <p class="why-p">Como a escala saiu: ${resumo}.</p>
+    <div class="why-tablewrap"><table class="why-table">
+      <thead><tr><th>Dia</th><th></th><th>Quem ficou, e que opção era</th></tr></thead>
+      <tbody>${linhas}</tbody>
+    </table></div>`;
+}
+
+function whyPeople(explain, byDay, assignments) {
+  const agora = new Map();
+  for (const a of assignments) {
+    if (!agora.has(a.personId)) agora.set(a.personId, []);
+    agora.get(a.personId).push(a);
+  }
+
+  const ordem = [...explain.people].sort((a, b) =>
+    (a.days[0]?.day ?? 9) - (b.days[0]?.day ?? 9)
+    || a.name.localeCompare(b.name, 'pt-BR'));
+
+  const linhas = ordem
+    .map((p) => `<li><b>${esc(p.name)}</b> — ${whyOnePerson(p, explain, byDay)}${
+      whyHandNote(p, agora.get(p.personId) ?? [])}</li>`)
+    .join('');
+  const ausentes = (explain.away ?? [])
+    .map((p) => `<li><b>${esc(p.name)}</b> — marcou que <b>não participa</b> desta semana,
+      então não entrou na conta e os contadores não andaram.</li>`)
+    .join('');
+
+  return `<h3 class="why-h">Pessoa por pessoa</h3>
+    <ul class="why-people">${linhas}${ausentes}</ul>`;
+}
+
+/** A frase de uma pessoa - sempre citando o numero que decidiu o caso dela. */
+function whyOnePerson(p, explain, byDay) {
+  const pedidos = p.choices.length
+    ? p.choices.map((d, i) => `${nomeDia(d)} (${ORDINAL[i + 1]})`).join(', ')
+    : null;
+  const chegou = `chegou com ${escalas(p.totalBefore)}`;
+
+  if (!p.days.length) {
+    const motivo = whyOutReason(p, explain);
+    const naProxima = ' O contador não andou, então entra na frente na próxima.';
+    if (motivo === 'corte') {
+      return `ficou <b>de fora</b> desta semana: ${chegou}, acima do corte de
+        ${escalas(explain.cut)} — o contador da última pessoa que cabia nas vagas.
+        Preferência não teve nada a ver.${naProxima}`;
+    }
+    if (motivo === 'frente') {
+      return `ficou <b>de fora</b> desta semana: ${chegou}, mais do que qualquer pessoa
+        que entrou. O app preferiu dar um segundo dia a quem estava atrás a dar mais uma
+        escala a quem já tinha mais.${naProxima}`;
+    }
+    return `ficou <b>de fora</b> desta semana: ${chegou}, o mesmo que gente que entrou —
+      havia mais pessoas nesse número do que vagas. Nesse empate, e só nele, o critério é
+      a preferência do grupo: o app fica com a combinação que deixa todo mundo mais perto
+      da 1ª opção.${naProxima}`;
+  }
+
+  const partes = p.days.map((a) => {
+    if (a.via === 'fixo') {
+      return `<b>${nomeDia(a.day)}</b>, o <b>dia fixo</b> cadastrado — vaga reservada
+        antes de qualquer disputa`;
+    }
+    if (a.day === FRIDAY) {
+      const nota = a.via === 'voluntario'
+        ? `pediu sexta no próprio top 3 e estava empatad${a.rank === 1 ? 'o(a)' : 'o(a)'}
+           em ${sextasDe(p.fridayBefore)} com a frente da fila, então passou na frente`
+        : `era o ${p.fridayPos}º da fila da sexta, com ${sextasDe(p.fridayBefore)}`;
+      return `<b>sexta</b> — ${nota}`;
+    }
+    if (a.rank === 1) return `<b>${nomeDia(a.day)}</b>, a 1ª opção que pediu`;
+    if (a.rank === 2 || a.rank === 3) {
+      const melhores = p.choices.slice(0, a.rank - 1)
+        .map((d) => {
+          const donos = (byDay.get(d) ?? []).map((x) => x.name);
+          if (d === FRIDAY) {
+            return `a sexta foi para ${esc(listaNomes(donos)) || 'ninguém'}, que estava à
+              frente na fila das sextas`;
+          }
+          return `a ${nomeDia(d)} tinha ${plural(explain.capacity?.[d] ?? 0, 'vaga', 'vagas')}
+            e ficou com ${esc(listaNomes(donos)) || 'ninguém'}`;
+        })
+        .join('; ');
+      return `<b>${nomeDia(a.day)}</b>, a ${ORDINAL[a.rank]} opção${
+        melhores ? ` — ${melhores}` : ''}`;
+    }
+    return `<b>${nomeDia(a.day)}</b>, que não estava no top 3: os dias pedidos já
+      estavam cheios, e alguém precisava cobrir esse`;
+  });
+
+  const dobrou = p.days.length > 1
+    ? ' Ficou em dois dias porque havia mais vagas do que gente disponível, e o contador'
+      + ' era dos mais baixos do grupo.'
+    : '';
+  return `${chegou}${pedidos ? `, pediu ${pedidos}` : ', não registrou preferência'}, e
+    ficou na ${partes.join('; e na ')}.${dobrou}`;
+}
+
+/** O que a mao mudou no caso desta pessoa, depois da geracao. */
+function whyHandNote(p, agora) {
+  const geradas = new Set(p.days.map((d) => d.day));
+  const atuais = new Set(agora.map((a) => a.day));
+  const entrou = [...atuais].filter((d) => !geradas.has(d));
+  const saiu = [...geradas].filter((d) => !atuais.has(d));
+  if (!entrou.length && !saiu.length) return '';
+
+  const frases = [
+    ...entrou.map((d) => `entrou na ${nomeDia(d)}`),
+    ...saiu.map((d) => `saiu da ${nomeDia(d)}`),
+  ];
+  return ` <span class="why-hand">Depois da geração, <b>por ajuste à mão</b>:
+    ${listaNomes(frases)}.</span>`;
+}
+
+function whyCheck() {
+  return `<p class="why-check">Todos os números desta seção saem da aba
+    <b>Contadores</b>, que mostra as escalas e as sextas de cada pessoa desde o início.
+    Se algum número aqui não bater com o de lá, é erro do app — não critério.</p>`;
 }
 
 /** Linha de um dia sem expediente - igual na escala e no editor. */

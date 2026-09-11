@@ -144,6 +144,33 @@ fora do próprio top 3 por causa disso.
 
 ---
 
+## "Como essa escala foi gerada?"
+
+Embaixo de toda escala gerada há uma caixa recolhida com esse título. Aberta, ela
+explica **aquela** semana — não o método em abstrato:
+
+- as três camadas, na ordem, e por que a ordem é essa;
+- quem tinha dia fixo e se a vaga coube;
+- quantas vagas havia para quantas pessoas, quem ficou de fora e **por qual dos
+  três motivos** (acima do corte, empatado no corte, ou à frente de todo mundo
+  que entrou — são coisas diferentes e a caixa não troca uma pela outra);
+- a fila da sexta inteira, em ordem, com os dois contadores de cada pessoa;
+- quem ficou em cada dia de segunda a quinta e que opção aquele dia era;
+- **pessoa por pessoa**, uma frase com o número que decidiu o caso dela — quem
+  ficou na 2ª opção vê quem levou a 1ª e com que contador.
+
+Os números vêm de um registro gravado **junto com a semana**, no momento da
+geração. Não é a conta refeita na hora de exibir: refazê-la daria outro resultado
+assim que qualquer outra semana fosse gerada, e a tela passaria a explicar a
+escala de março com os contadores de junho.
+
+Se a escala foi **editada à mão** depois de gerada, a caixa diz isso no topo,
+lista o que mudou e continua explicando o que o *app* montou — o ajuste aparece
+marcado na pessoa afetada. Misturar as duas coisas faria o app dizer que o
+contador tirou alguém que, na verdade, uma pessoa tirou.
+
+---
+
 ## Editar a escala à mão
 
 A escala que o app monta é um ponto de partida, não uma sentença. Na aba Escala,

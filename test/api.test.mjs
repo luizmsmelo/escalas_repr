@@ -438,6 +438,52 @@ const volta = (await call('GET', `state?week=${FIXA}`)).json;
 ok(volta.people.find((p) => p.id === ids['Luiz Melo']).fixedDay === null, 'sem dia fixo de novo');
 ok(volta.stats.fridayQueue.length === 8, `fila volta a ter 8 (${volta.stats.fridayQueue.length})`);
 
+console.log('\n=== a explicacao da escala fica gravada ===');
+{
+  // A explicacao e o registro de UMA geracao, com os contadores como estavam na
+  // hora. Se fosse recalculada na hora de exibir, mudaria sozinha assim que
+  // qualquer outra semana fosse gerada - e a tela passaria a explicar a escala
+  // de marco com os contadores de junho.
+  const SEM = '2026-10-05';   // semana que nenhum outro teste gera
+  const zerada = (await call('GET', `state?week=${SEM}`)).json;
+  ok(zerada.week.explain == null,
+     `semana ainda nao gerada nao tem explicacao (${JSON.stringify(zerada.week.explain)})`);
+
+  // Quem esta ativo AGORA - o cadastro mudou ao longo do arquivo de testes.
+  const ativos = zerada.people.filter((p) => p.active);
+  for (const [i, p] of ativos.entries()) {
+    await call('POST', 'preferences',
+      { monday: SEM, personId: p.id, choices: TOP3[i % TOP3.length] });
+  }
+  const g = (await call('POST', 'generate', { monday: SEM })).json;
+  ok(g.generation.explain?.people?.length === ativos.length,
+     `a geracao devolve a explicacao na hora (${g.generation.explain?.people?.length})`);
+
+  const lido = (await call('GET', `state?week=${SEM}`)).json;
+  const e = lido.week.explain;
+  ok(e?.people?.length === ativos.length,
+     `e ela volta do banco depois (${e?.people?.length} de ${ativos.length} pessoas)`);
+  ok(e.totalSlots === 9 && typeof e.generatedAt === 'string', 'com as vagas e a hora');
+
+  // O que a tela promete: para cada linha da escala ha a pessoa, o dia e como
+  // ela chegou ali.
+  for (const a of lido.assignments) {
+    const p = e.people.find((x) => x.personId === a.personId);
+    ok(p && p.days.some((d) => d.day === a.day && d.via === a.via),
+       `${a.name} na ${a.day}: a explicacao bate com a escala`);
+  }
+
+  // Gerar de novo reescreve a explicacao - nunca deixa a antiga para tras.
+  const antes = e.generatedAt;
+  await new Promise((r) => setTimeout(r, 15));
+  await call('POST', 'generate', { monday: SEM });
+  const depois = (await call('GET', `state?week=${SEM}`)).json.week.explain;
+  ok(depois.generatedAt !== antes, 'gerar de novo reescreve a explicacao');
+
+  console.log(`  explicacao de ${SEM}: corte em ${depois.cut}, ` +
+              `${depois.people.filter((p) => !p.days.length).length} fora da semana`);
+}
+
 console.log('\n=== rotas invalidas ===');
 ok((await call('GET', 'inexistente')).status === 404, '404 em rota desconhecida');
 ok((await call('GET', 'state?week=2026-02-30')).status === 400, 'rejeita data inexistente');

@@ -119,6 +119,9 @@ async function getState(weekParam) {
       capWeekday: week.cap_weekday,
       capFriday: week.cap_friday,
       generatedAt: week.generated_at,
+      // Gravada na geracao: e o que explica a escala que esta na tela, mesmo
+      // depois de recarregar a pagina ou de trocar de semana e voltar.
+      explain: week.explain ?? null,
       prevMonday: addDays(monday, -7),
       nextMonday: addDays(monday, 7),
     },
@@ -301,6 +304,19 @@ async function generate({ monday }) {
   const result = solveWeek(input, capacity);
   const dates = Object.fromEntries(situacao.map((d) => [d.day, d.date]));
 
+  // O registro de POR QUE esta escala ficou assim, gravado junto com a semana.
+  // O solver so enxerga quem esta na semana, entao o que ele nao tem como saber
+  // entra aqui: quem marcou ausencia (senao a pessoa some da lista sem motivo
+  // aparente), os dias sem expediente e a hora da geracao.
+  const explain = {
+    ...result.explain,
+    generatedAt: new Date().toISOString(),
+    away: rows.filter((r) => r.unavailable).map((r) => ({ personId: r.id, name: r.name })),
+    closedDays: fechados.map((d) => ({
+      day: d.day, date: d.date, name: d.holiday?.name ?? 'Sem expediente',
+    })),
+  };
+
   await sql.transaction([
     sql`delete from assignments where monday = ${week}`,
     ...result.assignments.map(
@@ -308,7 +324,8 @@ async function generate({ monday }) {
         insert into assignments (monday, person_id, day, rank, via, work_date)
         values (${week}, ${a.personId}, ${a.day}, ${a.rank}, ${a.via}, ${dates[a.day]})`,
     ),
-    sql`update weeks set generated_at = now() where monday = ${week}`,
+    sql`update weeks set generated_at = now(), explain = ${JSON.stringify(explain)}
+         where monday = ${week}`,
   ]);
 
   const state = await getState(week);
@@ -324,6 +341,7 @@ async function generate({ monday }) {
           && !result.fixed.placed.some((f) => f.personId === r.id))
         .map((r) => r.name),
       awayCount: rows.length - participants.length,
+      explain,
       friday: result.friday,
       fixed: result.fixed,
       closedDays: fechados.map((d) => ({
@@ -694,7 +712,7 @@ async function ensureWeek(monday) {
   const [row] = await sql`
     insert into weeks (monday) values (${monday})
     on conflict (monday) do update set monday = excluded.monday
-    returning monday, published, cap_weekday, cap_friday, generated_at`;
+    returning monday, published, cap_weekday, cap_friday, generated_at, explain`;
   return row;
 }
 

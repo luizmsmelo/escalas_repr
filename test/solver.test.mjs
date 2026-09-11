@@ -391,6 +391,75 @@ console.log('\n--- fase 0: dia fixo ---');
      'mesma entrada, mesma escala');
 }
 
+console.log('\n--- explicacao da escala ---');
+{
+  // A explicacao precisa bastar sozinha: e ela que a tela usa para dizer por
+  // que cada pessoa esta onde esta, meses depois, sem refazer conta nenhuma.
+  const povo = DOZE_PESSOAS(
+    { 0: { fixedDay: 2 }, 1: { choices: [FRIDAY, 1, 2] }, 2: { noFriday: true, totalCount: 9 } },
+    { totalCount: 4 },
+  );
+  const r = solveWeek(povo, CAP);
+  const e = r.explain;
+  const de = (nome) => e.people.find((p) => p.name === nome);
+
+  ok(e.people.length === povo.length, `uma linha por participante (${e.people.length})`);
+  ok(e.totalSlots === 9 && e.headcount === 12, `${e.totalSlots} vagas, ${e.headcount} pessoas`);
+
+  // Os contadores sao os de ANTES da semana - e o que sustenta cada frase.
+  ok(de('Luiz').totalBefore === 4 && de('Bruno').totalBefore === 9,
+     'guarda o contador com que cada um chegou na semana');
+
+  // O que a pessoa pediu fica registrado junto: a tela precisa poder dizer
+  // "sua 1a opcao foi para fulano" sem ir buscar as preferencias de novo.
+  ok(de('Ana').choices.join() === [FRIDAY, 1, 2].join(), 'guarda o top 3 pedido');
+
+  // Cada linha da escala aparece na pessoa certa.
+  for (const a of r.assignments) {
+    const dele = de(a.name).days.find((d) => d.day === a.day);
+    ok(dele && dele.via === a.via && dele.rank === a.rank,
+       `${a.name} na ${a.day} bate com a escala (via ${dele?.via})`);
+  }
+
+  ok(de('Luiz').fixedDay === 2 && de('Luiz').days[0].via === 'fixo', 'dia fixo registrado');
+  ok(de('Bruno').noFriday === true && de('Bruno').fridayPos === null,
+     'quem vetou a sexta nao aparece na fila');
+  ok(de('Bruno').aboveCut === true && de('Bruno').days.length === 0,
+     `quem tem 9 escalas contra 4 fica fora e marcado (aboveCut=${de('Bruno').aboveCut})`);
+  ok(e.cut === 4, `o corte vai junto, para a tela poder citar o numero (${e.cut})`);
+
+  // A fila da sexta e uma ordem, nao um conjunto: as posicoes tem que ser 1..N.
+  const posicoes = e.people.map((p) => p.fridayPos).filter((n) => n != null).sort((a, b) => a - b);
+  ok(posicoes.join() === posicoes.map((_, i) => i + 1).join(),
+     `posicoes da fila sao 1..${posicoes.length} sem buraco`);
+
+  console.log(`  corte em ${e.cut} escalas; ${e.people.filter((p) => !p.days.length).length} fora da semana`);
+}
+{
+  // Com vaga para todo mundo nao existe corte - a explicacao nao pode sugerir
+  // que alguem foi barrado por contador.
+  const r = solveWeek(NOMES.map((_, i) => mk(i)), CAP);
+  ok(r.explain.people.every((p) => p.aboveCut === false),
+     'com 9 vagas para 9 pessoas empatadas ninguem fica acima do corte');
+  ok(r.explain.people.every((p) => p.days.length === 1), 'e todo mundo tem o seu dia');
+}
+{
+  // Quem esta MUITO a frente fica de fora mesmo havendo vaga para todo mundo:
+  // o app dobra alguem que esta atras em vez de dar mais uma a quem tem mais.
+  // A explicacao precisa distinguir esse caso do empate - o motivo e outro.
+  const r = solveWeek(NOMES.map((_, i) => mk(i, { totalCount: i === 0 ? 9 : 0 })), CAP);
+  const luiz = r.explain.people.find((p) => p.name === 'Luiz');
+  ok(luiz.days.length === 0, 'quem tem 9 escalas contra 0 nao entra');
+  ok(luiz.aboveCut === false,
+     'e nao esta acima do corte - com 9 vagas para 9 pessoas, o corte nao barra ninguem');
+  const iguaisDentro = r.explain.people.some((q) =>
+    q.name !== 'Luiz' && q.totalBefore === luiz.totalBefore && q.days.length);
+  ok(iguaisDentro === false,
+     'nem empatado com quem entrou: a tela tem como dizer que ele estava a frente');
+  ok(r.explain.people.some((p) => p.days.length > 1),
+     'alguem dobrou no lugar dele - e o que fecha a diferenca');
+}
+
 console.log('\n--- casos limite ---');
 ok(solveWeek([], CAP).unfilledSlots.length === 9, 'zero pessoas: 9 vagas em aberto');
 ok(solveWeek(NOMES.map((_, i) => mk(i)), { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }).assignments.length === 0, 'zero vagas');

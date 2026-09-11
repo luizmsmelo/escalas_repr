@@ -207,6 +207,7 @@ export function solveWeek(participants, capacity) {
         && people.some((p) => p.noFriday),
     },
     summary: buildSummary(assignments, capacity),
+    explain: buildExplain(people, capacity, assignments, friday),
   };
 }
 
@@ -273,6 +274,7 @@ function pickFriday(people, slots, weekSlots) {
   return {
     picked,
     queue,
+    cut,
     candidates: ordered.length,
     unfilled: Array(Math.max(0, slots - picked.length)).fill(FRIDAY),
   };
@@ -441,5 +443,49 @@ function buildSummary(assignments, capacity) {
     automaticFriday: byRank[4],
     fixedDay,
     outsidePreferences: byRank.none,
+  };
+}
+
+/* -------------------------------------------------------------- explicacao */
+
+/**
+ * Os FATOS de que a tela precisa para explicar a escala linha por linha: o que
+ * cada pessoa pediu, com que contadores ela chegou na semana, em que posicao
+ * ficou na fila da sexta e onde parou. A prosa fica na tela; aqui nao ha
+ * nenhuma frase pronta, so o que foi de fato usado para decidir.
+ *
+ * A explicacao e gravada junto com a semana. Ela e o registro do que aconteceu
+ * naquela geracao - com os contadores como estavam na hora -, e nao uma conta
+ * refeita depois, que daria outro resultado assim que qualquer outra semana
+ * fosse gerada.
+ */
+function buildExplain(people, capacity, assignments, friday) {
+  const porPessoa = new Map();
+  for (const a of assignments) {
+    if (!porPessoa.has(a.personId)) porPessoa.set(a.personId, []);
+    porPessoa.get(a.personId).push({ day: a.day, rank: a.rank, via: a.via });
+  }
+
+  const posNaFila = new Map(friday.queue.map((p, i) => [p.id, i + 1]));
+  // Infinity significa "nao houve corte" - e nao sobrevive a um JSON.
+  const cut = Number.isFinite(friday.cut) ? friday.cut : null;
+
+  return {
+    capacity: { ...capacity },
+    totalSlots: DAYS.reduce((sum, d) => sum + (capacity[d] || 0), 0),
+    headcount: people.length,
+    cut,
+    people: people.map((p) => ({
+      personId: p.id,
+      name: p.name,
+      choices: [...(p.choices || [])],
+      totalBefore: p.totalCount ?? 0,
+      fridayBefore: p.fridayCount ?? 0,
+      fixedDay: p.fixedDay ?? null,
+      noFriday: !!p.noFriday,
+      fridayPos: posNaFila.get(p.id) ?? null,
+      aboveCut: cut != null && (p.totalCount ?? 0) > cut,
+      days: porPessoa.get(p.id) ?? [],
+    })),
   };
 }
