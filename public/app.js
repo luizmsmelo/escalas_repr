@@ -535,9 +535,20 @@ function renderSchedule(generation) {
       .join(', ');
     messages.push(`Sem expediente nesta semana: <b>${esc(lista)}</b>.`);
   }
-  if (generation?.unfilledSlots?.length) {
-    const days = generation.unfilledSlots.map((d) => DAY_NAMES[d]).join(', ');
-    messages.push(`Vagas não preenchidas (faltou gente disponível): <b>${esc(days)}</b>.`);
+  // Vaga em aberto e um ESTADO da escala, nao um evento da geracao: vem das
+  // vagas contra quem esta nelas, e nao de `generation`, que so existe no
+  // instante em que a escala e gerada e some ao recarregar a pagina.
+  const abertas = hasAny
+    ? week.dates.filter((d) => d.works)
+      .flatMap(({ day }) => Array(Math.max(0, capOf(day) - byDay.get(day).length)).fill(day))
+    : [];
+  if (abertas.length) {
+    const days = [...new Set(abertas)].map((d) => DAY_NAMES[d]).join(', ');
+    messages.push(`${abertas.length === 1 ? 'Uma vaga' : `${abertas.length} vagas`} `
+      + `em aberto: <b>${esc(days)}</b>. Ninguém faz duas escalas na mesma semana, `
+      + 'então o app não '
+      + 'preenche vaga repetindo quem já está na semana. Resolvam no grupo e use '
+      + '<b>Editar escala</b>.');
   }
   notice.innerHTML = messages.join('<br><br>');
   notice.hidden = messages.length === 0;
@@ -655,6 +666,10 @@ function whyRules() {
         contador de sextas; de segunda a quinta, o app procura a distribuição que deixa
         o grupo <b>inteiro</b> o mais perto possível da 1ª opção.</li>
     </ol>
+    <p class="why-note">Acima de tudo isso vale uma regra dura: <b>ninguém faz duas
+      escalas na mesma semana</b>. Se faltar gente para todas as vagas, a vaga fica em
+      aberto e a tela avisa — repetir alguém é decisão de quem monta a escala, feita à
+      mão e visível, não algo que o app faça sozinho para fechar a conta.</p>
     <p class="why-note">A ordem importa: se a preferência decidisse quem entra, quem
       gosta do dia mais disputado perderia toda semana e quem gosta do dia mais vazio
       entraria toda semana — e a diferença entre os contadores só cresceria.</p>`;
@@ -682,7 +697,9 @@ function whyFixed(explain) {
  * de outro seria mentira: 'corte' e estar acima do contador que cabia na
  * semana; 'empate' e ter o mesmo contador de gente que entrou, com mais gente
  * do que vaga; 'frente' e estar a frente de todo mundo que entrou - o app
- * preferiu dar um segundo dia a quem estava atras.
+ * estava a frente de todo mundo que entrou. Este ultimo nao deveria acontecer
+ * com a regra de uma escala por semana, mas a frase existe para nunca chamar
+ * um motivo pelo nome do outro se acontecer.
  */
 function whyOutReason(p, explain) {
   if (p.aboveCut) return 'corte';
@@ -695,11 +712,16 @@ function whyCut(explain) {
   const fora = explain.people.filter((p) => !p.days.length);
   const dentro = explain.headcount - fora.length;
 
+  const emAberto = explain.unfilled?.length ?? 0;
   if (!fora.length) {
     return `<h3 class="why-h">Camada 2 — quem trabalha nesta semana</h3>
       <p class="why-p">Havia ${explain.totalSlots} vagas para
         ${plural(explain.headcount, 'pessoa disponível', 'pessoas disponíveis')}:
-        <b>ninguém ficou de fora</b>, então o contador não precisou escolher ninguém.</p>`;
+        <b>ninguém ficou de fora</b>, então o contador não precisou escolher ninguém.</p>
+      ${emAberto ? `<p class="why-p">Sobraram <b>${plural(emAberto, 'vaga', 'vagas')} em
+        aberto</b>: não havia gente para todas, e ninguém faz duas escalas na mesma
+        semana. Quem quiser cobrir entra pelo <b>Editar escala</b> — e conta nos
+        contadores como qualquer escala.</p>` : ''}`;
   }
 
   const contadores = explain.people.map((p) => p.totalBefore).sort((a, b) => a - b);
@@ -725,9 +747,8 @@ function whyCut(explain) {
       sobrando. Aí, e só aí, o critério passa a ser a preferência do grupo — o app fica
       com a combinação que deixa todo mundo mais perto da 1ª opção.</p>` : ''}
     ${porFrente.length ? `<p class="why-p">${nomes(porFrente)} ${ficou(porFrente)} de fora
-      por estar <b>à frente no contador</b>: o app preferiu dar um segundo dia na semana a
-      quem estava atrás a dar mais uma escala a quem já tinha mais. É assim que a
-      diferença entre os contadores fecha quando há vaga para todo mundo.</p>` : ''}
+      por estar <b>à frente no contador</b>: ${porFrente.length === 1 ? 'chegou' : 'chegaram'}
+      com mais escalas do que qualquer pessoa que entrou.</p>` : ''}
     <p class="why-p">Quem ficou de fora <b>não gastou escala</b>: o contador não andou, e
       por isso essas pessoas entram na frente na próxima semana.</p>`;
 }
@@ -860,8 +881,7 @@ function whyOnePerson(p, explain, byDay) {
     }
     if (motivo === 'frente') {
       return `ficou <b>de fora</b> desta semana: ${chegou}, mais do que qualquer pessoa
-        que entrou. O app preferiu dar um segundo dia a quem estava atrás a dar mais uma
-        escala a quem já tinha mais.${naProxima}`;
+        que entrou.${naProxima}`;
     }
     return `ficou <b>de fora</b> desta semana: ${chegou}, o mesmo que gente que entrou —
       havia mais pessoas nesse número do que vagas. Nesse empate, e só nele, o critério é
@@ -901,12 +921,8 @@ function whyOnePerson(p, explain, byDay) {
       estavam cheios, e alguém precisava cobrir esse`;
   });
 
-  const dobrou = p.days.length > 1
-    ? ' Ficou em dois dias porque havia mais vagas do que gente disponível, e o contador'
-      + ' era dos mais baixos do grupo.'
-    : '';
   return `${chegou}${pedidos ? `, pediu ${pedidos}` : ', não registrou preferência'}, e
-    ficou na ${partes.join('; e na ')}.${dobrou}`;
+    ficou na ${partes.join('; e na ')}.`;
 }
 
 /** O que a mao mudou no caso desta pessoa, depois da geracao. */

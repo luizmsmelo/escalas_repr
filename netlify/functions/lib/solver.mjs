@@ -11,6 +11,12 @@
 // e quem larga o dia fixo volta a valer pelo contador, ou seja, fica de fora
 // ate o resto alcancar.
 //
+// E ACIMA DE TUDO ISSO, UMA REGRA DURA: ninguem faz duas escalas na mesma
+// semana - nem por dia fixo, nem pela sexta, nem para fechar a conta. Faltando
+// gente, a vaga fica em ABERTO e a tela avisa. Repetir alguem e uma decisao de
+// quem monta a escala, tomada a mao e visivel na tela, nao algo que o app faca
+// sozinho. O preco esta anotado na fase 2.
+//
 // FASE 0 - OS DIAS FIXOS. Quem tem um dia fixo cadastrado fica sempre naquele
 // dia e nao entra em disputa nenhuma: a vaga e reservada antes de tudo, e o que
 // sobra de capacidade e que vai para as outras duas fases. Quem tem dia fixo
@@ -44,10 +50,17 @@
 // rodizio, e a diferenca entre o maior e o menor so cresceria.
 //
 // Resolvido por fluxo de custo minimo: cada vaga e uma unidade de fluxo que
-// passa por uma pessoa e um dia. O custo de sair da origem e o historico da
-// pessoa; o de chegar num dia e a posicao daquele dia na lista dela. Minimizar
-// o custo total = rodizio fechado, e dentro dele o grupo INTEIRO o mais perto
-// possivel da 1a opcao.
+// passa por uma pessoa e um dia. Cada pessoa livre tem UMA unica aresta saindo
+// da origem - e dai que sai a regra de uma escala por semana. O custo dessa
+// aresta e o historico da pessoa; o de chegar num dia e a posicao daquele dia
+// na lista dela. Minimizar o custo total = rodizio fechado, e dentro dele o
+// grupo INTEIRO o mais perto possivel da 1a opcao.
+//
+// O preco da regra: numa semana com mais vagas do que gente, sobra vaga em
+// aberto; e numa equipe do tamanho EXATO da escala, todo mundo trabalha toda
+// semana, entao uma defasagem de uma escala nao fecha - so fecharia dobrando
+// alguem. Com mais gente do que vagas, que e o caso normal, a defasagem fecha
+// em poucas semanas sem ninguem repetir.
 //
 // Os dois contadores sao GERAIS, nao mensais. O mes tem 4 ou 5 sextas para 9
 // pessoas: um contador que zera todo mes nunca fecha o rodizio, e a mesma
@@ -162,10 +175,10 @@ export function solveWeek(participants, capacity) {
   const vagasDaSemana = DAYS.reduce((sum, d) => sum + (left[d] || 0), 0);
   const friday = pickFriday(disputantes, left[FRIDAY] ?? 0, vagasDaSemana);
 
-  // Quem ja tem vaga - por dia fixo ou pela sexta - so recebe um segundo dia se
-  // nao houver outro jeito de fechar a escala.
+  // Quem ja tem vaga - por dia fixo ou pela sexta - esta fora da fase 2: uma
+  // escala por pessoa por semana, sem excecao.
   const busy = new Set([...fixed.taken, ...friday.picked.map((p) => p.person.id)]);
-  const weekdays = solveWeekdays(people, left, busy, fixed.dayOf);
+  const weekdays = solveWeekdays(people, left, busy);
 
   const assignments = [
     ...fixed.placed,
@@ -207,7 +220,7 @@ export function solveWeek(participants, capacity) {
         && people.some((p) => p.noFriday),
     },
     summary: buildSummary(assignments, capacity),
-    explain: buildExplain(people, capacity, assignments, friday),
+    explain: buildExplain(people, capacity, assignments, friday, unfilledSlots),
   };
 }
 
@@ -221,7 +234,6 @@ export function solveWeek(participants, capacity) {
 function placeFixed(people, capacity) {
   const placed = [];
   const taken = new Set();
-  const dayOf = new Map();   // pessoa -> dia ja reservado, para nao repetir
   const spill = [];
 
   for (const day of DAYS) {
@@ -235,7 +247,6 @@ function placeFixed(people, capacity) {
           personId: person.id, name: person.name, day, rank: null, via: 'fixo',
         });
         taken.add(person.id);
-        dayOf.set(person.id, day);
       } else {
         spill.push({
           personId: person.id, name: person.name, day,
@@ -245,7 +256,7 @@ function placeFixed(people, capacity) {
     });
   }
 
-  return { placed, taken, dayOf, spill };
+  return { placed, taken, spill };
 }
 
 /* ------------------------------------------------------------------ fase 1 */
@@ -331,7 +342,7 @@ function byQueue(a, b) {
 
 /* ------------------------------------------------------------------ fase 2 */
 
-function solveWeekdays(people, capacity, busy, fixedOn = new Map()) {
+function solveWeekdays(people, capacity, busy) {
   const slots = WEEKDAYS.reduce((sum, d) => sum + (capacity[d] || 0), 0);
   const P = people.length;
   if (P === 0 || slots === 0) {
@@ -347,39 +358,27 @@ function solveWeekdays(people, capacity, busy, fixedOn = new Map()) {
   const SINK = 1 + P + WEEKDAYS.length;
   const graph = new MinCostFlow(SINK + 1);
 
-  const maxPerPerson = Math.max(1, Math.ceil(slots / P));
-
-  // Tres criterios, em ordem ESTRITA de importancia:
-  //   1. quem tem menos escalas acumuladas entra primeiro;
-  //   2. ninguem pega dois dias na mesma semana enquanto alguem no mesmo pe do
-  //      historico ainda nao pegou nenhum;
-  //   3. preferencia.
-  // Cada degrau vale mais do que o degrau de baixo consegue somar na semana
-  // INTEIRA, entao um criterio nunca e trocado pelo outro: o de cima decide, e
-  // o de baixo so escolhe entre escalas que o de cima empatou. E o mesmo
-  // criterio da fila da sexta, agora valendo tambem de segunda a quinta.
-  const EXTRA_SHIFT_COST = slots * NO_PREFERENCE_COST + 1;
-  const HISTORY_COST = slots * maxPerPerson * EXTRA_SHIFT_COST + 1;
+  // Dois criterios, em ordem ESTRITA: primeiro entra quem tem menos escalas
+  // acumuladas; so depois a preferencia escolhe o dia. Um degrau de historico
+  // vale mais do que a preferencia consegue somar na semana INTEIRA, entao o
+  // contador nunca e trocado por preferencia - ela so escolhe entre escalas que
+  // o contador empatou. E o mesmo criterio da fila da sexta.
+  const HISTORY_COST = slots * NO_PREFERENCE_COST + 1;
 
   // So a diferenca entre as pessoas importa, nao o tamanho do historico.
   const floor = Math.min(...people.map((p) => p.totalCount ?? 0));
 
   for (let i = 0; i < P; i++) {
-    // Quem ja pegou vaga nesta semana - dia fixo ou sexta - entra na fase 2
-    // como quem ja esta uma escala a frente no historico: so recebe um segundo
-    // dia depois de todo mundo no mesmo pe ter recebido o primeiro.
-    const already = busy.has(people[i].id) ? 1 : 0;
+    // UMA escala por pessoa por semana, e ponto: quem ja tem vaga - por dia
+    // fixo ou pela sexta - nao disputa aqui, e quem esta livre recebe uma unica
+    // aresta. Faltando gente, a vaga fica em aberto e a tela avisa; por a mesma
+    // pessoa duas vezes na semana e decisao de quem monta a escala, feita a mao
+    // e visivel, nao algo que o app faca sozinho para fechar a conta.
+    if (busy.has(people[i].id)) continue;
     const ahead = (people[i].totalCount ?? 0) - floor;
-    for (let k = 0; k < maxPerPerson; k++) {
-      const nth = already + k;   // a n-esima escala desta pessoa nesta semana
-      graph.addEdge(SOURCE, personNode(i), 1,
-        (ahead + nth) * HISTORY_COST + nth * EXTRA_SHIFT_COST);
-    }
+    graph.addEdge(SOURCE, personNode(i), 1, ahead * HISTORY_COST);
     for (const d of WEEKDAYS) {
       if (!capacity[d]) continue;
-      // Ja reservado neste dia pela fase 0: uma segunda aresta para o mesmo dia
-      // colocaria a pessoa duas vezes na mesma data.
-      if (fixedOn.get(people[i].id) === d) continue;
       graph.addEdge(personNode(i), dayNode(d), 1, weekdayCost(people[i], d));
     }
   }
@@ -459,7 +458,7 @@ function buildSummary(assignments, capacity) {
  * refeita depois, que daria outro resultado assim que qualquer outra semana
  * fosse gerada.
  */
-function buildExplain(people, capacity, assignments, friday) {
+function buildExplain(people, capacity, assignments, friday, unfilledSlots) {
   const porPessoa = new Map();
   for (const a of assignments) {
     if (!porPessoa.has(a.personId)) porPessoa.set(a.personId, []);
@@ -473,6 +472,7 @@ function buildExplain(people, capacity, assignments, friday) {
   return {
     capacity: { ...capacity },
     totalSlots: DAYS.reduce((sum, d) => sum + (capacity[d] || 0), 0),
+    unfilled: [...unfilledSlots],
     headcount: people.length,
     cut,
     people: people.map((p) => ({

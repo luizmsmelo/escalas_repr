@@ -11,6 +11,12 @@ dia. Com mais gente do que vagas, ele decide também **quem** fica de fora naque
 semana — e aí quem entra é quem tem menos escalas acumuladas, não quem pediu o
 dia mais vazio.
 
+**Ninguém faz duas escalas na mesma semana.** Nem por dia fixo, nem por ter
+pegado a sexta, nem para fechar a conta numa semana com pouca gente. Se faltar
+gente para todas as vagas, a vaga fica **em aberto** e a tela avisa: repetir
+alguém é decisão do grupo, tomada à mão em *Editar escala* e visível como
+ajuste manual — não algo que o app faça sozinho.
+
 ---
 
 ## Como a escala é montada
@@ -100,12 +106,10 @@ respostas diferentes:
 | **quem** é escalado nesta semana | o contador de escalas acumuladas |
 | **em qual dia** essa pessoa cai | a preferência dela |
 
-São três critérios, em ordem **estrita**: quem tem menos escalas acumuladas entra
-primeiro; ninguém pega dois dias na mesma semana enquanto alguém no mesmo pé do
-histórico não pegou nenhum; e só então a preferência escolhe o dia. Cada critério
-vale mais do que o de baixo consegue somar na semana inteira, então o de cima
-nunca é trocado pelo de baixo — o de baixo só escolhe entre escalas que o de cima
-empatou.
+São dois critérios, em ordem **estrita**: quem tem menos escalas acumuladas entra
+primeiro, e só então a preferência escolhe o dia. O primeiro vale mais do que o
+segundo consegue somar na semana inteira, então o contador nunca é trocado por
+preferência — ela só escolhe entre escalas que o contador empatou.
 
 É o mesmo critério da fila da sexta, agora valendo também de segunda a quinta.
 
@@ -127,6 +131,21 @@ e o total melhora.
 
 O resultado é o ótimo global — nenhuma outra distribuição tem custo menor — e é
 determinístico: a mesma entrada sempre produz a mesma escala.
+
+**Uma escala por pessoa, sempre.** No fluxo, cada pessoa livre tem uma única
+aresta saindo da origem, e quem já tem vaga (dia fixo ou sexta) não tem nenhuma.
+Não existe custo de "segundo dia": o segundo dia simplesmente não é
+representável. O preço são dois casos:
+
+| situação | o que acontece |
+| --- | --- |
+| mais vagas do que gente na semana | sobra vaga **em aberto**, para o grupo resolver |
+| equipe do tamanho exato da escala | todo mundo trabalha toda semana, então uma defasagem de 1 escala não fecha sozinha |
+
+Com **mais gente do que vagas** — o caso normal, e o de hoje: 12 pessoas para 9
+vagas — nenhum dos dois aparece, e a defasagem fecha em poucas semanas. Numa
+semana cheia, com 12 pessoas cadastradas, só sobra vaga em aberto a partir de
+**4 ausências**.
 
 **Por que o contador vem antes da preferência.** Com mais gente do que vagas,
 alguém fica de fora toda semana, e quem fica de fora é decidido aqui. Preferência

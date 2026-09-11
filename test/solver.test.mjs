@@ -105,22 +105,17 @@ console.log('\n--- fase 1: a fila da sexta ---');
      'e fica de fora da semana inteira, ate os contadores se equilibrarem');
 }
 {
-  // Mesmo com tanta vaga quanto gente, quem esta a frente no contador fica de
-  // fora: o app dobra alguem que esta atras em vez de dar mais uma escala a
-  // quem ja tem mais. Sem isso a defasagem nunca fecharia numa equipe do
-  // tamanho exato da escala.
+  // Com tanta vaga quanto gente todo mundo trabalha, inclusive quem esta a
+  // frente no contador: tirar essa pessoa exigiria dobrar outra, e ninguem faz
+  // duas escalas na mesma semana. A defasagem fecha quando sobra gente.
   const povo = NOMES.map((_, i) =>
     i === 0 ? mk(i, { totalCount: 5 }) : mk(i, { totalCount: 3 }));
   const r = solveWeek(povo, CAP);
   ok(r.assignments.length === 9, `as 9 vagas continuam preenchidas (${r.assignments.length})`);
-  ok(!r.assignments.some((a) => a.name === 'Luiz'),
-     'quem tem 5 escalas fica de fora, com os outros em 3');
-
-  const depois = new Map(povo.map((p) => [p.id, p.totalCount]));
-  for (const a of r.assignments) depois.set(a.personId, depois.get(a.personId) + 1);
-  const n = [...depois.values()];
-  ok(Math.max(...n) - Math.min(...n) === 1,
-     `a semana aproxima os contadores: de 2 para ${Math.max(...n) - Math.min(...n)}`);
+  ok(new Set(r.assignments.map((a) => a.personId)).size === 9,
+     '9 pessoas distintas - ninguem duas vezes');
+  ok(r.assignments.some((a) => a.name === 'Luiz'),
+     'quem esta a frente entra, porque nao ha como tira-lo sem dobrar alguem');
 }
 {
   // O corte NAO vira uma ordenacao dentro da semana. Quem ficou uma escala
@@ -202,15 +197,18 @@ console.log('\n--- fase 2: segunda a quinta ---');
               `${r.summary.automaticFriday}x sexta, ${r.summary.outsidePreferences}x fora`);
 }
 {
-  // Menos gente que vagas: alguem dobra, mas quem pegou a sexta e o ultimo a dobrar.
+  // Menos gente que vagas: NINGUEM dobra. A vaga que sobra fica em aberto - por
+  // a mesma pessoa duas vezes na semana e decisao de quem monta a escala, feita
+  // a mao e visivel, nao algo que o app faca sozinho para fechar a conta.
   const povo = NOMES.slice(0, 7).map((_, i) => mk(i));
   const r = solveWeek(povo, CAP);
-  ok(r.assignments.length === 9, `9 vagas com 7 pessoas (${r.assignments.length})`);
   const cont = {};
   r.assignments.forEach((a) => { cont[a.name] = (cont[a.name] || 0) + 1; });
-  ok(Math.max(...Object.values(cont)) === 2, 'ninguem com mais de 2 dias');
-  ok(cont[sexta(r).name] === 1, 'quem pegou a sexta nao dobrou');
-  console.log(`  dias por pessoa: ${JSON.stringify(cont)}`);
+  ok(Math.max(...Object.values(cont)) === 1, 'ninguem faz duas escalas na mesma semana');
+  ok(r.assignments.length === 7, `7 pessoas, 7 escalas (${r.assignments.length})`);
+  ok(r.unfilledSlots.length === 2, `as 2 vagas que sobraram ficam em aberto (${r.unfilledSlots.length})`);
+  console.log(`  7 pessoas para 9 vagas: ${r.assignments.length} escalas, ` +
+              `${r.unfilledSlots.length} vagas em aberto`);
 }
 {
   // Mais gente que vagas: quem decide QUEM entra e o contador, nao a
@@ -299,6 +297,23 @@ console.log('\n--- fase 2: segunda a quinta ---');
               `e no fim todos entre ${Math.min(...n)} e ${Math.max(...n)}`);
 }
 
+{
+  // A regra, direta: por mais folgada que a semana esteja, ninguem aparece duas
+  // vezes. Com 3 pessoas para 9 vagas, saem 3 escalas e 6 vagas em aberto.
+  const povo = NOMES.slice(0, 3).map((_, i) => mk(i));
+  const r = solveWeek(povo, CAP);
+  const porPessoa = new Map();
+  for (const a of r.assignments) porPessoa.set(a.personId, (porPessoa.get(a.personId) ?? 0) + 1);
+  ok([...porPessoa.values()].every((n) => n === 1), 'uma escala por pessoa, no maximo');
+  ok(r.assignments.length === 3 && r.unfilledSlots.length === 6,
+     `3 escalas e 6 vagas em aberto (${r.assignments.length} e ${r.unfilledSlots.length})`);
+
+  // Inclusive para quem pegou a sexta: a sexta e a escala da semana dela.
+  const daSexta = sexta(r);
+  ok(r.assignments.filter((a) => a.personId === daSexta.personId).length === 1,
+     'quem pegou a sexta nao pega tambem um dia de segunda a quinta');
+}
+
 console.log('\n--- fase 0: dia fixo ---');
 {
   // Quem tem dia fixo cai nele, sem passar por preferencia nenhuma.
@@ -372,15 +387,17 @@ console.log('\n--- fase 0: dia fixo ---');
   ok(sexta(r).via === 'voluntario', 'marcado como voluntario');
 }
 {
-  // Menos gente que vagas: quem tem dia fixo pode dobrar, mas nunca no MESMO
-  // dia - duas linhas na mesma data quebrariam a chave da tabela de escalas.
+  // Menos gente que vagas: quem tem dia fixo fica SO no dia fixo. A vaga dele ja
+  // foi reservada, e reservar nao e motivo para trabalhar duas vezes na semana.
   const povo = NOMES.slice(0, 7).map((_, i) => mk(i, i === 0 ? { fixedDay: 1 } : {}));
   const r = solveWeek(povo, CAP);
   const chaves = r.assignments.map((a) => `${a.personId}-${a.day}`);
   ok(new Set(chaves).size === chaves.length, 'ninguem aparece duas vezes no mesmo dia');
-  ok(r.assignments.length === 9, `9 vagas com 7 pessoas (${r.assignments.length})`);
+  ok(r.assignments.filter((a) => a.name === 'Luiz').length === 1,
+     'o fixo tem exatamente uma escala');
   ok(r.assignments.some((a) => a.name === 'Luiz' && a.day === 1 && a.via === 'fixo'),
-     'o fixo continua na segunda');
+     'e ela e o dia fixo dele');
+  ok(r.assignments.length === 7, `7 pessoas, 7 escalas (${r.assignments.length})`);
 }
 {
   // Determinismo: a ordem de entrada nao muda nada.
@@ -444,28 +461,25 @@ console.log('\n--- explicacao da escala ---');
   ok(r.explain.people.every((p) => p.days.length === 1), 'e todo mundo tem o seu dia');
 }
 {
-  // Quem esta MUITO a frente fica de fora mesmo havendo vaga para todo mundo:
-  // o app dobra alguem que esta atras em vez de dar mais uma a quem tem mais.
-  // A explicacao precisa distinguir esse caso do empate - o motivo e outro.
+  // Nem um contador muito a frente derruba a regra: com 9 vagas para 9 pessoas,
+  // tirar quem tem 9 escalas obrigaria alguem a fazer duas. Entao ele entra, e
+  // a explicacao registra que ninguem ficou de fora.
   const r = solveWeek(NOMES.map((_, i) => mk(i, { totalCount: i === 0 ? 9 : 0 })), CAP);
   const luiz = r.explain.people.find((p) => p.name === 'Luiz');
-  ok(luiz.days.length === 0, 'quem tem 9 escalas contra 0 nao entra');
-  ok(luiz.aboveCut === false,
-     'e nao esta acima do corte - com 9 vagas para 9 pessoas, o corte nao barra ninguem');
-  const iguaisDentro = r.explain.people.some((q) =>
-    q.name !== 'Luiz' && q.totalBefore === luiz.totalBefore && q.days.length);
-  ok(iguaisDentro === false,
-     'nem empatado com quem entrou: a tela tem como dizer que ele estava a frente');
-  ok(r.explain.people.some((p) => p.days.length > 1),
-     'alguem dobrou no lugar dele - e o que fecha a diferenca');
+  ok(luiz.days.length === 1, `quem tem 9 escalas contra 0 ainda entra (${luiz.days.length})`);
+  ok(r.explain.people.every((p) => p.days.length <= 1), 'e ninguem dobra');
+  ok(r.explain.unfilled.length === 0, 'sem vaga em aberto: havia gente para todas');
 }
 
 console.log('\n--- casos limite ---');
 ok(solveWeek([], CAP).unfilledSlots.length === 9, 'zero pessoas: 9 vagas em aberto');
 ok(solveWeek(NOMES.map((_, i) => mk(i)), { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }).assignments.length === 0, 'zero vagas');
 {
+  // Uma pessoa cobre UMA vaga - as outras 8 ficam em aberto, nao empilhadas
+  // nela. A tela avisa, e quem monta a escala resolve.
   const r = solveWeek([mk(0)], CAP);
-  ok(r.assignments.length === 5, `1 pessoa cobre no maximo 5 dias distintos (${r.assignments.length})`);
+  ok(r.assignments.length === 1, `1 pessoa cobre 1 vaga (${r.assignments.length})`);
+  ok(r.unfilledSlots.length === 8, `as outras 8 ficam em aberto (${r.unfilledSlots.length})`);
 }
 {
   // Sem preferencia registrada, a pessoa ainda entra na escala.
