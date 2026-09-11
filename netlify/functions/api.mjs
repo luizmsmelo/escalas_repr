@@ -496,7 +496,7 @@ async function computeStats(ym, overrides) {
       grandFridays: sumOf(activePeople, allTime, 'fridays'),
     },
     // A fila da sexta e acumulada e independente do mes que estiver na tela.
-    fridayQueue: buildFridayQueue(activePeople, allTime),
+    fridayQueue: buildFridayQueue(activePeople, allTime, capWeekday * 4 + capFriday),
     // Dias uteis do mes que nao terao expediente, para a tela explicar a conta.
     closedDays: calendar.closed,
     hasCalendar: calendar.hasCalendar,
@@ -556,20 +556,41 @@ async function resetCounters({ undo } = {}) {
 }
 
 /**
- * A fila da sexta como ela sera avaliada na proxima geracao. Quem tem dia fixo
- * fica de fora: a vaga dele ja esta reservada em outro dia, e o contador de
- * sextas dele nao anda - deixa-lo na fila o poria eternamente em primeiro.
+ * A fila da sexta como ela sera avaliada na proxima geracao, com o mesmo
+ * criterio do solver: quem esta a frente no contador GERAL nao trabalha na
+ * semana - e portanto nao leva a sexta - e, entre o resto, leva quem tem menos
+ * sextas acumuladas.
+ *
+ * `waiting` marca quem esta acima do corte. O corte usa uma semana cheia como
+ * referencia; feriado muda o numero de vagas e so se sabe na hora de gerar.
+ * Voluntariado tambem nao entra aqui: depende das preferencias da semana, que
+ * ainda podem mudar.
+ *
+ * Quem tem dia fixo fica de fora da fila: a vaga dele ja esta reservada em
+ * outro dia, e o contador de sextas dele nao anda - deixa-lo na fila o poria
+ * eternamente em primeiro.
  */
-function buildFridayQueue(people, counts) {
-  return people
+function buildFridayQueue(people, counts, weekSlots) {
+  const fixos = people.filter((p) => p.fixedDay != null).length;
+  const disputa = people
     .filter((p) => p.fixedDay == null)
     .map((p) => ({
       personId: p.id,
       name: p.name,
       fridays: counts.get(p.id)?.fridays ?? 0,
       total: counts.get(p.id)?.total ?? 0,
-    }))
-    .sort((a, b) => a.fridays - b.fridays || a.total - b.total || a.personId - b.personId);
+    }));
+
+  const vagas = Math.max(0, weekSlots - fixos);
+  const ordenados = disputa.map((q) => q.total).sort((a, b) => a - b);
+  const cut = vagas && ordenados.length
+    ? ordenados[Math.min(vagas, ordenados.length) - 1]
+    : Infinity;
+
+  return disputa
+    .map((q) => ({ ...q, waiting: q.total > cut }))
+    .sort((a, b) => (a.waiting ? 1 : 0) - (b.waiting ? 1 : 0)
+      || a.fridays - b.fridays || a.total - b.total || a.personId - b.personId);
 }
 
 /** Marca que um dia terá ou não terá expediente, contra o calendário oficial. */

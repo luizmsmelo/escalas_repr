@@ -387,16 +387,22 @@ function renderFridayBox(fridayPicked, locked, fridayOpen = true) {
     ? `${mine.fridays} ${mine.fridays === 1 ? 'sexta' : 'sextas'} no total`
     : '';
 
-  $('#fridayText').innerHTML = fridayPicked
-    ? 'Você colocou sexta no seu top 3, então está <b>se voluntariando</b> e passa na frente da fila.'
-    : state.noFriday
-      ? 'Você está <b>fora da sexta</b> nesta semana. Se todo mundo fizer o mesmo, a vaga fica vazia.'
-      : temFixo
-        ? 'Como você tem <b>dia fixo</b>, fica fora da fila da sexta. Se quiser a sexta '
-          + 'desta semana, coloque-a no seu top 3.'
-        : position
-          ? `Sexta é sua <b>4ª opção automática</b>. Você está em <b>${position}º</b> de ${queue.length} na fila.`
-          : 'Sexta é sua <b>4ª opção automática</b>.';
+  $('#fridayText').innerHTML = mine?.waiting
+    // Acima do corte do contador geral: nao e a sexta que esta em jogo, e a
+    // semana inteira - dizer "voce e o 12o da fila" esconderia o motivo.
+    ? `Você tem <b>${mine.total} escalas</b>, mais que o resto do grupo, então fica de fora `
+      + 'desta semana — inclusive da sexta — até os contadores se emparelharem.'
+    : fridayPicked
+      ? 'Você colocou sexta no seu top 3, então está <b>se voluntariando</b>: entre quem tem o '
+        + 'mesmo número de sextas, você passa na frente. Não é o mesmo que ter sexta como dia fixo.'
+      : state.noFriday
+        ? 'Você está <b>fora da sexta</b> nesta semana. Se todo mundo fizer o mesmo, a vaga fica vazia.'
+        : temFixo
+          ? 'Como você tem <b>dia fixo</b>, fica fora da fila da sexta. Se quiser a sexta '
+            + 'desta semana, coloque-a no seu top 3.'
+          : position
+            ? `Sexta é sua <b>4ª opção automática</b>. Você está em <b>${position}º</b> de ${queue.length} na fila.`
+            : 'Sexta é sua <b>4ª opção automática</b>.';
 }
 
 function renderRespondedList() {
@@ -740,14 +746,20 @@ function renderFridayQueue(queue) {
     el.innerHTML = '<li class="empty">Nenhuma pessoa ativa cadastrada.</li>';
     return;
   }
-  const menor = queue[0].fridays;
+  // Quem esta esperando o contador de escalas baixar nao esta na disputa da
+  // sexta, entao nao pode aparecer como "proximo da fila".
+  const naFila = queue.filter((q) => !q.waiting);
+  const menor = naFila.length ? naFila[0].fridays : null;
   el.innerHTML = queue
-    .map((q, i) => `<li class="queue-row" data-next="${q.fridays === menor ? 1 : 0}"
+    .map((q, i) => `<li class="queue-row" data-next="${!q.waiting && q.fridays === menor ? 1 : 0}"
+                        data-waiting="${q.waiting ? 1 : 0}"
                         data-me="${q.personId === state.me?.id ? 1 : 0}">
       <span class="queue-pos">${i + 1}</span>
       <span class="avatar">${esc(initials(q.name))}</span>
       <span class="queue-name">${esc(q.name)}</span>
-      <span class="queue-count">${q.fridays} ${q.fridays === 1 ? 'sexta' : 'sextas'}</span>
+      <span class="queue-count">${q.waiting
+        ? `${q.total} escalas — fora desta semana`
+        : `${q.fridays} ${q.fridays === 1 ? 'sexta' : 'sextas'}`}</span>
     </li>`)
     .join('');
 }

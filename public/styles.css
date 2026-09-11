@@ -642,6 +642,8 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
   color: var(--text-muted); font-variant-numeric: tabular-nums;
 }
 .queue-row[data-next="1"] .queue-pos { color: var(--accent); }
+/* Acima do corte do contador geral: nao disputa a sexta nesta semana. */
+.queue-row[data-waiting="1"] { opacity: .55; }
 .queue-row .avatar { width: 28px; height: 28px; font-size: .68rem; }
 .queue-name { flex: 1; min-width: 0; font-size: .9rem; }
 .queue-row[data-me="1"] .queue-name { font-weight: 700; }

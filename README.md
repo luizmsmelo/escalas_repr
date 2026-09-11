@@ -52,22 +52,43 @@ uma garantia de pegar toda sexta em que a segunda fosse feriado.
 
 ### Fase 1 — a sexta
 
-Ninguém escolhe sexta por gosto, então preferência não serve de critério. **Leva
-quem tem menos sextas acumuladas.** É uma fila que qualquer pessoa confere de
-cabeça. Duas exceções:
+A sexta é uma vaga como as outras, então a primeira pergunta é a mesma:
+**quem trabalha nesta semana?** Quem está à frente no contador geral não
+trabalha — e portanto não leva a sexta. O corte é o contador da última pessoa
+que cabe nas vagas da semana; quem está acima dele só é chamado se não sobrar
+mais ninguém, porque deixar a vaga vazia seria pior.
 
-- **Voluntário passa na frente.** Quem coloca sexta no próprio top 3 leva, mesmo
-  tendo mais sextas acumuladas. Ninguém sai perdendo: o voluntário queria a
-  sexta, e quem estava na fila foi poupado.
+Entre quem está dentro do corte, **leva quem tem menos sextas acumuladas**. É uma
+fila que qualquer pessoa confere de cabeça. Duas observações:
+
+- **Voluntário passa na frente — só no empate.** Quem coloca sexta no próprio
+  top 3 leva a vaga quando está empatado em sextas com os outros da fila. Aí
+  ninguém sai perdendo: o voluntário queria a sexta, e quem estava na fila foi
+  poupado.
 - **"Não posso esta sexta" é veto, não preferência.** Quem aperta sai da conta
   daquela semana. Se todos apertarem, a vaga fica vazia — o app não escala
   alguém que disse que não podia.
 
 Para quem não pediu nem vetou, sexta é a **4ª opção automática**.
 
-Empates na fila são desfeitos por: menos sextas → menos escalas no total →
-ordem de cadastro. O último critério garante que a mesma entrada sempre produza
-a mesma escala.
+Empates na fila são desfeitos por: menos sextas → voluntário → menos escalas no
+total → ordem de cadastro. O último critério garante que a mesma entrada sempre
+produza a mesma escala.
+
+**Por que voluntariar-se não fura a fila.** Se bastasse pedir, quem colocasse
+sexta no top 3 toda semana levaria todas as sextas — exatamente o efeito de
+cadastrar sexta como **dia fixo**, só que sem passar pelo cadastro, sem aparecer
+na tela como fixo e sem nenhum dos limites que o dia fixo tem. Quem quer sempre
+o mesmo dia tem o dia fixo para isso; preferir a sexta move a pessoa dentro dos
+empates, não para fora da fila.
+
+**Por que o corte é um corte, e não uma ordenação.** Ordenar a fila da sexta pelo
+contador geral parece mais justo, mas quebra o rodízio: numa equipe do tamanho
+exato da escala, todo mundo trabalha toda semana, então uma defasagem de uma
+escala nunca fecha — e quem ficasse uma atrás seria o primeiro da fila para
+sempre, levando *todas* as sextas. Dentro do corte, todo mundo é igualmente
+elegível, e a escolha entre eles não muda contador nenhum: quem leva a sexta e
+quem leva um dia de segunda a quinta terminam a semana com o mesmo total.
 
 ### Fase 2 — de segunda a quinta
 
@@ -162,13 +183,14 @@ Não são só um placar: cada um decide uma coisa na hora de montar a semana.
 
 | contador | decide |
 | --- | --- |
-| **sextas** | quem leva a sexta (fase 1) |
-| **escalas** | quem é escalado de segunda a quinta quando há mais gente que vagas (fase 2) |
+| **escalas** | **quem trabalha na semana** — nas duas fases, sexta inclusive |
+| **sextas** | qual dessas pessoas leva a sexta |
 
-Duas coisas passam por cima do contador de escalas, de propósito: o **dia fixo**,
-que reserva a vaga antes de qualquer disputa, e o **voluntário da sexta**, que
-fura a fila. Quem tem dia fixo numa semana em que sobra gente entra toda semana e
-acumula mais escalas que o resto — é o preço de ter sempre o mesmo dia.
+Uma única coisa passa por cima do contador de escalas, de propósito: o **dia
+fixo**, que reserva a vaga antes de qualquer disputa. Numa semana em que sobra
+gente, quem tem dia fixo entra de qualquer jeito e acumula mais escalas que o
+resto — é o preço de ter sempre o mesmo dia. E quem larga o dia fixo volta a
+valer pelo contador: fica de fora das escalas até o resto alcançar.
 
 Isso é deliberado, por dois motivos.
 

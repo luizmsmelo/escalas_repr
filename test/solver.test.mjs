@@ -58,6 +58,14 @@ const mk = (i, extra = {}) => ({
 });
 const sexta = (r) => r.assignments.find((a) => a.day === FRIDAY);
 
+// 12 pessoas para as 9 vagas da semana: e o caso em que alguem fica de fora, e
+// portanto o unico em que o contador consegue escolher quem entra.
+const DOZE = [...NOMES, 'Ivo', 'Joana', 'Kaue'];
+const DOZE_PESSOAS = (excecoes = {}, padrao = {}) => DOZE.map((name, i) => ({
+  id: i + 1, name, choices: [1, 2, 3],
+  fridayCount: 0, totalCount: 0, noFriday: false, ...padrao, ...(excecoes[i] ?? {}),
+}));
+
 console.log('\n--- fase 1: a fila da sexta ---');
 {
   // Contadores diferentes, ninguem pede sexta: leva quem tem menos.
@@ -68,13 +76,75 @@ console.log('\n--- fase 1: a fila da sexta ---');
   ok(sexta(r).rank === 4, 'registrado como 4a opcao automatica');
 }
 {
-  // Voluntario fura a fila mesmo tendo MAIS sextas que todo mundo.
+  // Empatado nos dois contadores, o voluntario passa na frente: ele queria a
+  // sexta, e quem estava na fila foi poupado.
   const povo = NOMES.map((_, i) =>
-    i === 0 ? mk(i, { choices: [FRIDAY, 1, 2], fridayCount: 50 }) : mk(i, { fridayCount: 0 }));
+    i === 0 ? mk(i, { choices: [FRIDAY, 1, 2] }) : mk(i));
   const r = solveWeek(povo, CAP);
   ok(sexta(r).name === 'Luiz', `voluntario passa na frente (levou ${sexta(r).name})`);
   ok(sexta(r).via === 'voluntario', 'marcado como voluntario');
   ok(sexta(r).rank === 1, 'mantem a posicao que ele mesmo deu (1a opcao)');
+}
+{
+  // ... mas voluntariar-se NAO fura a fila. Senao, colocar sexta no top 3 toda
+  // semana seria o mesmo que ter sexta como dia fixo, sem passar pelo cadastro.
+  const povo = NOMES.map((_, i) =>
+    i === 0 ? mk(i, { choices: [FRIDAY, 1, 2], fridayCount: 50 }) : mk(i, { fridayCount: 0 }));
+  const r = solveWeek(povo, CAP);
+  ok(sexta(r).name !== 'Luiz',
+     `quem ja tem 50 sextas nao leva mais uma so por pedir (levou ${sexta(r).name})`);
+}
+{
+  // ... e nem entra na semana, se o contador GERAL dele estiver alto e houver
+  // mais gente do que vagas: 5 escalas contra 3, e ninguem mais quer a sexta.
+  const povo = DOZE_PESSOAS({ 0: { choices: [FRIDAY, 1, 2], totalCount: 5 } }, { totalCount: 3 });
+  const r = solveWeek(povo, CAP);
+  ok(sexta(r).name !== 'Luiz',
+     `voluntario com o contador alto nao leva a sexta (levou ${sexta(r).name})`);
+  ok(!r.assignments.some((a) => a.name === 'Luiz'),
+     'e fica de fora da semana inteira, ate os contadores se equilibrarem');
+}
+{
+  // Mesmo com tanta vaga quanto gente, quem esta a frente no contador fica de
+  // fora: o app dobra alguem que esta atras em vez de dar mais uma escala a
+  // quem ja tem mais. Sem isso a defasagem nunca fecharia numa equipe do
+  // tamanho exato da escala.
+  const povo = NOMES.map((_, i) =>
+    i === 0 ? mk(i, { totalCount: 5 }) : mk(i, { totalCount: 3 }));
+  const r = solveWeek(povo, CAP);
+  ok(r.assignments.length === 9, `as 9 vagas continuam preenchidas (${r.assignments.length})`);
+  ok(!r.assignments.some((a) => a.name === 'Luiz'),
+     'quem tem 5 escalas fica de fora, com os outros em 3');
+
+  const depois = new Map(povo.map((p) => [p.id, p.totalCount]));
+  for (const a of r.assignments) depois.set(a.personId, depois.get(a.personId) + 1);
+  const n = [...depois.values()];
+  ok(Math.max(...n) - Math.min(...n) === 1,
+     `a semana aproxima os contadores: de 2 para ${Math.max(...n) - Math.min(...n)}`);
+}
+{
+  // O corte NAO vira uma ordenacao dentro da semana. Quem ficou uma escala
+  // atras nao pode virar o primeiro da fila da sexta para sempre - foi o que
+  // aconteceu quando o contador geral ordenava a fila: com 9 vagas para 9
+  // pessoas a defasagem nunca fecha, e a pessoa levava todas as sextas.
+  const total = new Map(NOMES.map((_, i) => [i + 1, i === 0 ? 2 : 3]));
+  const sextas = new Map(NOMES.map((_, i) => [i + 1, 0]));
+  const donos = [];
+
+  for (let semana = 0; semana < 6; semana++) {
+    const povo = NOMES.map((name, i) => ({
+      id: i + 1, name, choices: [(i % 4) + 1, ((i + 1) % 4) + 1, ((i + 2) % 4) + 1],
+      noFriday: false, totalCount: total.get(i + 1), fridayCount: sextas.get(i + 1),
+    }));
+    for (const a of solveWeek(povo, CAP).assignments) {
+      total.set(a.personId, total.get(a.personId) + 1);
+      if (a.day === FRIDAY) { sextas.set(a.personId, sextas.get(a.personId) + 1); donos.push(a.name); }
+    }
+  }
+
+  ok(new Set(donos).size === 6, `6 semanas, 6 pessoas diferentes na sexta (${new Set(donos).size})`);
+  ok(donos.filter((n) => n === 'Luiz').length <= 1,
+     `quem estava uma escala atras nao levou todas as sextas (levou ${donos.filter((n) => n === 'Luiz').length})`);
 }
 {
   // Dois voluntarios: quem colocou sexta em posicao melhor leva.
@@ -173,7 +243,6 @@ console.log('\n--- fase 2: segunda a quinta ---');
   // de fora por semana, e em 8 semanas a diferenca entre o maior e o menor
   // contador nao passa de 1. E o teste que o app nao passava: com o contador
   // valendo so como desempate, os mesmos 3 ficavam de fora toda semana.
-  const DOZE = [...NOMES, 'Ivo', 'Joana', 'Kaue'];
   // Gosto ESTAVEL e desigual, como na vida real: oito preferem o comeco da
   // semana, quatro preferem a quinta. E a desigualdade que quebrava o rodizio -
   // os quatro da quinta nunca disputavam vaga com ninguem e entravam sempre.
@@ -197,6 +266,37 @@ console.log('\n--- fase 2: segunda a quinta ---');
   ok(espalhamento <= 1,
      `8 semanas, 12 pessoas, 9 vagas: diferenca de ${espalhamento} escala(s) entre o maior e o menor`);
   console.log(`  12 pessoas em 8 semanas: de ${Math.min(...n)} a ${Math.max(...n)} escalas por pessoa`);
+}
+
+{
+  // Quem larga o dia fixo volta a valer pelo contador. Como o dia fixo entra
+  // toda semana, a tendencia e chegar a essa hora com o contador mais alto - e
+  // entao a pessoa fica de fora ate o resto alcancar. E o caso que o usuario
+  // descreveu: a excecao do dia fixo vale enquanto ele existe, nao depois.
+  const EX_FIXO = 6, RESTO = 3;
+  const total = new Map(DOZE.map((_, i) => [i + 1, i === 0 ? EX_FIXO : RESTO]));
+  const sextas = new Map(DOZE.map((_, i) => [i + 1, 0]));
+  const semanasDeFora = [];
+
+  for (let semana = 0; semana < 6; semana++) {
+    const povo = DOZE.map((name, i) => ({
+      id: i + 1, name, choices: [1, 2, 3], noFriday: false,
+      totalCount: total.get(i + 1), fridayCount: sextas.get(i + 1),
+    }));
+    const r = solveWeek(povo, CAP);
+    if (!r.assignments.some((a) => a.name === 'Luiz')) semanasDeFora.push(semana + 1);
+    for (const a of r.assignments) {
+      total.set(a.personId, total.get(a.personId) + 1);
+      if (a.day === FRIDAY) sextas.set(a.personId, sextas.get(a.personId) + 1);
+    }
+  }
+
+  ok(semanasDeFora[0] === 1, `o ex-fixo fica de fora ja na 1a semana (ficou nas ${semanasDeFora})`);
+  const n = [...total.values()];
+  ok(Math.max(...n) - Math.min(...n) <= 1,
+     `em 6 semanas os contadores emparelham (diferenca ${Math.max(...n) - Math.min(...n)})`);
+  console.log(`  ex-fixo de ${EX_FIXO} contra ${RESTO}: fora nas semanas ${semanasDeFora}, ` +
+              `e no fim todos entre ${Math.min(...n)} e ${Math.max(...n)}`);
 }
 
 console.log('\n--- fase 0: dia fixo ---');

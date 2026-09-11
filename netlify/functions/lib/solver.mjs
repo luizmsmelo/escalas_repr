@@ -1,5 +1,16 @@
 // Montagem da escala da semana, em tres fases independentes.
 //
+// A REGRA QUE VALE EM TODAS ELAS: o contador GERAL de escalas decide QUEM
+// trabalha na semana; preferencia decide QUAL dia essa pessoa pega. Equilibrio
+// e o objetivo da escala, e preferencia e um criterio estavel - quem gosta do
+// dia mais disputado perderia toda semana, e quem gosta do dia mais vazio
+// entraria toda semana. Deixar a preferencia decidir quem entra nao fecha o
+// rodizio: a diferenca entre o maior e o menor contador so cresce.
+//
+// A unica excecao e o DIA FIXO, que reserva a vaga antes de qualquer disputa -
+// e quem larga o dia fixo volta a valer pelo contador, ou seja, fica de fora
+// ate o resto alcancar.
+//
 // FASE 0 - OS DIAS FIXOS. Quem tem um dia fixo cadastrado fica sempre naquele
 // dia e nao entra em disputa nenhuma: a vaga e reservada antes de tudo, e o que
 // sobra de capacidade e que vai para as outras duas fases. Quem tem dia fixo
@@ -9,12 +20,15 @@
 // vagas. Nesses casos ela escolhe como todo mundo, mas continua fora da FILA da
 // sexta (pode se voluntariar, se quiser).
 //
-// FASE 1 - A SEXTA. Ninguem escolhe sexta por gosto, entao preferencia nao
-// serve de criterio. Quem leva e quem tem menos sextas no historico - uma fila
-// que qualquer pessoa consegue conferir de cabeca. Duas excecoes:
+// FASE 1 - A SEXTA. A sexta e uma vaga como as outras, entao a primeira
+// pergunta e a mesma: quem trabalha nesta semana? Quem esta a frente no
+// contador geral nao trabalha, e portanto nao leva a sexta - e um CORTE, nao
+// uma ordenacao (ver cutoff()). Entre os que ficam dentro do corte, leva quem
+// tem menos sextas acumuladas.
 //   * quem colocou sexta no proprio top 3 esta se voluntariando e passa na
-//     frente da fila (ninguem sai perdendo: o voluntario queria, e quem estava
-//     na fila foi poupado);
+//     frente de quem esta EMPATADO com ele em sextas - so isso. Se bastasse
+//     pedir, colocar sexta no top 3 toda semana levaria todas as sextas, o
+//     mesmo efeito de ter sexta como dia fixo mas sem passar pelo cadastro;
 //   * quem apertou "nao posso esta sexta" sai da conta por completo. E um veto,
 //     nao uma preferencia: se todos vetarem, a vaga fica vazia e a tela avisa.
 //
@@ -145,7 +159,8 @@ export function solveWeek(participants, capacity) {
   for (const a of fixed.placed) left[a.day]--;
 
   const disputantes = people.filter((p) => !fixed.taken.has(p.id));
-  const friday = pickFriday(disputantes, left[FRIDAY] ?? 0);
+  const vagasDaSemana = DAYS.reduce((sum, d) => sum + (left[d] || 0), 0);
+  const friday = pickFriday(disputantes, left[FRIDAY] ?? 0, vagasDaSemana);
 
   // Quem ja tem vaga - por dia fixo ou pela sexta - so recebe um segundo dia se
   // nao houver outro jeito de fechar a escala.
@@ -182,7 +197,8 @@ export function solveWeek(participants, capacity) {
       })),
       vetoed: people.filter((p) => p.noFriday).map((p) => p.name),
       queue: friday.queue.map((p) => ({
-        personId: p.id, name: p.name, fridayCount: p.fridayCount ?? 0,
+        personId: p.id, name: p.name,
+        totalCount: p.totalCount ?? 0, fridayCount: p.fridayCount ?? 0,
       })),
       // Vaga vazia por falta de candidato so e "todo mundo recusou" se alguem
       // de fato recusou - com o grupo inteiro fixo em outros dias, tambem nao
@@ -233,28 +249,25 @@ function placeFixed(people, capacity) {
 
 /* ------------------------------------------------------------------ fase 1 */
 
-function pickFriday(people, slots) {
-  const candidates = people.filter((p) => !p.noFriday);
+function pickFriday(people, slots, weekSlots) {
+  // Quem tem dia fixo so entra na sexta se se voluntariar: a vaga dele ja esta
+  // reservada em outro dia, e o contador de sextas dele nao anda - deixa-lo na
+  // fila o poria em primeiro em toda semana em que o dia fixo cai em feriado.
+  const candidates = people.filter(
+    (p) => !p.noFriday && (p.fixedDay == null || rankOf(p, FRIDAY) !== null));
 
-  // Quem pediu sexta explicitamente: melhor posicao primeiro. Vale tambem para
-  // quem tem dia fixo mas ficou de fora nesta semana - voluntariar-se e um ato,
-  // nao um automatismo.
-  const volunteers = candidates
-    .filter((p) => rankOf(p, FRIDAY) !== null)
-    .sort((a, b) =>
-      rankOf(a, FRIDAY) - rankOf(b, FRIDAY) || byQueue(a, b));
+  // A sexta e uma vaga como as outras: quem esta a frente no contador geral nao
+  // trabalha nesta semana, e por isso nao leva a sexta. Quem esta acima do
+  // corte so e chamado se nao sobrar mais ninguem - deixar a vaga vazia por
+  // causa do contador seria pior do que escalar alguem.
+  const cut = cutoff(people, weekSlots);
+  const queue = candidates.slice()
+    .sort((a, b) => outOfCut(a, cut) - outOfCut(b, cut) || byQueue(a, b));
 
-  // O resto: fila pelo contador geral de sextas. Quem tem dia fixo nunca entra
-  // aqui - o contador de sextas dele nao anda, entao ele seria sempre o
-  // primeiro da fila nas semanas em que o dia fixo cai em feriado.
-  const queue = candidates
-    .filter((p) => rankOf(p, FRIDAY) === null && p.fixedDay == null)
-    .sort(byQueue);
-
-  const ordered = [
-    ...volunteers.map((person) => ({ person, via: 'voluntario' })),
-    ...queue.map((person) => ({ person, via: 'fila' })),
-  ];
+  const ordered = queue.map((person) => ({
+    person,
+    via: rankOf(person, FRIDAY) !== null ? 'voluntario' : 'fila',
+  }));
   const picked = ordered.slice(0, slots);
 
   return {
@@ -265,9 +278,51 @@ function pickFriday(people, slots) {
   };
 }
 
-/** Menos sextas primeiro; depois menos escalas; depois ordem estavel por id. */
+/**
+ * O contador da ultima pessoa que cabe nas vagas da semana. Quem esta acima
+ * dele nao trabalha nesta semana - a fase 2 chegaria a mesma conclusao sozinha,
+ * e e isso que a fase 1 precisa saber antes de entregar a sexta a alguem.
+ *
+ * E um CORTE, nao uma ordenacao. Dentro do corte todo mundo e igualmente
+ * elegivel, e ai quem decide e o contador de sextas. Ordenar a fila da sexta
+ * pelo contador geral quebraria o rodizio: com o mesmo numero de vagas e de
+ * pessoas todo mundo trabalha toda semana, entao uma defasagem de uma escala
+ * nunca fecha, e quem ficasse um atras seria o primeiro da fila para sempre -
+ * levaria todas as sextas.
+ */
+function cutoff(people, weekSlots) {
+  if (!weekSlots || !people.length) return Infinity;
+  const totais = people.map((p) => p.totalCount ?? 0).sort((a, b) => a - b);
+  return totais[Math.min(weekSlots, totais.length) - 1];
+}
+
+const outOfCut = (p, cut) => ((p.totalCount ?? 0) <= cut ? 0 : 1);
+
+/**
+ * Ordem da fila, ja dentro do corte:
+ *   1. menos sextas acumuladas - e o rodizio da sexta;
+ *   2. voluntario na frente (melhor posicao primeiro);
+ *   3. menos escalas no total;
+ *   4. ordem de cadastro, so para o resultado nao mudar de uma geracao a outra.
+ *
+ * O voluntariado vem depois do contador de sextas, e e isso que separa "prefiro
+ * sexta" de "sou fixo na sexta". Se voluntariar-se bastasse, quem colocasse
+ * sexta no top 3 toda semana levaria todas elas - o mesmo efeito de cadastrar
+ * sexta como dia fixo, so que sem passar pelo cadastro, sem aparecer na tela
+ * como fixo e sem nenhum dos limites que o dia fixo tem. Quem quer sempre o
+ * mesmo dia tem o dia fixo para isso; preferir a sexta move a pessoa dentro dos
+ * empates, nao para fora da fila.
+ *
+ * Entre pessoas empatadas no contador de sextas, ai sim o voluntario passa na
+ * frente e ninguem sai perdendo: ele queria a sexta, quem estava na fila foi
+ * poupado, e os contadores dos dois ficam iguais de qualquer forma.
+ */
 function byQueue(a, b) {
+  const volA = rankOf(a, FRIDAY);
+  const volB = rankOf(b, FRIDAY);
   return (a.fridayCount ?? 0) - (b.fridayCount ?? 0)
+    || (volA === null ? 1 : 0) - (volB === null ? 1 : 0)
+    || (volA ?? 0) - (volB ?? 0)
     || (a.totalCount ?? 0) - (b.totalCount ?? 0)
     || a.id - b.id;
 }
