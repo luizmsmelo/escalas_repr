@@ -680,7 +680,9 @@ function whyRules() {
       <b>ninguém faz duas escalas na mesma semana</b>. Quando as duas não cabem juntas —
       menos gente do que vagas —, a primeira vence: alguém dobra, o mínimo de gente
       possível, e dobra quem tem menos escalas acumuladas. Quem já está na sexta é o
-      último a dobrar.</p>
+      último a dobrar. E ninguém dobra enquanto houver alguém disponível fora da
+      semana — inclusive quem está à frente no contador: antes da segunda escala de
+      qualquer pessoa vem a primeira de todo mundo.</p>
     <p class="why-note">A ordem importa: se a preferência decidisse quem entra, quem
       gosta do dia mais disputado perderia toda semana e quem gosta do dia mais vazio
       entraria toda semana — e a diferença entre os contadores só cresceria.</p>`;

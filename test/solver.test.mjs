@@ -212,6 +212,20 @@ console.log('\n--- fase 2: segunda a quinta ---');
   console.log(`  dias por pessoa: ${JSON.stringify(cont)}`);
 }
 {
+  // Antes de alguem dobrar, TODA pessoa disponivel ja esta na semana - inclusive
+  // quem esta la na frente no contador e numa semana normal ficaria de fora.
+  // A primeira escala de qualquer um custa menos do que a segunda de qualquer
+  // outro; o corte so tira gente quando sobra gente.
+  const povo = NOMES.slice(0, 8).map((_, i) => mk(i, { totalCount: i === 7 ? 20 : 0 }));
+  const r = solveWeek(povo, CAP);
+  const cont = {};
+  r.assignments.forEach((a) => { cont[a.name] = (cont[a.name] || 0) + 1; });
+  ok(r.assignments.length === 9, `9 vagas com 8 pessoas (${r.assignments.length})`);
+  ok(cont.Gisele === 1, `quem tem 20 escalas contra 0 entra uma vez antes de alguem dobrar (${cont.Gisele ?? 0})`);
+  ok(Object.values(cont).filter((n) => n === 2).length === 1, 'e so uma pessoa dobra');
+  ok(Object.keys(cont).length === 8, 'as 8 pessoas disponiveis estao na semana');
+}
+{
   // Quem dobra e quem tem menos escalas - mesmo que seja quem pegou a sexta.
   // Poupar a sexta vale so entre empatados no contador; equilibrio vem antes.
   const povo = NOMES.slice(0, 7).map((_, i) => mk(i, { totalCount: i < 2 ? 0 : 5 }));

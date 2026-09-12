@@ -14,8 +14,10 @@ dia mais vazio.
 **Toda vaga é preenchida, e ninguém faz duas escalas na mesma semana.** Quando
 as duas não cabem juntas — menos gente do que vagas —, a primeira vence: alguém
 dobra, o mínimo de gente possível, e dobra quem tem **menos escalas acumuladas**.
-Quem já está na sexta é o último a dobrar. Vaga em aberto só existe se não houver
-ninguém para ela nem assim.
+Quem já está na sexta é o último a dobrar. E ninguém dobra enquanto houver
+alguém disponível fora da semana — inclusive quem está à frente no contador:
+antes da segunda escala de qualquer pessoa vem a primeira de todo mundo. Vaga em
+aberto só existe se não houver ninguém para ela nem assim.
 
 ---
 
