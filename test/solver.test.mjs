@@ -197,18 +197,32 @@ console.log('\n--- fase 2: segunda a quinta ---');
               `${r.summary.automaticFriday}x sexta, ${r.summary.outsidePreferences}x fora`);
 }
 {
-  // Menos gente que vagas: NINGUEM dobra. A vaga que sobra fica em aberto - por
-  // a mesma pessoa duas vezes na semana e decisao de quem monta a escala, feita
-  // a mao e visivel, nao algo que o app faca sozinho para fechar a conta.
+  // Menos gente que vagas: toda vaga e preenchida, e para isso alguem dobra -
+  // o MINIMO de gente possivel, e nunca quem ja esta na sexta enquanto houver
+  // outra pessoa no mesmo pe do contador.
   const povo = NOMES.slice(0, 7).map((_, i) => mk(i));
   const r = solveWeek(povo, CAP);
   const cont = {};
   r.assignments.forEach((a) => { cont[a.name] = (cont[a.name] || 0) + 1; });
-  ok(Math.max(...Object.values(cont)) === 1, 'ninguem faz duas escalas na mesma semana');
-  ok(r.assignments.length === 7, `7 pessoas, 7 escalas (${r.assignments.length})`);
-  ok(r.unfilledSlots.length === 2, `as 2 vagas que sobraram ficam em aberto (${r.unfilledSlots.length})`);
-  console.log(`  7 pessoas para 9 vagas: ${r.assignments.length} escalas, ` +
-              `${r.unfilledSlots.length} vagas em aberto`);
+  ok(r.assignments.length === 9, `9 vagas preenchidas com 7 pessoas (${r.assignments.length})`);
+  ok(r.unfilledSlots.length === 0, 'nenhuma vaga em aberto');
+  ok(Object.values(cont).filter((n) => n === 2).length === 2, 'exatamente 2 pessoas dobram');
+  ok(Math.max(...Object.values(cont)) === 2, 'ninguem faz tres');
+  ok(cont[sexta(r).name] === 1, 'quem pegou a sexta e o ultimo a dobrar - aqui nao dobrou');
+  console.log(`  dias por pessoa: ${JSON.stringify(cont)}`);
+}
+{
+  // Quem dobra e quem tem menos escalas - mesmo que seja quem pegou a sexta.
+  // Poupar a sexta vale so entre empatados no contador; equilibrio vem antes.
+  const povo = NOMES.slice(0, 7).map((_, i) => mk(i, { totalCount: i < 2 ? 0 : 5 }));
+  const r = solveWeek(povo, CAP);
+  const cont = {};
+  r.assignments.forEach((a) => { cont[a.name] = (cont[a.name] || 0) + 1; });
+  const dobraram = Object.entries(cont).filter(([, n]) => n === 2).map(([n]) => n).sort();
+  ok(dobraram.join() === ['Ana', 'Luiz'].join(),
+     `dobram os dois com 0 escalas contra 5 (dobraram ${dobraram})`);
+  ok(sexta(r).name === 'Luiz' && cont.Luiz === 2,
+     'inclusive quem esta na sexta, porque esta 5 escalas atras dos outros');
 }
 {
   // Mais gente que vagas: quem decide QUEM entra e o contador, nao a
@@ -298,20 +312,19 @@ console.log('\n--- fase 2: segunda a quinta ---');
 }
 
 {
-  // A regra, direta: por mais folgada que a semana esteja, ninguem aparece duas
-  // vezes. Com 3 pessoas para 9 vagas, saem 3 escalas e 6 vagas em aberto.
+  // Semana muito curta de gente: 3 pessoas para 9 vagas. Toda vaga sai
+  // preenchida e a repeticao se espalha - tres escalas para cada uma, e nao
+  // quatro para duas e uma para a terceira.
   const povo = NOMES.slice(0, 3).map((_, i) => mk(i));
   const r = solveWeek(povo, CAP);
   const porPessoa = new Map();
   for (const a of r.assignments) porPessoa.set(a.personId, (porPessoa.get(a.personId) ?? 0) + 1);
-  ok([...porPessoa.values()].every((n) => n === 1), 'uma escala por pessoa, no maximo');
-  ok(r.assignments.length === 3 && r.unfilledSlots.length === 6,
-     `3 escalas e 6 vagas em aberto (${r.assignments.length} e ${r.unfilledSlots.length})`);
-
-  // Inclusive para quem pegou a sexta: a sexta e a escala da semana dela.
-  const daSexta = sexta(r);
-  ok(r.assignments.filter((a) => a.personId === daSexta.personId).length === 1,
-     'quem pegou a sexta nao pega tambem um dia de segunda a quinta');
+  ok(r.assignments.length === 9 && r.unfilledSlots.length === 0,
+     `9 escalas, nenhuma em aberto (${r.assignments.length} e ${r.unfilledSlots.length})`);
+  ok([...porPessoa.values()].every((n) => n === 3),
+     `a repeticao se espalha: ${[...porPessoa.values()].join('/')} escalas`);
+  const chaves = r.assignments.map((a) => `${a.personId}-${a.day}`);
+  ok(new Set(chaves).size === chaves.length, 'ninguem duas vezes na mesma data');
 }
 
 console.log('\n--- fase 0: dia fixo ---');
@@ -387,17 +400,15 @@ console.log('\n--- fase 0: dia fixo ---');
   ok(sexta(r).via === 'voluntario', 'marcado como voluntario');
 }
 {
-  // Menos gente que vagas: quem tem dia fixo fica SO no dia fixo. A vaga dele ja
-  // foi reservada, e reservar nao e motivo para trabalhar duas vezes na semana.
+  // Menos gente que vagas: quem tem dia fixo pode dobrar como qualquer um, mas
+  // nunca no MESMO dia - duas linhas na mesma data quebrariam a chave da tabela.
   const povo = NOMES.slice(0, 7).map((_, i) => mk(i, i === 0 ? { fixedDay: 1 } : {}));
   const r = solveWeek(povo, CAP);
   const chaves = r.assignments.map((a) => `${a.personId}-${a.day}`);
   ok(new Set(chaves).size === chaves.length, 'ninguem aparece duas vezes no mesmo dia');
-  ok(r.assignments.filter((a) => a.name === 'Luiz').length === 1,
-     'o fixo tem exatamente uma escala');
+  ok(r.assignments.length === 9, `9 vagas com 7 pessoas (${r.assignments.length})`);
   ok(r.assignments.some((a) => a.name === 'Luiz' && a.day === 1 && a.via === 'fixo'),
-     'e ela e o dia fixo dele');
-  ok(r.assignments.length === 7, `7 pessoas, 7 escalas (${r.assignments.length})`);
+     'o fixo continua na segunda');
 }
 {
   // Determinismo: a ordem de entrada nao muda nada.
@@ -475,11 +486,11 @@ console.log('\n--- casos limite ---');
 ok(solveWeek([], CAP).unfilledSlots.length === 9, 'zero pessoas: 9 vagas em aberto');
 ok(solveWeek(NOMES.map((_, i) => mk(i)), { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }).assignments.length === 0, 'zero vagas');
 {
-  // Uma pessoa cobre UMA vaga - as outras 8 ficam em aberto, nao empilhadas
-  // nela. A tela avisa, e quem monta a escala resolve.
+  // Uma pessoa so: cobre os 5 dias distintos e nao mais - a mesma data nunca
+  // recebe a mesma pessoa duas vezes, entao 4 vagas ficam em aberto.
   const r = solveWeek([mk(0)], CAP);
-  ok(r.assignments.length === 1, `1 pessoa cobre 1 vaga (${r.assignments.length})`);
-  ok(r.unfilledSlots.length === 8, `as outras 8 ficam em aberto (${r.unfilledSlots.length})`);
+  ok(r.assignments.length === 5, `1 pessoa cobre no maximo 5 dias distintos (${r.assignments.length})`);
+  ok(r.unfilledSlots.length === 4, `as 4 vagas restantes ficam em aberto (${r.unfilledSlots.length})`);
 }
 {
   // Sem preferencia registrada, a pessoa ainda entra na escala.

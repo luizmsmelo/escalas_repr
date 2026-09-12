@@ -11,11 +11,11 @@
 // e quem larga o dia fixo volta a valer pelo contador, ou seja, fica de fora
 // ate o resto alcancar.
 //
-// E ACIMA DE TUDO ISSO, UMA REGRA DURA: ninguem faz duas escalas na mesma
-// semana - nem por dia fixo, nem pela sexta, nem para fechar a conta. Faltando
-// gente, a vaga fica em ABERTO e a tela avisa. Repetir alguem e uma decisao de
-// quem monta a escala, tomada a mao e visivel na tela, nao algo que o app faca
-// sozinho. O preco esta anotado na fase 2.
+// E ACIMA DE TUDO ISSO, DUAS REGRAS: toda vaga e preenchida, e ninguem faz
+// duas escalas na mesma semana. Quando as duas nao cabem juntas - menos gente
+// do que vagas -, a primeira vence: alguem dobra, o MINIMO de gente possivel,
+// e dobra quem tem menos escalas acumuladas. Quem ja esta na sexta e o ultimo a
+// dobrar. Vaga em aberto so existe se nao houver ninguem para ela nem assim.
 //
 // FASE 0 - OS DIAS FIXOS. Quem tem um dia fixo cadastrado fica sempre naquele
 // dia e nao entra em disputa nenhuma: a vaga e reservada antes de tudo, e o que
@@ -56,11 +56,11 @@
 // na lista dela. Minimizar o custo total = rodizio fechado, e dentro dele o
 // grupo INTEIRO o mais perto possivel da 1a opcao.
 //
-// O preco da regra: numa semana com mais vagas do que gente, sobra vaga em
-// aberto; e numa equipe do tamanho EXATO da escala, todo mundo trabalha toda
-// semana, entao uma defasagem de uma escala nao fecha - so fecharia dobrando
-// alguem. Com mais gente do que vagas, que e o caso normal, a defasagem fecha
-// em poucas semanas sem ninguem repetir.
+// O preco de dobrar so por necessidade: numa equipe do tamanho EXATO da escala,
+// todo mundo trabalha toda semana, entao uma defasagem de uma escala nao fecha
+// - so fecharia dobrando alguem, e dobrar por equilibrio nao e permitido. Com
+// mais gente do que vagas, que e o caso normal, a defasagem fecha em poucas
+// semanas sem ninguem repetir.
 //
 // Os dois contadores sao GERAIS, nao mensais. O mes tem 4 ou 5 sextas para 9
 // pessoas: um contador que zera todo mes nunca fecha o rodizio, e a mesma
@@ -175,10 +175,12 @@ export function solveWeek(participants, capacity) {
   const vagasDaSemana = DAYS.reduce((sum, d) => sum + (left[d] || 0), 0);
   const friday = pickFriday(disputantes, left[FRIDAY] ?? 0, vagasDaSemana);
 
-  // Quem ja tem vaga - por dia fixo ou pela sexta - esta fora da fase 2: uma
-  // escala por pessoa por semana, sem excecao.
-  const busy = new Set([...fixed.taken, ...friday.picked.map((p) => p.person.id)]);
-  const weekdays = solveWeekdays(people, left, busy);
+  // Quem ja tem vaga - por dia fixo ou pela sexta - so volta a fase 2 se for o
+  // unico jeito de preencher uma vaga. A fase precisa saber quem e quem: quem
+  // esta na sexta e o ultimo a dobrar, e quem esta em dia fixo nao pode cair
+  // de novo no proprio dia.
+  const onFriday = new Set(friday.picked.map((p) => p.person.id));
+  const weekdays = solveWeekdays(people, left, { onFriday, fixedOn: fixed.dayOf });
 
   const assignments = [
     ...fixed.placed,
@@ -234,6 +236,7 @@ export function solveWeek(participants, capacity) {
 function placeFixed(people, capacity) {
   const placed = [];
   const taken = new Set();
+  const dayOf = new Map();   // pessoa -> dia reservado, para nao repetir nele
   const spill = [];
 
   for (const day of DAYS) {
@@ -247,6 +250,7 @@ function placeFixed(people, capacity) {
           personId: person.id, name: person.name, day, rank: null, via: 'fixo',
         });
         taken.add(person.id);
+        dayOf.set(person.id, day);
       } else {
         spill.push({
           personId: person.id, name: person.name, day,
@@ -256,7 +260,7 @@ function placeFixed(people, capacity) {
     });
   }
 
-  return { placed, taken, spill };
+  return { placed, taken, dayOf, spill };
 }
 
 /* ------------------------------------------------------------------ fase 1 */
@@ -342,7 +346,7 @@ function byQueue(a, b) {
 
 /* ------------------------------------------------------------------ fase 2 */
 
-function solveWeekdays(people, capacity, busy) {
+function solveWeekdays(people, capacity, { onFriday, fixedOn }) {
   const slots = WEEKDAYS.reduce((sum, d) => sum + (capacity[d] || 0), 0);
   const P = people.length;
   if (P === 0 || slots === 0) {
@@ -358,27 +362,51 @@ function solveWeekdays(people, capacity, busy) {
   const SINK = 1 + P + WEEKDAYS.length;
   const graph = new MinCostFlow(SINK + 1);
 
-  // Dois criterios, em ordem ESTRITA: primeiro entra quem tem menos escalas
-  // acumuladas; so depois a preferencia escolhe o dia. Um degrau de historico
-  // vale mais do que a preferencia consegue somar na semana INTEIRA, entao o
-  // contador nunca e trocado por preferencia - ela so escolhe entre escalas que
-  // o contador empatou. E o mesmo criterio da fila da sexta.
-  const HISTORY_COST = slots * NO_PREFERENCE_COST + 1;
-
-  // So a diferenca entre as pessoas importa, nao o tamanho do historico.
-  const floor = Math.min(...people.map((p) => p.totalCount ?? 0));
+  // Quatro degraus, em ordem ESTRITA. Cada um vale mais do que tudo o que os
+  // de baixo conseguem somar na semana INTEIRA, entao um criterio nunca e
+  // trocado por outro: o de cima decide, o de baixo so escolhe entre escalas
+  // que o de cima empatou.
+  //   1. EXTRA_SHIFT  - dobrar alguem. So acontece se for o unico jeito de
+  //                     preencher a vaga, e o minimo de vezes possivel. Toda
+  //                     vaga e preenchida; uma escala por pessoa e a regra,
+  //                     e quebra so por isso.
+  //   2. HISTORY      - quem tem menos escalas acumuladas entra primeiro. E,
+  //                     quando alguem precisa dobrar, dobra quem tem menos.
+  //   3. SPARE_FRIDAY - entre quem pode dobrar, quem ja esta na sexta e o
+  //                     ultimo: sexta e mais um dia na mesma semana e o pior
+  //                     desenho possivel.
+  //   4. preferencia.
+  const totals = people.map((p) => p.totalCount ?? 0);
+  const floor = Math.min(...totals);
+  const spread = Math.max(...totals) - floor;
+  const PREF_MAX = slots * NO_PREFERENCE_COST;
+  const SPARE_FRIDAY_COST = PREF_MAX + 1;
+  const HISTORY_COST = slots * SPARE_FRIDAY_COST + PREF_MAX + 1;
+  // A n-esima escala de alguem custa n degraus: dois dobrando uma vez saem mais
+  // barato do que um dobrando duas, e o fluxo espalha as repeticoes.
+  const EXTRA_SHIFT_COST = slots * (spread + WEEKDAYS.length + 1) * HISTORY_COST + 1;
 
   for (let i = 0; i < P; i++) {
-    // UMA escala por pessoa por semana, e ponto: quem ja tem vaga - por dia
-    // fixo ou pela sexta - nao disputa aqui, e quem esta livre recebe uma unica
-    // aresta. Faltando gente, a vaga fica em aberto e a tela avisa; por a mesma
-    // pessoa duas vezes na semana e decisao de quem monta a escala, feita a mao
-    // e visivel, nao algo que o app faca sozinho para fechar a conta.
-    if (busy.has(people[i].id)) continue;
-    const ahead = (people[i].totalCount ?? 0) - floor;
-    graph.addEdge(SOURCE, personNode(i), 1, ahead * HISTORY_COST);
+    const id = people[i].id;
+    // So a diferenca entre as pessoas importa, nao o tamanho do historico.
+    const ahead = totals[i] - floor;
+    // Quem ja tem vaga nesta semana - dia fixo ou sexta - chega aqui com uma
+    // escala: a primeira aresta dele ja e a de dobrar.
+    const already = onFriday.has(id) || fixedOn.has(id) ? 1 : 0;
+    // Uma aresta por escala possivel na semana: nunca mais do que os dias
+    // uteis, ja que a pessoa nao cabe duas vezes na mesma data.
+    for (let k = 0; k < WEEKDAYS.length; k++) {
+      const nth = already + k;
+      graph.addEdge(SOURCE, personNode(i), 1,
+        nth * EXTRA_SHIFT_COST
+        + (ahead + nth) * HISTORY_COST
+        + (nth > 0 && onFriday.has(id) ? SPARE_FRIDAY_COST : 0));
+    }
     for (const d of WEEKDAYS) {
       if (!capacity[d]) continue;
+      // Ja reservado neste dia pela fase 0: uma segunda aresta para o mesmo dia
+      // colocaria a pessoa duas vezes na mesma data.
+      if (fixedOn.get(id) === d) continue;
       graph.addEdge(personNode(i), dayNode(d), 1, weekdayCost(people[i], d));
     }
   }

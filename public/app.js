@@ -545,10 +545,20 @@ function renderSchedule(generation) {
   if (abertas.length) {
     const days = [...new Set(abertas)].map((d) => DAY_NAMES[d]).join(', ');
     messages.push(`${abertas.length === 1 ? 'Uma vaga' : `${abertas.length} vagas`} `
-      + `em aberto: <b>${esc(days)}</b>. Ninguém faz duas escalas na mesma semana, `
-      + 'então o app não '
-      + 'preenche vaga repetindo quem já está na semana. Resolvam no grupo e use '
-      + '<b>Editar escala</b>.');
+      + `em aberto: <b>${esc(days)}</b>. Não havia ninguém disponível para `
+      + `${abertas.length === 1 ? 'ela' : 'elas'} nesta semana — nem repetindo quem já `
+      + 'está na escala. Resolvam no grupo e use <b>Editar escala</b>.');
+  }
+  // Quem dobrou tambem e estado da escala, e e a primeira coisa que alguem vai
+  // perguntar ao ver o mesmo nome duas vezes.
+  const vezes = new Map();
+  assignments.forEach((a) => vezes.set(a.name, (vezes.get(a.name) ?? 0) + 1));
+  const dobraram = [...vezes].filter(([, n]) => n > 1).map(([n]) => n);
+  if (dobraram.length && !assignments.some((a) => a.via === 'manual')) {
+    messages.push(`Semana com menos gente do que vagas: <b>${esc(listaNomes(dobraram))}</b> `
+      + `${dobraram.length === 1 ? 'ficou' : 'ficaram'} em mais de um dia para nenhuma `
+      + 'vaga ficar em aberto. Dobra quem tem menos escalas acumuladas; quem já está na '
+      + 'sexta é o último a dobrar.');
   }
   notice.innerHTML = messages.join('<br><br>');
   notice.hidden = messages.length === 0;
@@ -666,10 +676,11 @@ function whyRules() {
         contador de sextas; de segunda a quinta, o app procura a distribuição que deixa
         o grupo <b>inteiro</b> o mais perto possível da 1ª opção.</li>
     </ol>
-    <p class="why-note">Acima de tudo isso vale uma regra dura: <b>ninguém faz duas
-      escalas na mesma semana</b>. Se faltar gente para todas as vagas, a vaga fica em
-      aberto e a tela avisa — repetir alguém é decisão de quem monta a escala, feita à
-      mão e visível, não algo que o app faça sozinho para fechar a conta.</p>
+    <p class="why-note">Acima disso valem duas regras: <b>toda vaga é preenchida</b> e
+      <b>ninguém faz duas escalas na mesma semana</b>. Quando as duas não cabem juntas —
+      menos gente do que vagas —, a primeira vence: alguém dobra, o mínimo de gente
+      possível, e dobra quem tem menos escalas acumuladas. Quem já está na sexta é o
+      último a dobrar.</p>
     <p class="why-note">A ordem importa: se a preferência decidisse quem entra, quem
       gosta do dia mais disputado perderia toda semana e quem gosta do dia mais vazio
       entraria toda semana — e a diferença entre os contadores só cresceria.</p>`;
@@ -713,15 +724,21 @@ function whyCut(explain) {
   const dentro = explain.headcount - fora.length;
 
   const emAberto = explain.unfilled?.length ?? 0;
+  const dobraram = explain.people.filter((p) => p.days.length > 1);
   if (!fora.length) {
     return `<h3 class="why-h">Camada 2 — quem trabalha nesta semana</h3>
       <p class="why-p">Havia ${explain.totalSlots} vagas para
         ${plural(explain.headcount, 'pessoa disponível', 'pessoas disponíveis')}:
         <b>ninguém ficou de fora</b>, então o contador não precisou escolher ninguém.</p>
-      ${emAberto ? `<p class="why-p">Sobraram <b>${plural(emAberto, 'vaga', 'vagas')} em
-        aberto</b>: não havia gente para todas, e ninguém faz duas escalas na mesma
-        semana. Quem quiser cobrir entra pelo <b>Editar escala</b> — e conta nos
-        contadores como qualquer escala.</p>` : ''}`;
+      ${dobraram.length ? `<p class="why-p">Havia mais vagas do que gente: para
+        preencher todas, ${esc(listaNomes(dobraram.map((p) => p.name)))}
+        ${dobraram.length === 1 ? 'ficou' : 'ficaram'} em mais de um dia. Dobra quem
+        tem <b>menos escalas acumuladas</b> — e quem já está na sexta é o último a
+        dobrar.</p>` : ''}
+      ${emAberto ? `<p class="why-p">Ainda assim ${emAberto === 1 ? 'sobrou uma vaga' :
+        `sobraram ${emAberto} vagas`} <b>em aberto</b>: não havia ninguém para
+        ${emAberto === 1 ? 'ela' : 'elas'}, nem repetindo. Resolvam no grupo e use
+        <b>Editar escala</b>.</p>` : ''}`;
   }
 
   const contadores = explain.people.map((p) => p.totalBefore).sort((a, b) => a - b);
@@ -904,6 +921,9 @@ function whyOnePerson(p, explain, byDay) {
     if (a.rank === 1) return `<b>${nomeDia(a.day)}</b>, a 1ª opção que pediu`;
     if (a.rank === 2 || a.rank === 3) {
       const melhores = p.choices.slice(0, a.rank - 1)
+        // Quem dobrou ja esta num dos dias que pediu: nao faz sentido explicar
+        // que "a segunda ficou com fulano" quando fulano e a propria pessoa.
+        .filter((d) => !p.days.some((x) => x.day === d))
         .map((d) => {
           const donos = (byDay.get(d) ?? []).map((x) => x.name);
           if (d === FRIDAY) {
@@ -921,8 +941,12 @@ function whyOnePerson(p, explain, byDay) {
       estavam cheios, e alguém precisava cobrir esse`;
   });
 
+  const dobrou = p.days.length > 1
+    ? ' Ficou em mais de um dia porque havia mais vagas do que gente disponível: dobra'
+      + ' quem tem menos escalas acumuladas, e quem já está na sexta é o último.'
+    : '';
   return `${chegou}${pedidos ? `, pediu ${pedidos}` : ', não registrou preferência'}, e
-    ficou na ${partes.join('; e na ')}.`;
+    ficou na ${partes.join('; e na ')}.${dobrou}`;
 }
 
 /** O que a mao mudou no caso desta pessoa, depois da geracao. */

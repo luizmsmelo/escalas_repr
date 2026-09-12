@@ -11,11 +11,11 @@ dia. Com mais gente do que vagas, ele decide também **quem** fica de fora naque
 semana — e aí quem entra é quem tem menos escalas acumuladas, não quem pediu o
 dia mais vazio.
 
-**Ninguém faz duas escalas na mesma semana.** Nem por dia fixo, nem por ter
-pegado a sexta, nem para fechar a conta numa semana com pouca gente. Se faltar
-gente para todas as vagas, a vaga fica **em aberto** e a tela avisa: repetir
-alguém é decisão do grupo, tomada à mão em *Editar escala* e visível como
-ajuste manual — não algo que o app faça sozinho.
+**Toda vaga é preenchida, e ninguém faz duas escalas na mesma semana.** Quando
+as duas não cabem juntas — menos gente do que vagas —, a primeira vence: alguém
+dobra, o mínimo de gente possível, e dobra quem tem **menos escalas acumuladas**.
+Quem já está na sexta é o último a dobrar. Vaga em aberto só existe se não houver
+ninguém para ela nem assim.
 
 ---
 
@@ -132,20 +132,21 @@ e o total melhora.
 O resultado é o ótimo global — nenhuma outra distribuição tem custo menor — e é
 determinístico: a mesma entrada sempre produz a mesma escala.
 
-**Uma escala por pessoa, sempre.** No fluxo, cada pessoa livre tem uma única
-aresta saindo da origem, e quem já tem vaga (dia fixo ou sexta) não tem nenhuma.
-Não existe custo de "segundo dia": o segundo dia simplesmente não é
-representável. O preço são dois casos:
+**Dobrar só por necessidade.** No fluxo, a n-ésima escala de uma pessoa na
+semana custa n degraus de um custo que domina tudo o mais — então o app só dobra
+alguém se não houver outro jeito de preencher a vaga, e espalha as repetições
+(dois dobrando uma vez sai mais barato que um dobrando duas). Abaixo desse
+degrau vêm, nesta ordem: quem tem menos escalas acumuladas, poupar quem já está
+na sexta, e a preferência.
 
 | situação | o que acontece |
 | --- | --- |
-| mais vagas do que gente na semana | sobra vaga **em aberto**, para o grupo resolver |
-| equipe do tamanho exato da escala | todo mundo trabalha toda semana, então uma defasagem de 1 escala não fecha sozinha |
+| mais vagas do que gente na semana | alguém dobra — quem tem menos escalas, e nunca quem já está na sexta se houver outra pessoa no mesmo pé |
+| equipe do tamanho exato da escala | todo mundo trabalha toda semana, então uma defasagem de 1 escala não fecha sozinha (fecharia só dobrando por equilíbrio, que não é permitido) |
 
 Com **mais gente do que vagas** — o caso normal, e o de hoje: 12 pessoas para 9
-vagas — nenhum dos dois aparece, e a defasagem fecha em poucas semanas. Numa
-semana cheia, com 12 pessoas cadastradas, só sobra vaga em aberto a partir de
-**4 ausências**.
+vagas — ninguém dobra e a defasagem fecha em poucas semanas. Numa semana cheia,
+com 12 pessoas cadastradas, só há dobra a partir de **4 ausências**.
 
 **Por que o contador vem antes da preferência.** Com mais gente do que vagas,
 alguém fica de fora toda semana, e quem fica de fora é decidido aqui. Preferência
