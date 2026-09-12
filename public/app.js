@@ -1177,10 +1177,22 @@ function renderFridayQueue(queue) {
       <span class="avatar">${esc(initials(q.name))}</span>
       <span class="queue-name">${esc(q.name)}</span>
       <span class="queue-count">${q.waiting
-        ? `${q.total} escalas — fora desta semana`
+        ? `${plural(q.total, 'escala', 'escalas')}`
         : `${q.fridays} ${q.fridays === 1 ? 'sexta' : 'sextas'}`}</span>
     </li>`)
     .join('');
+
+  // O motivo de quem esta apagado aparece uma vez, embaixo - e o mesmo para
+  // todo mundo, e repeti-lo em cada linha espremia o nome contra a borda.
+  const esperando = queue.filter((q) => q.waiting);
+  $('#fridayQueueWaiting').hidden = esperando.length === 0;
+  if (esperando.length) {
+    const um = esperando.length === 1;
+    $('#fridayQueueWaiting').innerHTML =
+      `${um ? 'Apagado acima: já tem' : 'Apagados acima: já têm'} mais escalas que o resto `
+      + `do grupo, então ${um ? 'fica' : 'ficam'} de fora da semana — e, por isso, fora da `
+      + `sexta. ${um ? 'Volta' : 'Voltam'} assim que os contadores se emparelharem.`;
+  }
 }
 
 /** Quem esta fora da fila por ter dia fixo - senao a lista pareceria incompleta. */
@@ -1364,7 +1376,7 @@ function renderSettings() {
                 title="Remover" aria-label="Remover ${esc(p.name)}">✕</button>
         <select class="person-fixed" data-action="fixed" data-set="${p.fixedDay ? 1 : 0}"
                 title="Dia fixo" aria-label="Dia fixo de ${esc(p.name)}">
-          <option value=""${p.fixedDay == null ? ' selected' : ''}>fixo: —</option>
+          <option value=""${p.fixedDay == null ? ' selected' : ''}>—</option>
           ${[1, 2, 3, 4, 5].map((d) =>
             `<option value="${d}"${p.fixedDay === d ? ' selected' : ''}>${DAY_SHORT[d]}</option>`).join('')}
         </select>

@@ -146,6 +146,7 @@
           — e, por isso, fora da sexta. Entre os demais, leva quem tem menos sextas; quem se
           voluntaria, colocando sexta no próprio top 3, passa na frente só em caso de empate.</p>
         <ol id="fridayQueue" class="queue"></ol>
+        <p class="hint hint-muted" id="fridayQueueWaiting" hidden></p>
         <p class="hint hint-muted" id="fridayQueueFixed" hidden></p>
       </section>
 
@@ -180,7 +181,8 @@
           <input id="addPersonName" type="text" placeholder="Nome" maxlength="60" required>
           <button type="submit" class="btn btn-primary">Adicionar</button>
         </form>
-        <p class="hint hint-muted">Desativar mantém o histórico da pessoa nos contadores;
+        <p class="hint hint-muted">A última coluna é o <b>dia fixo</b> de cada pessoa.
+          Desativar mantém o histórico da pessoa nos contadores;
           remover apaga tudo. <strong>Dia fixo</strong> reserva a mesma vaga toda semana e
           tira a pessoa da escolha de preferências e da fila da sexta.</p>
       </section>

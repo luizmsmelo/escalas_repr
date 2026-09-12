@@ -165,8 +165,13 @@ button { font: inherit; color: inherit; }
   width: 100%; max-width: 640px; margin: 0 auto;
   padding: 14px 14px calc(88px + var(--safe-bottom));
   display: grid; gap: 14px; align-content: start;
+  /* minmax(0,...) e o que impede a pagina inteira de crescer por causa de UM
+     texto que nao quebra. Sem isso, a coluna do grid assume o min-content do
+     filho mais largo, todo o resto estica junto, e o celular ganha uma barra
+     de rolagem horizontal - com metade da tela cortada para fora. */
+  grid-template-columns: minmax(0, 1fr);
 }
-.tab { display: grid; gap: 14px; }
+.tab { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); }
 
 .card {
   background: var(--surface-1);
@@ -255,7 +260,7 @@ button { font: inherit; color: inherit; }
 .switch-label { font-size: .92rem; }
 
 .daypicker {
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px;
   margin: 10px 0 8px;
 }
 .daybtn {
@@ -307,7 +312,7 @@ button { font: inherit; color: inherit; }
 /* --------------------------------------------------------------- escala --- */
 .schedule { display: grid; gap: 8px; }
 .dayrow {
-  display: grid; grid-template-columns: 62px 1fr; gap: 12px; align-items: start;
+  display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 12px; align-items: start;
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -322,8 +327,8 @@ button { font: inherit; color: inherit; }
 }
 .dayrow-date { font-size: .72rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .dayrow-people { display: grid; gap: 8px; }
-.slot { display: flex; align-items: center; gap: 10px; }
-.slot-name { font-weight: 600; font-size: .95rem; }
+.slot { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.slot-name { font-weight: 600; font-size: .95rem; min-width: 0; overflow-wrap: anywhere; }
 .slot-rank {
   margin-left: auto;
   font-size: .68rem; font-weight: 600;
@@ -442,7 +447,7 @@ button { font: inherit; color: inherit; }
 
 /* ----------------------------------------------------------- contadores --- */
 .mystats {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px;
 }
 .stat {
   background: var(--surface-1);
@@ -494,7 +499,7 @@ th { color: var(--text-muted); font-weight: 600; font-size: .74rem;
      text-transform: uppercase; letter-spacing: .05em; }
 td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
 
-.premise { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+.premise { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; margin-top: 10px; }
 .field { display: grid; gap: 5px; font-size: .78rem; color: var(--text-secondary); }
 .field input {
   width: 100%; padding: 11px 12px;
@@ -550,9 +555,11 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 .iconbtn:hover { border-color: var(--border-strong); color: var(--text-primary); }
 .iconbtn[data-danger="1"]:hover { border-color: var(--danger); color: var(--danger); }
 
-.row-form { display: flex; gap: 8px; }
+.row-form { display: flex; gap: 8px; min-width: 0; }
 .row-form input {
-  flex: 1; min-width: 0;
+  /* `size` padrao do input = 20 caracteres de largura intrinseca. Sem o
+     flex-basis zerado, essa largura vira o piso do formulario inteiro. */
+  flex: 1 1 0; min-width: 0; width: 0;
   padding: 11px 12px;
   background: var(--surface-0);
   color: var(--text-primary);
@@ -584,7 +591,7 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 /* ---------------------------------------------------------------- tabbar -- */
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
   background: color-mix(in srgb, var(--surface-1) 92%, transparent);
   backdrop-filter: blur(12px);
   border-top: 1px solid var(--border);
@@ -624,7 +631,7 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @media (min-width: 560px) {
-  .mystats { grid-template-columns: repeat(4, 1fr); }
+  .mystats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 /* ------------------------------------------------------------ sexta-feira - */
@@ -716,11 +723,12 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 /* Acima do corte do contador geral: nao disputa a sexta nesta semana. */
 .queue-row[data-waiting="1"] { opacity: .55; }
 .queue-row .avatar { width: 28px; height: 28px; font-size: .68rem; }
-.queue-name { flex: 1; min-width: 0; font-size: .9rem; }
+.queue-name { flex: 1; min-width: 0; font-size: .9rem; overflow-wrap: anywhere; }
 .queue-row[data-me="1"] .queue-name { font-weight: 700; }
 .queue-count {
   font-size: .78rem; color: var(--text-secondary);
-  font-variant-numeric: tabular-nums; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  text-align: right; white-space: nowrap;
 }
 
 
@@ -803,7 +811,7 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 .cal { margin-top: 4px; }
 .calhead, .calgrid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 3px;
 }
 .calhead {
@@ -925,9 +933,14 @@ body.is-busy { cursor: progress; }
 
 /* O seletor fica na mesma linha do nome. Com 9 pessoas, uma segunda linha por
    pessoa viraria uma parede de "sem dia fixo" numa tela de celular. Em telas
-   muito estreitas o flex-wrap deixa ele cair sozinho para a linha de baixo. */
+   muito estreitas o flex-wrap deixa ele cair sozinho para a linha de baixo.
+
+   O flex-basis do nome precisa ser pequeno: num container com wrap, o navegador
+   QUEBRA a linha quando a soma dos basis nao cabe, em vez de encolher os itens.
+   Com basis de 100px, o seletor caia de linha em toda pessoa num celular de
+   360px - a parede que este bloco existe para evitar. */
 .person-row { flex-wrap: wrap; }
-.person-row input { flex: 1 1 100px; }
+.person-row input { flex: 1 1 56px; }
 .person-fixed {
   flex: none;
   padding: 7px 2px 7px 6px;
