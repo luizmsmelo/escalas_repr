@@ -470,22 +470,52 @@ button { font: inherit; color: inherit; }
 .stat-note[data-tone="under"] { color: var(--good); }
 
 .chart-card { overflow: hidden; }
-.chart { margin: 4px -4px 0; }
-.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
-.bar { transition: opacity .12s; }
-.chart[data-hover="1"] .bar:not(.is-hover) { opacity: .45; }
 
-.chart-tooltip {
-  position: fixed; z-index: 60;
-  pointer-events: none;
-  background: var(--text-primary);
-  color: var(--surface-1);
-  font-size: .78rem; line-height: 1.35;
-  padding: 6px 9px;
+/* Barras deitadas, uma linha por pessoa (ver drawBarList). As linhas ficam
+   coladas umas nas outras para a linha da media - desenhada em cada trilha -
+   parecer uma so, de cima a baixo. */
+.barlist { display: grid; margin-top: 6px; }
+.barlist-row {
+  display: grid;
+  grid-template-columns: minmax(0, 36%) minmax(0, 1fr) 3ch;
+  align-items: center;
+  column-gap: 10px;
+  min-height: 30px;
+  padding: 0 6px;
   border-radius: 8px;
-  box-shadow: 0 4px 14px rgb(0 0 0 / .25);
-  transform: translate(-50%, -100%);
-  white-space: nowrap;
+}
+.barlist-row:hover { background: var(--surface-2); }
+.barlist-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .86rem; color: var(--text-secondary);
+}
+.barlist-row[data-me="1"] .barlist-name { color: var(--text-primary); font-weight: 700; }
+.barlist-track {
+  position: relative;
+  align-self: stretch;
+  display: flex; align-items: center;
+}
+/* Enfase: a sua barra na cor cheia, a dos outros na mesma cor mais clara. */
+.barlist-bar {
+  height: 14px;
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--series-1) 42%, var(--surface-1));
+}
+.barlist-row[data-me="1"] .barlist-bar { background: var(--series-1); }
+.barlist-bar[data-zero="1"] { background: var(--border-strong); border-radius: 0; }
+.barlist-track::after {
+  content: '';
+  position: absolute; top: 0; bottom: 0;
+  left: var(--media);
+  width: 1px;
+  background: var(--text-muted);
+}
+.chart[data-media="0"] .barlist-track::after { display: none; }
+.barlist-value {
+  text-align: right;
+  font-size: .9rem; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
 }
 
 .linkbtn {

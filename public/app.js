@@ -110,21 +110,6 @@ function shiftMonth(ym, n) {
   return d.toISOString().slice(0, 7);
 }
 
-/** Rotulos curtos e ainda distinguiveis para o eixo dos graficos. */
-function shortNames(people) {
-  const firsts = people.map((p) => String(p.name).trim().split(/\s+/)[0]);
-  const seen = new Map();
-  firsts.forEach((f) => seen.set(f, (seen.get(f) ?? 0) + 1));
-  return people.map((p, i) => {
-    const parts = String(p.name).trim().split(/\s+/);
-    let label = firsts[i];
-    if (seen.get(firsts[i]) > 1 && parts.length > 1) {
-      label = `${firsts[i]} ${parts[parts.length - 1][0]}.`;
-    }
-    return label.length > 11 ? `${label.slice(0, 10)}…` : label;
-  });
-}
-
 let toastTimer;
 function toast(message, tone = 'info') {
   const el = $('#toast');
@@ -1382,23 +1367,19 @@ function renderCounters() {
   renderFridayQueue(queue);
   renderFridayQueueFixed();
 
-  const names = shortNames(c.perPerson);
-  const totalData = c.perPerson.map((p, i) =>
-    ({ label: names[i], full: p.name, value: p.total, id: p.personId }));
-  const fridayData = c.perPerson.map((p, i) =>
-    ({ label: names[i], full: p.name, value: p.fridays, id: p.personId }));
+  // Mesma ordem nas barras e na tabela: maior valor primeiro.
+  const totalData = porValor(c.perPerson.map((p) =>
+    ({ full: p.name, value: p.total, id: p.personId })));
+  const fridayData = porValor(c.perPerson.map((p) =>
+    ({ full: p.name, value: p.fridays, id: p.personId })));
 
-  $('#chartTotalSub').textContent = `média ${fmtNum(c.avgTotal)}`;
-  $('#chartFridaySub').textContent = `média ${fmtNum(c.avgFridays)}`;
+  $('#chartTotalSub').textContent = `média ${fmtNum(c.avgTotal)} · linha cinza`;
+  $('#chartFridaySub').textContent = `média ${fmtNum(c.avgFridays)} · linha cinza`;
 
-  drawBarChart($('#chartTotal'), totalData, {
-    target: c.avgTotal, targetLabel: `média ${fmtNum(c.avgTotal)}`,
-    unit: 'escala', unitPlural: 'escalas',
-  });
-  drawBarChart($('#chartFriday'), fridayData, {
-    target: c.avgFridays, targetLabel: `média ${fmtNum(c.avgFridays)}`,
-    unit: 'sexta', unitPlural: 'sextas',
-  });
+  drawBarList($('#chartTotal'), totalData,
+    { target: c.avgTotal, unit: 'escala', unitPlural: 'escalas' });
+  drawBarList($('#chartFriday'), fridayData,
+    { target: c.avgFridays, unit: 'sexta', unitPlural: 'sextas' });
 
   renderChartTable($('#chartTotalTable'), totalData, 'Escalas');
   renderChartTable($('#chartFridayTable'), fridayData, 'Sextas');
@@ -1505,130 +1486,43 @@ function renderChartTable(el, data, valueHeader) {
 }
 
 /* --- graficos de barras --------------------------------------------------- */
+/* Barras deitadas, uma linha por pessoa, em HTML. As colunas em SVG tinham uma
+ * faixa de 42px por pessoa - com 19 pessoas, ~810px - e, encolhidas para caber
+ * no celular, deixavam nome e numero com 5px. Aqui a letra fica sempre no
+ * tamanho normal, e a lista cresce para baixo, que e para onde o celular rola. */
 
-const CHART = {
-  band: 42,      // largura da faixa de cada pessoa
-  barMax: 24,    // barras finas: nunca preenchem a faixa inteira
-  padX: 6,
-  top: 30,       // espaco para o rotulo de valor acima da barra
-  base: 152,     // linha de base
-  labelY: 170,
-  radius: 4,
-};
+/** Maior valor primeiro; empate em ordem alfabetica. Vale para barras e tabela. */
+const porValor = (data) => [...data].sort((a, b) =>
+  b.value - a.value || a.full.localeCompare(b.full, 'pt-BR'));
 
-function drawBarChart(container, data, { target = 0, targetLabel = '', unit, unitPlural }) {
+function drawBarList(container, data, { target = 0, unit, unitPlural }) {
   if (!data.length) {
     container.innerHTML = '<p class="empty">Nenhuma pessoa ativa cadastrada.</p>';
     return;
   }
 
-  const { band, barMax, padX, top, base, labelY, radius } = CHART;
-  const width = padX * 2 + data.length * band;
-  const height = labelY + 12;
-  const barW = Math.min(barMax, band - 14);
+  // A maior barra ocupa a trilha inteira - contando a media, para a linha dela
+  // nunca cair fora da trilha.
+  const escala = Math.max(...data.map((d) => d.value), target, 1);
+  const pct = (v) => `${Math.min(100, (v / escala) * 100).toFixed(2)}%`;
+  container.dataset.media = target > 0 ? '1' : '0';
+  container.style.setProperty('--media', pct(target));
 
-  const peak = Math.max(...data.map((d) => d.value), target, 1);
-  const scaleMax = peak * 1.12;
-  const y = (v) => base - (v / scaleMax) * (base - top);
-
-  const bars = data
-    .map((d, i) => {
-      const cx = padX + i * band + band / 2;
-      const x = cx - barW / 2;
-      const isMe = d.id === state.me?.id;
-      const h = base - y(d.value);
-
-      const mark = d.value > 0
-        ? `<path class="bar-mark" d="${roundedTopBar(x, y(d.value), barW, h, radius)}"
-                 fill="var(--series-1)"/>`
-        : `<rect class="bar-mark" x="${x}" y="${base - 3}" width="${barW}" height="3" rx="1.5"
-                 fill="var(--border-strong)"/>`;
-
-      return `<g class="bar" data-index="${i}">
-        ${mark}
-        <text x="${cx}" y="${base - h - 8}" text-anchor="middle"
-              font-size="13" font-weight="700" fill="var(--text-primary)"
-              style="font-variant-numeric:tabular-nums">${d.value}</text>
-        <text x="${cx}" y="${labelY}" text-anchor="middle" font-size="11"
-              font-weight="${isMe ? 700 : 500}"
-              fill="var(--text-${isMe ? 'primary' : 'secondary'})">${esc(d.label)}</text>
-        <rect class="bar-hit" x="${padX + i * band}" y="${top - 18}"
-              width="${band}" height="${labelY - top + 22}" fill="transparent"/>
-      </g>`;
-    })
-    .join('');
-
-  const targetLine = target > 0
-    ? `<g>
-         <line x1="${padX}" x2="${width - padX}" y1="${y(target)}" y2="${y(target)}"
-               stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3 4"/>
-         <text x="${width - padX}" y="${y(target) - 5}" text-anchor="end" font-size="10"
-               fill="var(--text-muted)">${esc(targetLabel)}</text>
-       </g>`
-    : '';
-
-  // O max-width impede que o SVG estique alem do tamanho natural em telas
-  // largas, o que engrossaria as barras acima dos 24px de espessura.
-  container.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img"
-      style="max-width:${width}px;margin:0 auto"
-      aria-label="Gráfico de barras: ${esc(unitPlural)} por pessoa no mês.">
-      ${targetLine}
-      <line x1="${padX}" x2="${width - padX}" y1="${base}" y2="${base}"
-            stroke="var(--border-strong)" stroke-width="1"/>
-      ${bars}
-    </svg>`;
-
-  attachChartHover(container, data, unit, unitPlural);
-}
-
-/** Barra com o topo arredondado e a base reta, ancorada na linha de base. */
-function roundedTopBar(x, y, w, h, r) {
-  const rr = Math.max(0, Math.min(r, h, w / 2));
-  const bottom = y + h;
-  return `M${x} ${bottom} L${x} ${y + rr} Q${x} ${y} ${x + rr} ${y} ` +
-         `L${x + w - rr} ${y} Q${x + w} ${y} ${x + w} ${y + rr} L${x + w} ${bottom} Z`;
-}
-
-let tooltipEl;
-const chartHiders = new Set();
-// Um unico listener global: cada grafico apenas registra a sua funcao de
-// esconder, em vez de acumular listeners em `document` a cada redesenho.
-document.addEventListener('pointerup', () => chartHiders.forEach((fn) => fn()));
-
-function attachChartHover(container, data, unit, unitPlural) {
-  const groups = $$('.bar', container);
-
-  const show = (group, index) => {
-    const d = data[index];
-    if (!tooltipEl) {
-      tooltipEl = document.createElement('div');
-      tooltipEl.className = 'chart-tooltip';
-      document.body.append(tooltipEl);
-    }
-    tooltipEl.textContent = `${d.full}: ${d.value} ${d.value === 1 ? unit : unitPlural}`;
-    const box = group.querySelector('.bar-mark').getBoundingClientRect();
-    tooltipEl.style.left = `${box.left + box.width / 2}px`;
-    tooltipEl.style.top = `${box.top - 8}px`;
-    tooltipEl.hidden = false;
-    container.dataset.hover = '1';
-    groups.forEach((g) => g.classList.toggle('is-hover', g === group));
-  };
-
-  const hide = () => {
-    if (tooltipEl) tooltipEl.hidden = true;
-    container.dataset.hover = '0';
-    groups.forEach((g) => g.classList.remove('is-hover'));
-  };
-
-  chartHiders.forEach((fn) => { if (fn.container === container) chartHiders.delete(fn); });
-  hide.container = container;
-  chartHiders.add(hide);
-
-  groups.forEach((group, index) => {
-    group.addEventListener('pointerenter', () => show(group, index));
-    group.addEventListener('pointerdown', () => show(group, index));
-  });
-  container.addEventListener('pointerleave', hide);
+  container.innerHTML = `<div class="barlist" role="list"
+      aria-label="${esc(unitPlural)} por pessoa, do maior para o menor">${data.map((d) => {
+    const eu = d.id === state.me?.id;
+    const conta = `${d.value} ${d.value === 1 ? unit : unitPlural}`;
+    // Zero nao some: vira um tracinho, para a pessoa aparecer na lista.
+    const largura = d.value > 0 ? pct(d.value) : '3px';
+    return `<div class="barlist-row" role="listitem" data-me="${eu ? 1 : 0}"
+                 aria-label="${esc(d.full)}${eu ? ' (você)' : ''}: ${conta}">
+      <span class="barlist-name" title="${esc(d.full)}" aria-hidden="true">${esc(d.full)}</span>
+      <span class="barlist-track" aria-hidden="true">
+        <span class="barlist-bar" data-zero="${d.value > 0 ? 0 : 1}" style="width:${largura}"></span>
+      </span>
+      <span class="barlist-value" aria-hidden="true">${d.value}</span>
+    </div>`;
+  }).join('')}</div>`;
 }
 
 /* --- aba: ajustes --------------------------------------------------------- */
