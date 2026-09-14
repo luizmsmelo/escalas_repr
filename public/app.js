@@ -715,7 +715,10 @@ function renderSchedule(generation) {
   $('#generateBtn').textContent = hasAny ? 'Gerar escala de novo' : 'Gerar escala';
   $('#generateBtn').disabled = week.published || adiantada
     || week.monday < state.data.currentMonday;
-  $('#editBtn').textContent = hasAny ? 'Editar escala' : 'Montar escala à mão';
+  // Editar e para ajustar uma escala que o app ja gerou. Semana sem escala nao
+  // oferece montar do zero a mao: o caminho e gerar, dentro da janela de
+  // geracao que vale para todo mundo.
+  $('#editBtn').hidden = !hasAny;
   // Sem nenhum dia com expediente nao ha o que editar.
   $('#editBtn').disabled = week.published || !week.dates.some((d) => d.works);
   $('#publishBtn').textContent = week.published ? 'Reabrir escala' : 'Publicar escala';

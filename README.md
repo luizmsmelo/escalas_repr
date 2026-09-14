@@ -366,7 +366,7 @@ Para o rascunho não virar bagunça, há uma janela:
 | --- | --- |
 | gerar escala | só a semana **atual** e a **próxima** |
 | publicar | qualquer semana até a **próxima** |
-| editar à mão | qualquer semana não publicada |
+| editar à mão | semana não publicada que já tenha escala gerada — não há como montar uma escala do zero à mão |
 
 Semana adiantada ainda não tem preferências, e o app não tem senha: sem a janela,
 um clique à toa em "Gerar escala" enchia o histórico de escalas que ninguém ia
