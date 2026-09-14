@@ -610,7 +610,11 @@ console.log('\n=== ferias ===');
   console.log(`  ${escolheu.json.error}`);
 
   const antes = await contador(iris);
-  ok(antes.total === 0 && antes.vacationTotal === 0, 'nenhum credito antes de gerar');
+  // Iris e cadastrada com historico no banco, entao comeca na media do grupo.
+  const inicio = antes.startTotal;
+  const inicioSex = antes.startFridays;
+  ok(antes.vacationTotal === 0 && antes.total === inicio,
+     `nenhum credito antes de gerar (comeca com ${inicio})`);
 
   const ativos = (await call('GET', `state?week=${SEMANAS[0]}`)).json.people
     .filter((p) => p.active && p.id !== iris);
@@ -637,8 +641,8 @@ console.log('\n=== ferias ===');
   const depois = await contador(iris);
   ok(esperado >= 2, `tres semanas de ferias valem ao menos 2 escalas (${esperado})`);
   ok(depois.vacationTotal === esperado, `credito de escalas = ${esperado} (${depois.vacationTotal})`);
-  ok(depois.total === esperado, `e entra no contador (${depois.total})`);
-  ok(depois.vacationFridays === esperadoSex && depois.fridays === esperadoSex,
+  ok(depois.total === inicio + esperado, `e entra no contador (${depois.total})`);
+  ok(depois.vacationFridays === esperadoSex && depois.fridays === inicioSex + esperadoSex,
      `credito de sextas = ${esperadoSex} (${depois.vacationFridays})`);
   console.log(`  3 semanas de ferias: ${depois.vacationTotal} escalas e ` +
               `${depois.vacationFridays} sextas de credito`);
@@ -649,7 +653,7 @@ console.log('\n=== ferias ===');
   await call('POST', 'assignments', { monday: meio, slots: [...slots, { day: 1, personId: iris }] });
   const comEscala = await contador(iris);
   const semMeio = credito([geradas[0], geradas[2]]);
-  ok(comEscala.vacationTotal === semMeio && comEscala.total === semMeio + 1,
+  ok(comEscala.vacationTotal === semMeio && comEscala.total === inicio + semMeio + 1,
      `semana trabalhada sai do credito (${comEscala.vacationTotal} + 1 real = ${comEscala.total})`);
   geradas[1] = (await call('POST', 'generate', { monday: meio })).json;
   ok((await contador(iris)).vacationTotal === credito(geradas), 'gerar de novo devolve o credito');
@@ -698,9 +702,70 @@ console.log('\n=== ferias ===');
   // Na semana parcial de Diego, Iris ja nao estava de ferias e foi escalada: o
   // que sobra no contador dela e so escala real.
   const reais = gParcial.assignments.filter((a) => a.personId === iris).length;
-  ok(semFerias.vacationTotal === 0 && semFerias.total === reais,
-     `o credito some junto (sobram ${semFerias.total} escalas reais, esperado ${reais})`);
+  ok(semFerias.vacationTotal === 0 && semFerias.total === inicio + reais,
+     `o credito some junto (sobram ${semFerias.total}: ${inicio} de partida + ${reais} reais)`);
   ok((await call('DELETE', `vacations?id=${ferias.id}`)).status === 404, '404 ao apagar de novo');
+}
+
+console.log('\n=== pessoa nova comeca na media ===');
+{
+  // A secao anterior desfez o zeramento: ha historico acumulado.
+  const contadores = async () => (await call('GET', 'stats?month=2026-11')).json.stats;
+  const daPessoa = async (id) => (await contadores()).counters.perPerson
+    .find((p) => p.personId === id);
+  const media = (perPerson, campo) =>
+    perPerson.reduce((s, p) => s + p[campo], 0) / perPerson.length;
+
+  const antes = (await contadores()).counters;
+  const esperado = {
+    total: Math.round(media(antes.perPerson, 'total')),
+    fridays: Math.round(media(antes.perPerson, 'fridays')),
+  };
+  ok(esperado.total > 0, `a media nao e zero neste ponto do teste (${esperado.total})`);
+
+  const nova = await call('POST', 'people', { name: 'Julia Prado' });
+  ok(nova.status === 200, `cadastro aceito: ${JSON.stringify(nova.json.error ?? '')}`);
+  const julia = nova.json.person.id;
+  ok(nova.json.start?.total === esperado.total && nova.json.start?.fridays === esperado.fridays,
+     `o cadastro devolve o ponto de partida (${JSON.stringify(nova.json.start)})`);
+
+  const dela = await daPessoa(julia);
+  ok(dela.startTotal === esperado.total && dela.total === esperado.total,
+     `comeca com a media de escalas (${dela.total}, esperado ${esperado.total})`);
+  ok(dela.startFridays === esperado.fridays && dela.fridays === esperado.fridays,
+     `e com a media de sextas (${dela.fridays}, esperado ${esperado.fridays})`);
+  console.log(`  Julia comeca com ${dela.total} escalas e ${dela.fridays} sextas`);
+
+  // Com a media de sextas, ela nao fura a fila so por ser nova.
+  const fila = (await contadores()).fridayQueue;
+  ok(fila.some((q) => q.personId !== julia && q.fridays <= dela.fridays),
+     'na fila da sexta ha gente com tantas ou menos sextas do que ela');
+
+  // Reativar nao mexe no ponto de partida.
+  await call('PATCH', 'people', { id: julia, active: false });
+  await call('PATCH', 'people', { id: julia, active: true });
+  ok((await daPessoa(julia)).startTotal === esperado.total, 'reativar mantem o ponto de partida');
+
+  // Zerar recomeca todo mundo do zero - inclusive quem entrou antes do zeramento.
+  await call('POST', 'reset', {});
+  const zerada = await daPessoa(julia);
+  ok(zerada.startTotal === 0 && zerada.startFridays === 0,
+     `depois de zerar, o ponto de partida sai (${zerada.startTotal}, ${zerada.startFridays})`);
+
+  // Quem entra depois do zeramento comeca na media de depois do zeramento.
+  const posReset = (await contadores()).counters;
+  const esperadoPos = Math.round(media(posReset.perPerson, 'total'));
+  const kaio = (await call('POST', 'people', { name: 'Kaio Lemos' })).json;
+  const dele = await daPessoa(kaio.person.id);
+  ok(kaio.start.total === esperadoPos && dele.startTotal === esperadoPos,
+     `quem entra depois do zeramento mantem o seu ponto (${dele.startTotal}, esperado ${esperadoPos})`);
+
+  // Desfazer o zeramento devolve o ponto de partida de quem entrou antes.
+  await call('POST', 'reset', { undo: true });
+  ok((await daPessoa(julia)).startTotal === esperado.total,
+     'desfazer o zeramento devolve o ponto de partida');
+  ok((await daPessoa(kaio.person.id)).startTotal === esperadoPos,
+     'e quem entrou depois do zeramento continua com o dele');
 }
 
 console.log('\n=== rotas invalidas ===');

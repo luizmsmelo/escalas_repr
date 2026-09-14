@@ -88,4 +88,12 @@ export const SCHEMA = [
      end_date   date not null check (end_date >= start_date),
      created_at timestamptz not null default now()
    )`,
+
+  // Ponto de partida de quem entra depois: a media do grupo, arredondada, no
+  // instante do cadastro. Sem isso a pessoa comecaria zerada e seria escalada
+  // toda semana - e pegaria as sextas seguidas - ate alcancar o grupo. Fica
+  // gravado porque e o registro de onde ela comecou; recalcular a media depois
+  // mudaria esse ponto a cada semana gerada.
+  `alter table people add column if not exists start_total int not null default 0`,
+  `alter table people add column if not exists start_fridays int not null default 0`,
 ];

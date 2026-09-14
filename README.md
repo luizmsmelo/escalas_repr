@@ -336,6 +336,24 @@ tamanhos diferentes. No acumulado, todo mundo mediu o mesmo período.
 A referência nos gráficos é a **média do grupo** — com contadores acumulados, é
 onde todos deveriam estar.
 
+### Quem entra depois
+
+Quem é cadastrado com a escala já andando **não começa do zero**: começa com o
+inteiro mais próximo da média de escalas e da média de sextas das pessoas ativas,
+calculadas na hora do cadastro. Começando do zero, o contador escalaria essa
+pessoa toda semana — e a fila da sexta lhe daria as sextas seguidas — até ela
+alcançar o grupo, e ela não tem culpa de ter entrado depois.
+
+- O ponto de partida **fica gravado** e não muda depois. Recalcular a média a cada
+  consulta faria ele andar sozinho a cada semana gerada.
+- Ele entra nos contadores como qualquer escala: no corte da semana, na fila da
+  sexta, nas médias e nos gráficos. A aba Contadores mostra "começou com N".
+- **Zerar os contadores** descarta o ponto de partida de quem foi cadastrado antes
+  do zeramento — todo mundo recomeça do zero. Desfazer o zeramento devolve.
+- Vale **só para cadastro novo**. Quem é desativado e reativado volta com o próprio
+  histórico; afastamento se registra como férias, que dão a média semana a semana.
+- Com o grupo ainda sem nenhuma escala, a média é zero e a pessoa começa em zero.
+
 ---
 
 ## Férias

@@ -1321,12 +1321,13 @@ function renderCounters() {
   const myPos = queue.findIndex((q) => q.personId === state.me?.id) + 1;
 
   $('#myStats').innerHTML = [
-    // O credito de ferias ja esta no numero; a nota so diz quanto dele veio dali.
-    statCard('Minhas escalas', mine?.total ?? 0, `média ${fmtNum(c.avgTotal)}${
-      mine?.vacationTotal ? ` · ${mine.vacationTotal} de férias` : ''}`,
+    // Ponto de partida e credito de ferias ja estao no numero; a nota so diz de
+    // onde veio cada parte.
+    statCard('Minhas escalas', mine?.total ?? 0,
+      notaContador(c.avgTotal, mine?.startTotal, mine?.vacationTotal),
       diffTone(mine?.total ?? 0, c.avgTotal)),
-    statCard('Minhas sextas', mine?.fridays ?? 0, `média ${fmtNum(c.avgFridays)}${
-      mine?.vacationFridays ? ` · ${mine.vacationFridays} de férias` : ''}`,
+    statCard('Minhas sextas', mine?.fridays ?? 0,
+      notaContador(c.avgFridays, mine?.startFridays, mine?.vacationFridays),
       diffTone(mine?.fridays ?? 0, c.avgFridays)),
     statCard('Posição na fila', myPos || '—',
       myPos ? `de ${queue.length} pessoas`
@@ -1418,6 +1419,21 @@ function renderFridayQueueFixed() {
       + ' — a sexta só é deles se for o dia que escolherem na semana.');
   }
   el.innerHTML = partes.join(' ');
+}
+
+/** "média 2,5 · começou com 3 · 1 de férias" - so as partes que existem. */
+function notaContador(media, inicio, ferias) {
+  return [
+    `média ${fmtNum(media)}`,
+    inicio ? `começou com ${inicio}` : '',
+    ferias ? `${ferias} de férias` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+/** Onde comeca quem acabou de ser cadastrado, para o aviso de sucesso. */
+function pontoDePartida(start, prefixo) {
+  if (!start?.total && !start?.fridays) return '';
+  return `${prefixo}${escalas(start.total)} e ${sextasDe(start.fridays)}, a média do grupo.`;
 }
 
 function statCard(label, value, note, tone = '') {
@@ -1756,11 +1772,11 @@ function wireEvents() {
     e.preventDefault();
     const input = $('#identityAddName');
     run(async () => {
-      const { person } = await post('/people', { name: input.value });
+      const { person, start } = await post('/people', { name: input.value });
       input.value = '';
       await loadWeek(state.week);
       pickMe(person);
-      toast(`Bem-vindo, ${person.name}!`);
+      toast(`Bem-vindo, ${person.name}!${pontoDePartida(start, ' Você começa com ')}`);
     });
   });
 
@@ -1958,10 +1974,10 @@ function wireEvents() {
     e.preventDefault();
     const input = $('#addPersonName');
     run(async () => {
-      await post('/people', { name: input.value });
+      const { start } = await post('/people', { name: input.value });
       input.value = '';
       await loadWeek(state.week);
-      toast('Pessoa adicionada.');
+      toast(`Pessoa adicionada.${pontoDePartida(start, ' Começa com ')}`);
     });
   });
 

@@ -156,10 +156,34 @@ async function createPerson({ name }) {
   const existing = await sql`select id from people where lower(name) = lower(${clean})`;
   if (existing.length) throw bad(`Ja existe alguem cadastrado como "${clean}".`);
 
+  const start = await startingPoint();
   const [person] = await sql`
-    insert into people (name) values (${clean})
+    insert into people (name, start_total, start_fridays)
+    values (${clean}, ${start.total}, ${start.fridays})
     returning id, name, active, fixed_day, priority`;
-  return { person: toPerson(person) };
+  return { person: toPerson(person), start };
+}
+
+/**
+ * Onde comeca quem e cadastrado agora: o inteiro mais proximo da media de
+ * escalas e da media de sextas das pessoas ativas. Quem entra depois nao tem
+ * culpa de ter entrado depois - comecando do zero, o contador o escalaria toda
+ * semana, e a fila da sexta lhe daria as sextas seguidas, ate alcancar o grupo.
+ *
+ * A media e a mesma da aba Contadores: sai de allTimeCounts(), entao ja inclui
+ * credito de ferias e o ponto de partida de quem entrou antes. So vale para
+ * cadastro novo - quem e reativado volta com o proprio historico.
+ */
+async function startingPoint() {
+  const [counts, ativos] = await Promise.all([
+    allTimeCounts(),
+    sql`select id from people where active = true`,
+  ]);
+  if (!ativos.length) return { total: 0, fridays: 0 };
+  return {
+    total: Math.round(sumOf(ativos, counts, 'total') / ativos.length),
+    fridays: Math.round(sumOf(ativos, counts, 'fridays') / ativos.length),
+  };
 }
 
 async function updatePerson({ id, name, active, fixedDay, priority }) {
@@ -628,7 +652,10 @@ async function computeStats(ym, overrides) {
         name: p.name,
         total: allTime.get(p.id)?.total ?? 0,
         fridays: allTime.get(p.id)?.fridays ?? 0,
-        // Quanto de `total` e `fridays` veio de credito de ferias.
+        // Quanto de `total` e `fridays` veio do ponto de partida de quem entrou
+        // depois, e quanto de credito de ferias.
+        startTotal: allTime.get(p.id)?.startTotal ?? 0,
+        startFridays: allTime.get(p.id)?.startFridays ?? 0,
         vacationTotal: allTime.get(p.id)?.vacationTotal ?? 0,
         vacationFridays: allTime.get(p.id)?.vacationFridays ?? 0,
       })),
@@ -654,8 +681,9 @@ async function computeStats(ym, overrides) {
  * `excludeMonday` tira a propria semana da conta, para que regerar uma escala
  * nao conte duas vezes.
  *
- * `total` e `fridays` ja incluem o credito de ferias; `vacationTotal` e
- * `vacationFridays` dizem quanto dele veio dali.
+ * `total` e `fridays` ja incluem o ponto de partida de quem entrou depois e o
+ * credito de ferias; `startTotal`/`startFridays` e `vacationTotal`/
+ * `vacationFridays` dizem quanto veio de cada um.
  */
 async function allTimeCounts(excludeMonday = null) {
   const desde = await countersResetAt();
@@ -664,13 +692,25 @@ async function allTimeCounts(excludeMonday = null) {
       ? sql`select person_id, day, monday from assignments
              where monday <> ${excludeMonday} and work_date >= ${desde}`
       : sql`select person_id, day, monday from assignments where work_date >= ${desde}`,
-    sql`select id, active from people`,
+    // O ponto de partida so vale para quem foi cadastrado DEPOIS do ultimo
+    // zeramento: zerar recomeca todo mundo do zero, e desfazer o zeramento (que
+    // apaga o marco) devolve tudo. A comparacao e feita no banco, com o instante
+    // exato, para cadastrar e zerar no mesmo dia nao se confundirem.
+    sql`select p.id, p.active, p.start_total, p.start_fridays,
+               coalesce(p.created_at > (select updated_at from settings
+                                         where key = 'counters_reset_at'), true) as vale_inicio
+          from people p`,
     loadVacations(),
   ]);
 
-  const map = new Map(people.map((p) => [p.id, {
-    total: 0, fridays: 0, vacationTotal: 0, vacationFridays: 0,
-  }]));
+  const map = new Map(people.map((p) => {
+    const total = p.vale_inicio ? (p.start_total ?? 0) : 0;
+    const fridays = p.vale_inicio ? (p.start_fridays ?? 0) : 0;
+    return [p.id, {
+      total, fridays, startTotal: total, startFridays: fridays,
+      vacationTotal: 0, vacationFridays: 0,
+    }];
+  }));
   for (const r of rows) {
     const c = map.get(r.person_id);
     if (!c) continue;
