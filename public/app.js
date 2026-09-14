@@ -192,7 +192,7 @@ function renderIdentity() {
           (p) => `<button class="identity-item" type="button" data-person="${p.id}"
                           data-inactive="${p.active ? 0 : 1}">
             <span class="avatar">${esc(initials(p.name))}</span>
-            <span>${esc(p.name)}${p.active ? '' : ' (inativo)'}</span>
+            <span>${nomePrio(p.id, p.name)}${p.active ? '' : ' (inativo)'}</span>
           </button>`,
         )
         .join('')
@@ -224,7 +224,7 @@ function forgetMe() {
 function renderAll() {
   if (!state.me) return;
   $('#whoamiInitials').textContent = initials(state.me.name);
-  $('#whoamiName').textContent = state.me.name;
+  $('#whoamiName').innerHTML = nomePrio(state.me.id, state.me.name);
   renderPicker();
   renderSchedule();
   renderCounters();
@@ -379,10 +379,16 @@ function myFixedDay() {
 const isPriority = (personId = state.me?.id) =>
   !!state.data?.people.find((p) => p.id === personId)?.priority;
 
-/** Estrela na frente do nome de quem tem prioridade - a mesma da lista de pessoas. */
+/** Estrela na frente do nome de quem tem prioridade - a mesma em toda a tela. */
 const prioStar = (personId) => (isPriority(personId)
   ? '<span class="prio-star" title="Tem prioridade" aria-label="Tem prioridade">★</span>'
   : '');
+
+/** A mesma marca em texto puro, para onde nao cabe HTML - um <option>, por exemplo. */
+const prioMark = (personId) => (isPriority(personId) ? '★ ' : '');
+
+/** Nome de pessoa na tela: estrela de prioridade + nome escapado. Devolve HTML. */
+const nomePrio = (personId, nome) => `${prioStar(personId)}${esc(nome)}`;
 
 /**
  * Ferias de uma pessoa na semana aberta - o mesmo criterio da API: `blocked`
@@ -553,7 +559,7 @@ function renderRespondedList() {
             : state_ === 'fixed' ? ` · fixo ${DAY_SHORT[p.fixedDay].toLowerCase()}`
             : state_ === 'pending' ? ' · pendente' : '';
           return `<li class="chip" data-state="${state_}">
-            <span class="chip-dot"></span>${prioStar(p.id)}${esc(p.name)}${suffix}</li>`;
+            <span class="chip-dot"></span>${nomePrio(p.id, p.name)}${suffix}</li>`;
         })
         .join('')
     : '<li class="empty">Nenhuma pessoa ativa cadastrada.</li>';
@@ -601,7 +607,7 @@ function renderSchedule(generation) {
               .map(
                 (a) => `<div class="slot" data-me="${a.personId === state.me?.id ? 1 : 0}">
                   <span class="avatar">${esc(initials(a.name))}</span>
-                  <span class="slot-name">${prioStar(a.personId)}${esc(a.name)}</span>
+                  <span class="slot-name">${nomePrio(a.personId, a.name)}</span>
                   <span class="slot-rank" data-rank="${slotRankTone(a)}">${
                     slotRankLabel(a)
                   }</span>
@@ -653,18 +659,18 @@ function renderSchedule(generation) {
   }
   if (generation?.fixed?.spill?.length) {
     const lista = generation.fixed.spill
-      .map((f) => `${f.name} (${DAY_NAMES[f.day].toLowerCase()}, ${
+      .map((f) => `${nomePrio(f.personId, f.name)} (${DAY_NAMES[f.day].toLowerCase()}, ${
         f.reason === 'sem-expediente' ? 'sem expediente'
           : f.reason === 'ferias' ? 'de férias' : 'sem vaga livre'})`)
       .join(', ');
-    messages.push(`Dia fixo sem vaga nesta semana: <b>${esc(lista)}</b>. `
+    messages.push(`Dia fixo sem vaga nesta semana: <b>${lista}</b>. `
       + 'Essas pessoas entraram pela preferência, como todo mundo.');
   }
   if (generation?.priorityUnplaced?.length) {
     const lista = generation.priorityUnplaced
-      .map((p) => `${p.name}${p.day ? ` (pediu ${DAY_NAMES[p.day].toLowerCase()})` : ' (não escolheu dia)'}`)
+      .map((p) => `${nomePrio(p.personId, p.name)}${p.day ? ` (pediu ${DAY_NAMES[p.day].toLowerCase()})` : ' (não escolheu dia)'}`)
       .join(', ');
-    messages.push(`Fora da escala nesta semana, por prioridade: <b>${esc(lista)}</b>. `
+    messages.push(`Fora da escala nesta semana, por prioridade: <b>${lista}</b>. `
       + 'Quem tem prioridade só entra no dia que pediu — quando ele enche, entra '
       + 'quem tem menos escalas acumuladas e o resto fica para a próxima semana.');
   }
@@ -689,15 +695,16 @@ function renderSchedule(generation) {
   // Ferias sao estado da semana, como a vaga em aberto: o aviso vale ao
   // recarregar a pagina, e nao so no instante da geracao.
   const deFeriasAgora = state.data.people
-    .filter((p) => p.active && vacationWeek(p.id).fullWeek).map((p) => p.name);
+    .filter((p) => p.active && vacationWeek(p.id).fullWeek);
   if (deFeriasAgora.length) {
-    messages.push(`De férias nesta semana: <b>${esc(listaNomes(deFeriasAgora))}</b>. `
+    messages.push(`De férias nesta semana: <b>${listaPessoas(deFeriasAgora)}</b>. `
       + 'Ficam fora da escala e, nos contadores, recebem a média do grupo.');
   }
-  const escaladosNasFerias = [...new Set(assignments
-    .filter((a) => vacationWeek(a.personId).blocked.includes(a.day)).map((a) => a.name))];
+  const escaladosNasFerias = [...new Map(assignments
+    .filter((a) => vacationWeek(a.personId).blocked.includes(a.day))
+    .map((a) => [a.personId, a])).values()];
   if (escaladosNasFerias.length) {
-    messages.push(`Na escala em dia de férias: <b>${esc(listaNomes(escaladosNasFerias))}</b>. `
+    messages.push(`Na escala em dia de férias: <b>${listaPessoas(escaladosNasFerias)}</b>. `
       + 'As férias foram cadastradas depois de a escala ser montada — gere de novo ou use '
       + '<b>Editar escala</b>.');
   }
@@ -730,10 +737,11 @@ function renderSchedule(generation) {
   // Quem dobrou tambem e estado da escala, e e a primeira coisa que alguem vai
   // perguntar ao ver o mesmo nome duas vezes.
   const vezes = new Map();
-  assignments.forEach((a) => vezes.set(a.name, (vezes.get(a.name) ?? 0) + 1));
-  const dobraram = [...vezes].filter(([, n]) => n > 1).map(([n]) => n);
+  assignments.forEach((a) =>
+    vezes.set(a.personId, { ...a, n: (vezes.get(a.personId)?.n ?? 0) + 1 }));
+  const dobraram = [...vezes.values()].filter((a) => a.n > 1);
   if (dobraram.length && !assignments.some((a) => a.via === 'manual')) {
-    messages.push(`Semana com menos gente do que vagas: <b>${esc(listaNomes(dobraram))}</b> `
+    messages.push(`Semana com menos gente do que vagas: <b>${listaPessoas(dobraram)}</b> `
       + `${dobraram.length === 1 ? 'ficou' : 'ficaram'} em mais de um dia para nenhuma `
       + 'vaga ficar em aberto. Dobra quem tem menos escalas acumuladas; quem já está na '
       + 'sexta é o último a dobrar.');
@@ -809,6 +817,10 @@ const listaNomes = (nomes) => (nomes.length < 2
   ? (nomes[0] ?? '')
   : `${nomes.slice(0, -1).join(', ')} e ${nomes[nomes.length - 1]}`);
 
+/** listaNomes de pessoas: cada nome sai escapado e com a estrela - ja e HTML. */
+const listaPessoas = (pessoas) =>
+  listaNomes(pessoas.map((p) => nomePrio(p.personId ?? p.id, p.name)));
+
 function renderWhy() {
   const box = $('#whyBox');
   const explain = state.data.week?.explain;
@@ -871,10 +883,12 @@ function whyIntro(explain, edits) {
       ${explain.away?.length ? ` · ${plural(explain.away.length, 'ausente', 'ausentes')}` : ''}
       ${explain.vacation?.length ? ` · ${explain.vacation.length} de férias` : ''}</p>
     ${mexeu ? `<p class="why-warn">Depois de gerada, esta escala foi <b>ajustada à
-      mão</b>: ${esc(listaNomes([
-        ...edits.entraram.map((a) => `${a.name} entrou na ${nomeDia(a.day)}`),
-        ...edits.sairam.map((a) => `${a.name} saiu da ${nomeDia(a.day)}`),
-      ]))}. As camadas abaixo explicam o que o <b>app</b> montou; o ajuste foi decisão de
+      mão</b>: ${listaNomes([
+        ...edits.entraram.map((a) =>
+          `${nomePrio(a.personId, a.name)} entrou na ${nomeDia(a.day)}`),
+        ...edits.sairam.map((a) =>
+          `${nomePrio(a.personId, a.name)} saiu da ${nomeDia(a.day)}`),
+      ])}. As camadas abaixo explicam o que o <b>app</b> montou; o ajuste foi decisão de
       quem editou. Ele conta nos contadores como qualquer outra escala.</p>` : ''}`;
 }
 
@@ -916,7 +930,7 @@ function whyFixed(explain) {
   }
   const linhas = fixos.map((p) => {
     const coube = p.days.some((d) => d.via === 'fixo');
-    return `<li><b>${esc(p.name)}</b> — ${coube
+    return `<li><b>${nomePrio(p.personId, p.name)}</b> — ${coube
       ? `tem ${nomeDia(p.fixedDay)} como dia fixo; a vaga foi reservada antes de tudo`
       : p.blockedDays?.includes(p.fixedDay)
         ? `tem ${nomeDia(p.fixedDay)} como dia fixo, mas estava de <b>férias</b> nesse dia,
@@ -955,7 +969,7 @@ function whyCut(explain) {
         ${plural(explain.headcount, 'pessoa disponível', 'pessoas disponíveis')}:
         <b>ninguém ficou de fora</b>, então o contador não precisou escolher ninguém.</p>
       ${dobraram.length ? `<p class="why-p">Havia mais vagas do que gente: para
-        preencher todas, ${esc(listaNomes(dobraram.map((p) => p.name)))}
+        preencher todas, ${listaPessoas(dobraram)}
         ${dobraram.length === 1 ? 'ficou' : 'ficaram'} em mais de um dia. Dobra quem
         tem <b>menos escalas acumuladas</b> — e quem já está na sexta é o último a
         dobrar.</p>` : ''}
@@ -971,7 +985,7 @@ function whyCut(explain) {
   const porPrioridade = fora.filter((p) => p.priority);
   const grupo = (motivo) => fora.filter(
     (p) => !p.priority && whyOutReason(p, explain) === motivo);
-  const nomes = (lista) => esc(listaNomes(lista.map((p) => p.name)));
+  const nomes = (lista) => listaPessoas(lista);
   const ficou = (lista) => (lista.length === 1 ? 'ficou' : 'ficaram');
   const [porContador, porEmpate, porFrente] = ['corte', 'empate', 'frente'].map(grupo);
 
@@ -1013,14 +1027,14 @@ function whyFriday(explain, byDay) {
     .filter((p) => p.fridayPos != null)
     .sort((a, b) => a.fridayPos - b.fridayPos);
   const levaram = new Set((byDay.get(FRIDAY) ?? []).map((a) => a.personId));
-  const vetaram = explain.people.filter((p) => p.noFriday).map((p) => p.name);
+  const vetaram = explain.people.filter((p) => p.noFriday);
 
   const linhas = fila.map((p) => {
     const levou = levaram.has(p.personId);
     const via = p.days.find((d) => d.day === FRIDAY)?.via;
     return `<tr${levou ? ' class="why-hit"' : ''}>
       <td>${p.fridayPos}º</td>
-      <td>${esc(p.name)}</td>
+      <td>${nomePrio(p.personId, p.name)}</td>
       <td class="num">${p.fridayBefore}</td>
       <td class="num">${p.totalBefore}</td>
       <td>${levou
@@ -1041,7 +1055,7 @@ function whyFriday(explain, byDay) {
       <tbody>${linhas}</tbody>
     </table></div>
     ${vetaram.length ? `<p class="why-note">Fora da conta da sexta por terem marcado
-      “não posso esta sexta”: ${esc(listaNomes(vetaram))}. É veto, não preferência.</p>` : ''}`;
+      “não posso esta sexta”: ${listaPessoas(vetaram)}. É veto, não preferência.</p>` : ''}`;
 }
 
 function whyWeekdays(explain, byDay) {
@@ -1067,7 +1081,7 @@ function whyWeekdays(explain, byDay) {
   ].filter(Boolean).join(', ');
 
   const linhas = uteis.map((d) => {
-    const gente = (byDay.get(d) ?? []).map((a) => `${esc(a.name)} <span class="why-tag">${
+    const gente = (byDay.get(d) ?? []).map((a) => `${nomePrio(a.personId, a.name)} <span class="why-tag">${
       a.via === 'fixo' ? 'dia fixo'
         : a.rank ? `${ORDINAL[a.rank]} opção`
         : 'fora do top 3'}</span>`).join('<br>');
@@ -1101,16 +1115,16 @@ function whyPeople(explain, byDay, assignments) {
     || a.name.localeCompare(b.name, 'pt-BR'));
 
   const linhas = ordem
-    .map((p) => `<li><b>${esc(p.name)}</b> — ${whyOnePerson(p, explain, byDay)}${
+    .map((p) => `<li><b>${nomePrio(p.personId, p.name)}</b> — ${whyOnePerson(p, explain, byDay)}${
       whyVacationNote(p)}${whyHandNote(p, agora.get(p.personId) ?? [])}</li>`)
     .join('');
   const ferias = (explain.vacation ?? [])
-    .map((p) => `<li><b>${esc(p.name)}</b> — está de <b>férias</b> a semana inteira, então
+    .map((p) => `<li><b>${nomePrio(p.personId, p.name)}</b> — está de <b>férias</b> a semana inteira, então
       não entrou na conta. Nos contadores recebe a <b>média do grupo</b> nesta semana, para
       voltar das férias no mesmo ponto de todo mundo.</li>`)
     .join('');
   const ausentes = (explain.away ?? [])
-    .map((p) => `<li><b>${esc(p.name)}</b> — marcou que <b>não participa</b> desta semana,
+    .map((p) => `<li><b>${nomePrio(p.personId, p.name)}</b> — marcou que <b>não participa</b> desta semana,
       então não entrou na conta e os contadores não andaram.</li>`)
     .join('');
 
@@ -1146,11 +1160,11 @@ function whyOnePerson(p, explain, byDay) {
         return `tem <b>prioridade</b> e <b>não escolheu dia</b> nesta semana. Quem tem
           prioridade só entra no dia que pede, então não havia onde escalá-la.`;
       }
-      const donos = (byDay.get(p.priorityDay) ?? []).map((x) => x.name);
+      const donos = byDay.get(p.priorityDay) ?? [];
       const vagas = explain.capacity?.[p.priorityDay] ?? 0;
       const dia = donos.length
         ? `${vagas === 1 ? 'a vaga do dia ficou' : `as ${vagas} vagas do dia ficaram`} com ${
-            esc(listaNomes(donos))}`
+            listaPessoas(donos)}`
         : 'o dia não teve vaga nenhuma nesta semana';
       return `tem <b>prioridade</b> e pediu ${nomeDia(p.priorityDay)}: ${chegou}, e ${dia}.
         Prioridade não é remanejada para outro dia — é o dia pedido ou nenhum.${naProximaPrio}`;
@@ -1195,13 +1209,13 @@ function whyOnePerson(p, explain, byDay) {
         // que "a segunda ficou com fulano" quando fulano e a propria pessoa.
         .filter((d) => !p.days.some((x) => x.day === d))
         .map((d) => {
-          const donos = (byDay.get(d) ?? []).map((x) => x.name);
+          const donos = byDay.get(d) ?? [];
           if (d === FRIDAY) {
-            return `a sexta foi para ${esc(listaNomes(donos)) || 'ninguém'}, que estava à
+            return `a sexta foi para ${listaPessoas(donos) || 'ninguém'}, que estava à
               frente na fila das sextas`;
           }
           return `a ${nomeDia(d)} tinha ${plural(explain.capacity?.[d] ?? 0, 'vaga', 'vagas')}
-            e ficou com ${esc(listaNomes(donos)) || 'ninguém'}`;
+            e ficou com ${listaPessoas(donos) || 'ninguém'}`;
         })
         .join('; ');
       return `<b>${nomeDia(a.day)}</b>, a ${ORDINAL[a.rank]} opção${
@@ -1312,7 +1326,7 @@ function renderScheduleEditor() {
           const nome = p?.name ?? 'Desconhecido';
           return `<div class="slot" data-me="${id === state.me?.id ? 1 : 0}">
             <span class="avatar">${esc(initials(nome))}</span>
-            <span class="slot-name">${prioStar(id)}${esc(nome)}</span>
+            <span class="slot-name">${nomePrio(id, nome)}</span>
             <button class="iconbtn" type="button" data-danger="1" data-remove="${day}:${id}"
                     aria-label="Tirar ${esc(nome)} de ${DAY_NAMES[day].toLowerCase()}">×</button>
           </div>`;
@@ -1324,7 +1338,7 @@ function renderScheduleEditor() {
         ? `<select class="editadd" data-add-day="${day}"
                    aria-label="Acrescentar alguém em ${DAY_NAMES[day].toLowerCase()}">
              <option value="">+ Acrescentar pessoa</option>
-             ${livres.map((p) => `<option value="${p.id}">${esc(p.name)}${
+             ${livres.map((p) => `<option value="${p.id}">${prioMark(p.id)}${esc(p.name)}${
                  vacationWeek(p.id).blocked.includes(day) ? ' · de férias'
                    : fora.has(p.id) ? ' · fora esta semana' : ''}</option>`).join('')}
            </select>`
@@ -1360,10 +1374,10 @@ function renderScheduleEditor() {
 
   const partes = [];
   if (semDia.length) {
-    partes.push(`Sem nenhum dia: <b>${esc(semDia.map((p) => p.name).join(', '))}</b>`);
+    partes.push(`Sem nenhum dia: <b>${semDia.map((p) => nomePrio(p.id, p.name)).join(', ')}</b>`);
   }
   if (repetidos.length) {
-    partes.push(`Em mais de um dia: <b>${esc(repetidos.map((p) => p.name).join(', '))}</b>`);
+    partes.push(`Em mais de um dia: <b>${repetidos.map((p) => nomePrio(p.id, p.name)).join(', ')}</b>`);
   }
   const summary = $('#schedSummary');
   summary.innerHTML = partes.join(' · ') || 'Cada pessoa ativa está em exatamente um dia.';
@@ -1449,7 +1463,7 @@ function renderFridayQueue(queue) {
                         data-me="${q.personId === state.me?.id ? 1 : 0}">
       <span class="queue-pos">${i + 1}</span>
       <span class="avatar">${esc(initials(q.name))}</span>
-      <span class="queue-name">${esc(q.name)}</span>
+      <span class="queue-name">${nomePrio(q.personId, q.name)}</span>
       <span class="queue-count">${q.waiting
         ? `${plural(q.total, 'escala', 'escalas')}`
         : `${q.fridays} ${q.fridays === 1 ? 'sexta' : 'sextas'}`}</span>
@@ -1482,12 +1496,12 @@ function renderFridayQueueFixed() {
   const partes = [];
   if (fixos.length) {
     partes.push('Fora da fila por ter dia fixo: '
-      + fixos.map((p) => `${esc(p.name)} (${DAY_NAMES[p.fixedDay].toLowerCase()})`).join(', ')
+      + fixos.map((p) => `${nomePrio(p.id, p.name)} (${DAY_NAMES[p.fixedDay].toLowerCase()})`).join(', ')
       + '.');
   }
   if (prio.length) {
     partes.push('Fora da fila por ter prioridade: '
-      + prio.map((p) => esc(p.name)).join(', ')
+      + prio.map((p) => nomePrio(p.id, p.name)).join(', ')
       + ' — a sexta só é deles se for o dia que escolherem na semana.');
   }
   el.innerHTML = partes.join(' ');
@@ -1528,7 +1542,7 @@ function renderChartTable(el, data, valueHeader) {
   el.innerHTML = `<table>
     <thead><tr><th>Pessoa</th><th>${esc(valueHeader)}</th></tr></thead>
     <tbody>${data
-      .map((d) => `<tr><td>${esc(d.full)}</td><td>${d.value}</td></tr>`)
+      .map((d) => `<tr><td>${nomePrio(d.id, d.full)}</td><td>${d.value}</td></tr>`)
       .join('')}</tbody>
   </table>`;
 }
@@ -1562,9 +1576,11 @@ function drawBarList(container, data, { target = 0, unit, unitPlural }) {
     const conta = `${d.value} ${d.value === 1 ? unit : unitPlural}`;
     // Zero nao some: vira um tracinho, para a pessoa aparecer na lista.
     const largura = d.value > 0 ? pct(d.value) : '3px';
+    // A estrela e visual: para quem ouve a tela, a prioridade vai escrita.
+    const rotulo = `${d.full}${isPriority(d.id) ? ' (tem prioridade)' : ''}${eu ? ' (você)' : ''}`;
     return `<div class="barlist-row" role="listitem" data-me="${eu ? 1 : 0}"
-                 aria-label="${esc(d.full)}${eu ? ' (você)' : ''}: ${conta}">
-      <span class="barlist-name" title="${esc(d.full)}" aria-hidden="true">${esc(d.full)}</span>
+                 aria-label="${esc(rotulo)}: ${conta}">
+      <span class="barlist-name" title="${esc(d.full)}" aria-hidden="true">${nomePrio(d.id, d.full)}</span>
       <span class="barlist-track" aria-hidden="true">
         <span class="barlist-bar" data-zero="${d.value > 0 ? 0 : 1}" style="width:${largura}"></span>
       </span>
