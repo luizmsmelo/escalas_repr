@@ -551,6 +551,13 @@ function applyWeekBadge(el, monday) {
   if (monday === current) { el.textContent = 'Semana atual'; el.dataset.tone = 'now'; }
   else if (monday === next) { el.textContent = 'Próxima semana'; el.dataset.tone = 'next'; }
   else { el.textContent = monday < current ? 'Semana passada' : 'Semana futura'; el.dataset.tone = ''; }
+
+  // Longe da semana atual - duas ou mais para frente, ou no passado -, um atalho
+  // para voltar sem tocar na seta varias vezes. Na atual e na proxima ele nao
+  // aparece: a proxima e onde o app abre e onde se escolhe o dia, e um toque a
+  // toa ali levaria para a semana atual, que costuma estar publicada e travada.
+  const atalho = el.parentElement.querySelector('[data-week-today]');
+  if (atalho) atalho.hidden = monday === current || monday === next;
 }
 
 /* --- aba: escala ---------------------------------------------------------- */
@@ -1997,6 +2004,10 @@ function wireEvents() {
 
   // navegacao de semana / mes
   document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-week-today]')) {
+      run(() => loadWeek(state.data.currentMonday));
+      return;
+    }
     const week = e.target.closest('[data-week-step]');
     if (week) {
       const target = addDays(state.week, Number(week.dataset.weekStep) * 7);
