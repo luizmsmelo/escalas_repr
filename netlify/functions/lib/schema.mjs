@@ -111,4 +111,14 @@ export const SCHEMA = [
      created_at  timestamptz not null default now()
    )`,
   `create index if not exists week_log_monday_idx on week_log (monday)`,
+
+  // Tentativas de entrar no modo administrador. Serve ao freio contra adivinhar
+  // a senha - erros seguidos bloqueiam novas tentativas por um tempo - e deixa
+  // rastro de quem tentou, de qual aparelho.
+  `create table if not exists admin_attempts (
+     id     serial primary key,
+     ok     boolean not null,
+     device text,
+     at     timestamptz not null default now()
+   )`,
 ];

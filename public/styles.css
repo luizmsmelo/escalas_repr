@@ -1095,3 +1095,24 @@ body.is-busy { cursor: progress; }
   padding: 2px 6px;
   font-size: .8rem; font-weight: 600;
 }
+
+/* ------------------------------------------------- modo admin e dia fixo --- */
+/* O botao "Admin" e discreto de proposito: nao e para os colegas, e sim para
+   quem administra. */
+.adminbox { display: grid; gap: 8px; justify-items: center; margin-top: 2px; }
+.adminlink { color: var(--text-muted); font-size: .78rem; padding: 4px 10px; }
+.adminbox .row-form, .adminon { width: 100%; }
+.adminon { display: grid; gap: 8px; justify-items: center; text-align: center; }
+
+.fixedday-select {
+  width: 100%;
+  margin-top: 10px;
+  padding: 11px 12px;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 1rem;
+}
+.fixedday-select:disabled { opacity: .55; }
+.fixedday-select + .hint { margin-top: 8px; }

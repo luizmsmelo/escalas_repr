@@ -238,6 +238,36 @@ fora do próprio top 3 por causa disso.
 
 ---
 
+## Modo administrador
+
+O app não tem login individual: cada pessoa escolhe o próprio nome. As operações
+que, nas mãos erradas, quebrariam o sistema pedem a **senha de administrador**:
+
+| qualquer pessoa | só o administrador |
+| --- | --- |
+| escolher dias, marcar ausência, cadastrar férias | cadastrar, renomear, desativar e remover pessoas |
+| escolher o **próprio dia fixo** (aba Escolher) | dar ou tirar prioridade (estrela) |
+| gerar escala (rascunho) | editar, publicar e reabrir escala |
+| ver escalas, contadores e calendário | vagas da semana, calendário e zerar contadores |
+
+- A senha fica **só no servidor**, como *Secret* `ADMIN_PASSWORD` no Cloudflare
+  (Settings → Variables and Secrets, ambiente Production). Trocar a senha é trocar o
+  *Secret*: vale a partir do próximo deploy e derruba as sessões abertas.
+- Em Ajustes, o botão discreto **Admin** pede a senha. A sessão vale 8 horas, só
+  naquela aba do navegador, e "Sair do modo admin" encerra antes.
+- Depois de **5 senhas erradas** seguidas em 15 minutos, novas tentativas ficam
+  bloqueadas por 15 minutos.
+- Esconder os botões é só conforto: **o servidor recusa** toda operação de
+  administrador sem uma sessão válida. Sem `ADMIN_PASSWORD` configurada, nenhuma é
+  aceita.
+- **Remover pessoa** só vale para quem ainda não tem histórico — cadastro feito por
+  engano. Para os demais, desativar preserva tudo.
+- **Baixar cópia dos dados**, no modo admin, gera um JSON com todas as tabelas.
+- Quem tem **prioridade** não troca a estrela por dia fixo sozinho: ligar o dia fixo
+  desliga a estrela, que é do administrador.
+
+---
+
 ## Tour guiado
 
 O app tem um passeio pelos próprios botões, pensado para quem tem pouca prática

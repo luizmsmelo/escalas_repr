@@ -26,7 +26,7 @@ export default async function handler(request) {
   } catch (err) {
     const status = err instanceof HttpError ? err.status : 500;
     if (status === 500) console.error('[api]', route, err);
-    return json({ error: err.message || 'Erro inesperado' }, status);
+    return json({ error: err.message || 'Erro inesperado', code: err.code ?? null }, status);
   }
 }
 
@@ -63,29 +63,39 @@ function health() {
 }
 
 class HttpError extends Error {
-  constructor(status, message) {
+  // `code` deixa a tela reagir a um tipo de erro sem depender do texto - hoje,
+  // so 'admin': a sessao de administrador faltou ou venceu.
+  constructor(status, message, code = null) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 const bad = (msg) => new HttpError(400, msg);
 
 async function dispatch(route, method, params, body, request) {
   switch (`${method} ${route}`) {
+    // Livre para qualquer pessoa: ler, cuidar das proprias escolhas e gerar
+    // rascunho (a geracao e deterministica e rascunho nao conta).
     case 'GET state':       return getState(params.get('week'));
     case 'GET stats':       return getStats(params.get('month'));
-    case 'POST people':     return createPerson(body);
-    case 'PATCH people':    return updatePerson(body);
-    case 'DELETE people':   return deletePerson(params.get('id'));
+    case 'PATCH people':    return updatePerson(body, request);   // dia fixo e livre; o resto, admin
     case 'POST preferences':return savePreferences(body);
     case 'POST generate':   return generate(body, request);
-    case 'POST assignments':return setAssignments(body, request);
-    case 'POST publish':    return publish(body, request);
-    case 'POST capacity':   return setCapacity(body);
-    case 'POST reset':      return resetCounters(body);
-    case 'POST day':        return setDayOverride(body);
     case 'POST vacations':  return createVacation(body);
     case 'DELETE vacations':return deleteVacation(params);
+    case 'POST admin/login':return adminLogin(body, request);
+
+    // So administrador: o que, nas maos erradas, quebra o sistema. O servidor
+    // recusa sem sessao - esconder o botao na tela nao bastaria.
+    case 'POST people':     await requireAdmin(request); return createPerson(body);
+    case 'DELETE people':   await requireAdmin(request); return deletePerson(params.get('id'));
+    case 'POST assignments':await requireAdmin(request); return setAssignments(body, request);
+    case 'POST publish':    await requireAdmin(request); return publish(body, request);
+    case 'POST capacity':   await requireAdmin(request); return setCapacity(body);
+    case 'POST reset':      await requireAdmin(request); return resetCounters(body);
+    case 'POST day':        await requireAdmin(request); return setDayOverride(body);
+    case 'GET admin/backup':await requireAdmin(request); return backup();
     default:
       throw new HttpError(404, `Rota desconhecida: ${method} /api/${route}`);
   }
@@ -149,6 +159,98 @@ async function getState(weekParam) {
   };
 }
 
+/* ------------------------------------------------------------ administrador */
+/*
+ * Nao ha login individual: cada pessoa escolhe o proprio nome. As operacoes
+ * que quebrariam o sistema nas maos erradas - pessoas, vagas, calendario,
+ * zerar contadores, editar e publicar escala - pedem a senha de administrador.
+ *
+ * A senha fica so no servidor (Secret ADMIN_PASSWORD no Cloudflare). Com a
+ * senha certa, o servidor devolve um passe "validade.assinatura", assinado com
+ * HMAC a partir da propria senha: trocar a senha invalida todos os passes. Sem
+ * senha configurada, nenhuma operacao de administrador e aceita.
+ */
+
+const ADMIN_SESSAO_MS = 8 * 60 * 60 * 1000;   // 8 horas
+const ADMIN_MAX_ERROS = 5;                     // erros seguidos antes do bloqueio
+const encoder = new TextEncoder();
+
+/** HMAC-SHA256 em base64url. Roda igual no Node e no Cloudflare (WebCrypto). */
+async function assinar(chave, texto) {
+  const key = await crypto.subtle.importKey(
+    'raw', encoder.encode(`escalas-admin:${chave}`), { name: 'HMAC', hash: 'SHA-256' },
+    false, ['sign']);
+  const bytes = new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(texto)));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** Comparacao sem atalho: o tempo de resposta nao entrega ate onde o texto bateu. */
+function mesmoConteudo(a, b) {
+  if (a.length !== b.length) return false;
+  let diferenca = 0;
+  for (let i = 0; i < a.length; i++) diferenca |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diferenca === 0;
+}
+
+const semSenhaConfigurada = () => new HttpError(503,
+  'A senha de administrador ainda nao foi configurada no servidor (ADMIN_PASSWORD).');
+
+/** O pedido traz um passe de administrador valido e dentro da validade? */
+async function isAdminRequest(request) {
+  const senha = env().ADMIN_PASSWORD;
+  const passe = request?.headers?.get('x-admin-token');
+  if (!senha || !passe) return false;
+  const [validade, assinatura] = passe.split('.');
+  if (!/^\d+$/.test(validade ?? '') || Number(validade) <= Date.now() || !assinatura) return false;
+  return mesmoConteudo(assinatura, await assinar(senha, validade));
+}
+
+async function requireAdmin(request) {
+  if (!env().ADMIN_PASSWORD) throw semSenhaConfigurada();
+  if (!(await isAdminRequest(request))) {
+    throw new HttpError(403,
+      'Operacao so para o administrador: entre no modo Admin, em Ajustes.', 'admin');
+  }
+}
+
+/**
+ * Confere a senha e devolve o passe. Depois de ADMIN_MAX_ERROS erros seguidos
+ * nos ultimos 15 minutos, recusa ate o bloqueio passar - inclusive a senha
+ * certa, senao o bloqueio nao serviria para nada.
+ */
+async function adminLogin({ password }, request) {
+  const senha = env().ADMIN_PASSWORD;
+  if (!senha) throw semSenhaConfigurada();
+
+  const [{ erros }] = await sql`
+    select count(*)::int as erros from admin_attempts
+     where not ok
+       and at > now() - interval '15 minutes'
+       and at > coalesce((select max(at) from admin_attempts where ok), '-infinity'::timestamptz)`;
+  if (erros >= ADMIN_MAX_ERROS) {
+    throw new HttpError(429, 'Muitas tentativas erradas. Espere 15 minutos e tente de novo.');
+  }
+
+  const certa = mesmoConteudo(
+    await assinar(String(password ?? ''), 'senha'), await assinar(senha, 'senha'));
+  await sql`insert into admin_attempts (ok, device)
+            values (${certa}, ${resumoAparelho(request?.headers?.get('user-agent') ?? '')})`;
+  if (!certa) throw new HttpError(403, 'Senha incorreta.');
+
+  const validade = String(Date.now() + ADMIN_SESSAO_MS);
+  return { token: `${validade}.${await assinar(senha, validade)}`, expiresAt: Number(validade) };
+}
+
+/** Copia de todas as tabelas, para o administrador guardar antes de mudancas grandes. */
+async function backup() {
+  // Nomes fixos, escritos aqui: nenhuma entrada de usuario chega a este SQL.
+  const tabelas = ['people', 'weeks', 'preferences', 'assignments', 'vacations',
+    'day_overrides', 'settings', 'week_log', 'admin_attempts'];
+  const dados = {};
+  for (const tabela of tabelas) dados[tabela] = await sql.query(`select * from ${tabela}`);
+  return { geradoEm: new Date().toISOString(), tabelas: dados };
+}
+
 /* ------------------------------------------------------------------ pessoas */
 
 async function createPerson({ name }) {
@@ -189,8 +291,22 @@ async function startingPoint() {
   };
 }
 
-async function updatePerson({ id, name, active, fixedDay, priority }) {
+async function updatePerson({ id, name, active, fixedDay, priority }, request) {
   const personId = requireId(id);
+  // A propria pessoa so mexe no dia fixo. Nome, ativo e prioridade sao do
+  // administrador - e o dia fixo de quem tem prioridade tambem, porque ligar o
+  // dia fixo desliga a estrela, que so o administrador da e tira.
+  const admin = await isAdminRequest(request);
+  if (!admin && (name !== undefined || active !== undefined || priority !== undefined)) {
+    await requireAdmin(request);
+  }
+  if (!admin && fixedDay !== undefined) {
+    const [atual] = await sql`select priority from people where id = ${personId}`;
+    if (atual?.priority) {
+      throw bad('Quem tem prioridade escolhe o dia a cada semana. Para passar a ter dia '
+        + 'fixo, fale com o administrador.');
+    }
+  }
   if (name !== undefined) {
     const clean = String(name).trim().replace(/\s+/g, ' ');
     if (clean.length < 2) throw bad('Nome precisa ter ao menos 2 caracteres.');
@@ -226,6 +342,17 @@ async function updatePerson({ id, name, active, fixedDay, priority }) {
 
 async function deletePerson(idParam) {
   const personId = requireId(idParam);
+  // Remover apaga em cascata escalas, preferencias e ferias - o historico que
+  // os contadores usam. Quem ja tem historico e desativado, que preserva tudo;
+  // remover fica para cadastro feito por engano.
+  const [uso] = await sql`
+    select (select count(*)::int from assignments where person_id = ${personId}) as escalas,
+           (select count(*)::int from preferences where person_id = ${personId}) as prefs,
+           (select count(*)::int from vacations   where person_id = ${personId}) as ferias`;
+  if (uso && (uso.escalas || uso.prefs || uso.ferias)) {
+    throw bad('Esta pessoa ja tem historico (escalas, preferencias ou ferias), e remover '
+      + 'apagaria tudo isso. Desative em vez de remover: o historico fica preservado.');
+  }
   await sql`delete from people where id = ${personId}`;
   return { ok: true };
 }

@@ -22,14 +22,6 @@
     <h1 class="identity-title">Escala&nbsp;18h</h1>
     <p class="identity-sub">Quem é você?</p>
     <div id="identityList" class="identity-list"></div>
-    <details class="identity-add">
-      <summary>Não estou na lista</summary>
-      <form id="identityAddForm" class="row-form">
-        <input id="identityAddName" type="text" placeholder="Seu nome" autocomplete="name"
-               maxlength="60" required>
-        <button type="submit" class="btn btn-primary">Adicionar</button>
-      </form>
-    </details>
   </div>
 </section>
 
@@ -125,6 +117,26 @@
         </form>
       </section>
 
+      <section class="card" id="fixedDayCard">
+        <h2 class="card-title">
+          Meu dia fixo
+          <span class="card-sub">opcional</span>
+        </h2>
+        <p class="hint hint-muted">Com dia fixo, você fica sempre no mesmo dia e não precisa
+          escolher a cada semana. Cada dia comporta poucas pessoas fixas: quem pede primeiro
+          fica com a vaga.</p>
+        <select id="myFixedDay" class="fixedday-select" aria-label="Meu dia fixo">
+          <option value="">Sem dia fixo</option>
+          <option value="1">Segunda-feira</option>
+          <option value="2">Terça-feira</option>
+          <option value="3">Quarta-feira</option>
+          <option value="4">Quinta-feira</option>
+          <option value="5">Sexta-feira</option>
+        </select>
+        <p id="myFixedDayPrio" class="hint hint-muted" hidden>Você tem <strong>prioridade</strong>:
+          escolhe o dia a cada semana. Para passar a ter dia fixo, fale com o administrador.</p>
+      </section>
+
       <div class="card">
         <h2 class="card-title">Quem já respondeu</h2>
         <ul id="responded" class="people-status"></ul>
@@ -216,7 +228,7 @@
 
     <!-- ABA: ajustes ----------------------------------------------------- -->
     <section id="tab-ajustes" class="tab" data-tab="ajustes" hidden>
-      <section class="card">
+      <section class="card" data-admin-only hidden>
         <h2 class="card-title">Pessoas</h2>
         <ul id="peopleList" class="people-edit"></ul>
         <form id="addPersonForm" class="row-form">
@@ -225,7 +237,7 @@
         </form>
         <p class="hint hint-muted">A última coluna é o <b>dia fixo</b> de cada pessoa.
           Desativar mantém o histórico da pessoa nos contadores;
-          remover apaga tudo. <strong>Dia fixo</strong> reserva a mesma vaga toda semana e
+          remover só vale para quem ainda não tem histórico (cadastro feito por engano). <strong>Dia fixo</strong> reserva a mesma vaga toda semana e
           tira a pessoa da escolha de preferências e da fila da sexta.</p>
         <p class="hint hint-muted">A estrela dá <strong>prioridade</strong>: a pessoa
           escolhe <strong>1 dia</strong> a cada semana, em vez de 3, e só entra na escala
@@ -234,7 +246,7 @@
           caminhos diferentes, então ligar um desliga o outro.</p>
       </section>
 
-      <section class="card">
+      <section class="card" data-admin-only hidden>
         <h2 class="card-title">Vagas da semana</h2>
         <p class="hint" id="capacityWeekLabel"></p>
         <form id="capacityForm" class="premise">
@@ -329,7 +341,7 @@
         <div id="calMath" class="math"></div>
       </section>
 
-      <section class="card">
+      <section class="card" data-admin-only hidden>
         <h2 class="card-title">Zerar contadores</h2>
         <p class="hint">Os contadores <strong>nunca zeram sozinhos</strong> &mdash; nem por mês,
           nem por ano. Meses com feriado têm menos vagas que meses cheios, então um recorte
@@ -347,6 +359,24 @@
       </section>
 
       <button id="switchUser" class="btn btn-ghost btn-block" type="button">Trocar de pessoa</button>
+
+      <!-- Modo administrador: discreto de proposito. A senha e conferida no
+           servidor; a tela so esconde o que e de administrador. -->
+      <div class="adminbox">
+        <button id="adminBtn" class="linkbtn adminlink" type="button">Admin</button>
+        <form id="adminForm" class="row-form" hidden>
+          <input id="adminPassword" type="password" autocomplete="current-password"
+                 placeholder="Senha de administrador" aria-label="Senha de administrador" required>
+          <button type="submit" class="btn btn-primary">Entrar</button>
+        </form>
+        <div id="adminOn" class="adminon" hidden>
+          <p class="hint">Modo admin ativo até <b id="adminUntil"></b>.</p>
+          <button id="adminBackupBtn" class="btn btn-ghost btn-block" type="button">
+            Baixar cópia dos dados
+          </button>
+          <button id="adminLogoutBtn" class="linkbtn" type="button">Sair do modo admin</button>
+        </div>
+      </div>
     </section>
 
   </main>

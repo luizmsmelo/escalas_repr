@@ -9,17 +9,27 @@ const ok = (cond, msg) => cond ? (pass++, true) : (fail++, console.log('  ✗ ' 
 // O app so gera e publica escala desta semana ou da proxima. Os testes mexem em
 // semanas de varias epocas, entao cada chamada vive "no dia" da semana que ela
 // mexe (ESCALAS_HOJE = body.monday); `hoje` escolhe outro dia.
-const call = async (method, path, body, hoje = body?.monday) => {
+//
+// As operacoes de administrador pedem senha. Os testes em geral rodam como
+// administrador (o passe vai em toda chamada); `{ admin: false }` chama como
+// uma pessoa comum, para testar as recusas.
+const SENHA_ADMIN = 'senha de teste bem longa';
+process.env.ADMIN_PASSWORD = SENHA_ADMIN;
+let passeAdmin = null;
+
+const call = async (method, path, body, hoje = body?.monday, { admin = true } = {}) => {
   if (hoje) process.env.ESCALAS_HOJE = hoje;
   try {
+    const headers = admin && passeAdmin ? { 'x-admin-token': passeAdmin } : {};
     const res = await handler(new Request(`https://x.test/api/${path}`, {
-      method, body: body === undefined ? undefined : JSON.stringify(body),
+      method, headers, body: body === undefined ? undefined : JSON.stringify(body),
     }));
     return { status: res.status, json: await res.json() };
   } finally {
     delete process.env.ESCALAS_HOJE;
   }
 };
+passeAdmin = (await call('POST', 'admin/login', { password: SENHA_ADMIN })).json.token;
 
 // So escala publicada conta nos contadores.
 const gerarEPublicar = async (monday) => {
@@ -251,12 +261,20 @@ ok((await call('POST', 'assignments', { monday: WEEK, slots: [] })).status === 4
    'e trava a edicao manual');
 await call('POST', 'publish', { monday: WEEK, published: false });
 
+// Quem tem historico nao e removido - remover apagaria o historico junto. Desativa.
 const antes = (await call('GET', 'stats?month=2026-07')).json.stats.totals.assigned;
-await call('DELETE', `people?id=${ids['Gisele Pinto']}`);
+const remocao = await call('DELETE', `people?id=${ids['Gisele Pinto']}`);
+ok(remocao.status === 400 && /Desative/.test(remocao.json.error),
+   `nao remove quem tem historico: ${remocao.json.error}`);
+await call('PATCH', 'people', { id: ids['Gisele Pinto'], active: false });
 const depois = (await call('GET', 'stats?month=2026-07')).json.stats;
-ok(depois.counters.perPerson.length === 8, '8 pessoas restantes');
-ok(depois.totals.assigned < antes, `escalas apagadas em cascata (${antes} -> ${depois.totals.assigned})`);
+ok(depois.counters.perPerson.length === 8, '8 pessoas ativas');
+ok(depois.totals.assigned === antes, `historico preservado (${antes} -> ${depois.totals.assigned})`);
 ok(depois.fridayQueue.length === 8, 'fila encolhe junto');
+
+// Cadastro feito por engano, sem historico nenhum, pode ser removido.
+const engano = (await call('POST', 'people', { name: 'Cadastro por engano' })).json.person;
+ok((await call('DELETE', `people?id=${engano.id}`)).status === 200, 'remove quem nao tem historico');
 
 console.log('\n=== calendário oficial ===');
 // 03/04/2026 é Paixão de Cristo (sexta). A semana de 30/03 não deve ter sexta.
@@ -841,6 +859,89 @@ console.log('\n=== rascunho nao conta, janela e registro ===');
   ok(editada.json.log[0].action === 'editar' && editada.json.log[0].personName === autor.name,
      'edicao a mao fica registrada');
   ok(await totalDoGrupo() === antes, 'reaberta, a semana sai da conta de novo');
+}
+
+console.log('\n=== modo administrador ===');
+{
+  const comum = { admin: false };
+  const semAdmin = (method, path, body) => call(method, path, body, undefined, comum);
+  const ativos = (await call('GET', 'state')).json.people.filter((p) => p.active);
+  const alguem = ativos.find((p) => !p.priority && p.fixedDay == null);
+
+  // Sem passe, o servidor recusa tudo o que e de administrador - com o codigo
+  // que faz a tela sair do modo admin.
+  const proibidas = [
+    ['POST', 'people', { name: 'Intruso Qualquer' }],
+    ['PATCH', 'people', { id: alguem.id, name: 'Nome Trocado' }],
+    ['PATCH', 'people', { id: alguem.id, active: false }],
+    ['PATCH', 'people', { id: alguem.id, priority: true }],
+    ['DELETE', `people?id=${alguem.id}`],
+    ['POST', 'reset', {}],
+    ['POST', 'capacity', { monday: '2026-12-07', capWeekday: 9, capFriday: 9 }],
+    ['POST', 'day', { date: '2026-12-08', works: false }],
+    ['POST', 'assignments', { monday: '2026-12-07', slots: [] }],
+    ['POST', 'publish', { monday: '2026-12-07', published: false }],
+    ['GET', 'admin/backup'],
+  ];
+  for (const [method, path, body] of proibidas) {
+    const r = await semAdmin(method, path, body);
+    ok(r.status === 403 && r.json.code === 'admin', `${method} ${path} sem senha: ${r.status}`);
+  }
+  ok((await call('GET', 'state')).json.people.find((p) => p.id === alguem.id).name === alguem.name,
+     'e nada foi alterado');
+
+  // Passe adulterado ou vencido nao vale.
+  const [validade, assinatura] = passeAdmin.split('.');
+  const adulterado = `${Number(validade) + 3600000}.${assinatura}`;
+  const vencido = `${Date.now() - 1000}.${assinatura}`;
+  for (const [nome, passe] of [['adulterado', adulterado], ['vencido', vencido]]) {
+    const res = await handler(new Request('https://x.test/api/reset', {
+      method: 'POST', headers: { 'x-admin-token': passe }, body: '{}',
+    }));
+    ok(res.status === 403, `passe ${nome} e recusado (${res.status})`);
+  }
+
+  // Continua livre: gerar rascunho, cuidar das proprias escolhas e do dia fixo.
+  const SEM = '2026-12-14';
+  ok((await call('POST', 'generate', { monday: SEM }, SEM, comum)).status === 200,
+     'gerar escala continua livre');
+  ok((await call('POST', 'preferences', { monday: SEM, personId: alguem.id, choices: [1, 2, 3] },
+     SEM, comum)).status === 200, 'salvar preferencia continua livre');
+  const fixo = await semAdmin('PATCH', 'people', { id: alguem.id, fixedDay: 5 });
+  ok(fixo.status === 200 && fixo.json.person.fixedDay === 5,
+     `a propria pessoa escolhe o dia fixo: ${JSON.stringify(fixo.json.error ?? '')}`);
+  ok((await semAdmin('PATCH', 'people', { id: alguem.id, fixedDay: null })).status === 200,
+     'e tira o dia fixo');
+
+  // Quem tem prioridade nao troca a estrela por dia fixo sem o administrador.
+  const prio = (await call('POST', 'people', { name: 'Pessoa Com Estrela' })).json.person;
+  await call('PATCH', 'people', { id: prio.id, priority: true });
+  const troca = await semAdmin('PATCH', 'people', { id: prio.id, fixedDay: 2 });
+  ok(troca.status === 400 && /prioridade/.test(troca.json.error),
+     `prioridade nao vira dia fixo sem admin: ${troca.json.error}`);
+  ok((await call('GET', 'state')).json.people.find((p) => p.id === prio.id).priority === true,
+     'e a estrela continua');
+
+  // Copia dos dados.
+  const copia = await call('GET', 'admin/backup');
+  ok(copia.status === 200 && copia.json.tabelas.people.length >= ativos.length
+     && Array.isArray(copia.json.tabelas.assignments), 'administrador baixa a copia dos dados');
+
+  // Sem senha configurada, nada de administrador e aceito - nem com passe.
+  delete process.env.ADMIN_PASSWORD;
+  ok((await call('POST', 'reset', { undo: true })).status === 503, 'sem senha no servidor: 503');
+  ok((await call('POST', 'admin/login', { password: 'qualquer' })).status === 503,
+     'e o login tambem responde 503');
+  process.env.ADMIN_PASSWORD = SENHA_ADMIN;
+
+  // Freio contra adivinhar: 5 erros seguidos bloqueiam ate a senha certa.
+  const errada = await call('POST', 'admin/login', { password: 'chute' });
+  ok(errada.status === 403 && errada.json.code !== 'admin', 'senha errada: 403');
+  for (let i = 0; i < 4; i++) await call('POST', 'admin/login', { password: `chute ${i}` });
+  const bloqueada = await call('POST', 'admin/login', { password: SENHA_ADMIN });
+  ok(bloqueada.status === 429, `depois de 5 erros, bloqueia ate a senha certa (${bloqueada.status})`);
+  console.log(`  ${bloqueada.json.error}`);
+  ok((await call('GET', 'admin/backup')).status === 200, 'o passe ja emitido continua valendo');
 }
 
 console.log('\n=== rotas invalidas ===');

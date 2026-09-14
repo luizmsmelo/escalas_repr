@@ -24,6 +24,7 @@ const state = {
   tab: 'escolher',
   selectedDay: null,   // dia aberto no editor do calendário
   busy: false,
+  admin: null,         // { token, expiresAt } enquanto o modo admin estiver ativo
 };
 
 const $  = (sel, root = document) => root.querySelector(sel);
@@ -32,17 +33,23 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 /* ------------------------------------------------------------------- api -- */
 
 async function api(path, options = {}) {
-  const res = await fetch(`/api${path}`, {
-    ...options,
-    headers: options.body ? { 'content-type': 'application/json' } : undefined,
-  });
+  const headers = {};
+  if (options.body) headers['content-type'] = 'application/json';
+  // Em modo admin, todo pedido leva o passe; o servidor so o usa onde precisa.
+  if (isAdmin()) headers['x-admin-token'] = state.admin.token;
+  const res = await fetch(`/api${path}`, { ...options, headers });
   let payload;
   try {
     payload = await res.json();
   } catch {
     throw new Error('O servidor não respondeu como esperado.');
   }
-  if (!res.ok) throw new Error(payload.error || `Erro ${res.status}`);
+  if (!res.ok) {
+    // Passe vencido, ou senha trocada no servidor: sai do modo admin em vez de
+    // continuar mostrando botoes que o servidor vai recusar.
+    if (payload.code === 'admin' && state.admin) sairAdmin();
+    throw new Error(payload.error || `Erro ${res.status}`);
+  }
   return payload;
 }
 
@@ -189,9 +196,7 @@ function renderIdentity() {
           </button>`,
         )
         .join('')
-    : '<p class="empty">Ninguém cadastrado ainda.<br>Adicione o primeiro nome abaixo.</p>';
-
-  if (!people.length) $('.identity-add').open = true;
+    : '<p class="empty">Ninguém cadastrado ainda.<br>Peça ao administrador para cadastrar você.</p>';
 
   $('#identity').hidden = false;
   $('#app').hidden = true;
@@ -344,6 +349,16 @@ function renderPicker() {
 
   renderRespondedList();
   renderVacations();
+  renderMyFixedDay();
+}
+
+/** Dia fixo escolhido pela propria pessoa. Com prioridade, so o administrador troca. */
+function renderMyFixedDay() {
+  const eu = state.data.people.find((p) => p.id === state.me?.id);
+  const select = $('#myFixedDay');
+  select.value = eu?.fixedDay ? String(eu.fixedDay) : '';
+  select.disabled = !eu || !!eu.priority;
+  $('#myFixedDayPrio').hidden = !eu?.priority;
 }
 
 /** Dia fixo de quem esta usando o app, ou null. */
@@ -718,11 +733,13 @@ function renderSchedule(generation) {
   // Editar e para ajustar uma escala que o app ja gerou. Semana sem escala nao
   // oferece montar do zero a mao: o caminho e gerar, dentro da janela de
   // geracao que vale para todo mundo.
-  $('#editBtn').hidden = !hasAny;
+  $('#editBtn').hidden = !hasAny || !isAdmin();
   // Sem nenhum dia com expediente nao ha o que editar.
   $('#editBtn').disabled = week.published || !week.dates.some((d) => d.works);
   $('#publishBtn').textContent = week.published ? 'Reabrir escala' : 'Publicar escala';
   $('#publishBtn').disabled = (!hasAny && !week.published) || (!week.published && adiantada);
+  // Publicar e reabrir sao do administrador.
+  $('#publishBtn').hidden = !isAdmin();
 }
 
 /* --- quem mexeu nesta escala ---------------------------------------------- */
@@ -1528,9 +1545,50 @@ function drawBarList(container, data, { target = 0, unit, unitPlural }) {
   }).join('')}</div>`;
 }
 
+/* --- modo administrador --------------------------------------------------- */
+/* A senha fica so no servidor. Aqui se guarda o passe que ele devolve - so
+ * nesta aba, em sessionStorage - e a tela esconde o que e de administrador.
+ * Esconder e so conforto: quem decide e o servidor, que recusa sem passe. */
+
+const STORAGE_ADMIN = 'escalas.admin';
+
+function loadAdmin() {
+  try {
+    const salvo = JSON.parse(sessionStorage.getItem(STORAGE_ADMIN));
+    if (salvo?.token && salvo.expiresAt > Date.now()) return salvo;
+  } catch { /* modo privado */ }
+  return null;
+}
+
+const isAdmin = () => !!state.admin && state.admin.expiresAt > Date.now();
+
+function entrarAdmin({ token, expiresAt }) {
+  state.admin = { token, expiresAt };
+  try { sessionStorage.setItem(STORAGE_ADMIN, JSON.stringify(state.admin)); } catch { /* modo privado */ }
+}
+
+function sairAdmin() {
+  state.admin = null;
+  try { sessionStorage.removeItem(STORAGE_ADMIN); } catch { /* modo privado */ }
+  if (state.me && state.data) renderAll();
+}
+
+function renderAdmin() {
+  const admin = isAdmin();
+  $$('[data-admin-only]').forEach((el) => { el.hidden = !admin; });
+  $('#adminBtn').hidden = admin;
+  if (admin) $('#adminForm').hidden = true;
+  $('#adminOn').hidden = !admin;
+  if (admin) {
+    $('#adminUntil').textContent = new Date(state.admin.expiresAt)
+      .toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  }
+}
+
 /* --- aba: ajustes --------------------------------------------------------- */
 
 function renderSettings() {
+  renderAdmin();
   const people = state.data.people;
   $('#peopleList').innerHTML = people.length
     ? people
@@ -1629,7 +1687,7 @@ function renderDayEditor() {
   const box = $('#dayEditor');
   const dia = (state.stats?.days ?? []).find((d) => d.date === state.selectedDay);
 
-  if (!dia || dia.weekend) { box.hidden = true; return; }
+  if (!dia || dia.weekend || !isAdmin()) { box.hidden = true; return; }
   box.hidden = false;
 
   const titulo = `${DOW_SHORT[dia.dow]}, ${fmtDay(dia.date)}`;
@@ -1868,15 +1926,61 @@ function wireEvents() {
     if (person) pickMe(person);
   });
 
-  $('#identityAddForm').addEventListener('submit', (e) => {
+  // modo administrador
+  $('#adminBtn').addEventListener('click', () => {
+    const form = $('#adminForm');
+    form.hidden = !form.hidden;
+    if (!form.hidden) $('#adminPassword').focus();
+  });
+
+  $('#adminForm').addEventListener('submit', (e) => {
     e.preventDefault();
-    const input = $('#identityAddName');
+    const input = $('#adminPassword');
     run(async () => {
-      const { person, start } = await post('/people', { name: input.value });
-      input.value = '';
+      try {
+        entrarAdmin(await post('/admin/login', { password: input.value }));
+      } finally {
+        input.value = '';   // a senha nao fica no campo, nem se errar
+      }
+      renderAll();
+      toast('Modo admin ativo.');
+    });
+  });
+
+  $('#adminLogoutBtn').addEventListener('click', () => {
+    sairAdmin();
+    toast('Você saiu do modo admin.');
+  });
+
+  $('#adminBackupBtn').addEventListener('click', () =>
+    run(async () => {
+      const dados = await get('/admin/backup');
+      const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `escala18h-copia-${state.data.today}.json`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+      toast('Cópia dos dados baixada.');
+    }));
+
+  // dia fixo escolhido pela propria pessoa
+  $('#myFixedDay').addEventListener('change', (e) => {
+    const escolha = e.target.value;
+    run(async () => {
+      try {
+        await post('/people',
+          { id: state.me.id, fixedDay: escolha === '' ? null : Number(escolha) }, 'PATCH');
+      } catch (err) {
+        renderMyFixedDay();   // devolve o seletor ao valor que o servidor aceita
+        throw err;
+      }
       await loadWeek(state.week);
-      pickMe(person);
-      toast(`Bem-vindo, ${person.name}!${pontoDePartida(start, ' Você começa com ')}`);
+      toast(escolha === ''
+        ? 'Você não tem mais dia fixo.'
+        : `Seu dia fixo agora é ${DAY_NAMES[Number(escolha)].toLowerCase()}-feira.`);
     });
   });
 
@@ -2121,7 +2225,8 @@ function wireEvents() {
           : `${person.name} passa a escolher 1 dia por semana, com prioridade.`);
       });
     } else if (btn.dataset.action === 'remove') {
-      if (!confirm(`Remover ${person.name}? Todo o histórico de escalas dessa pessoa será apagado.`)) return;
+      if (!confirm(`Remover ${person.name}? Só é possível para quem ainda não tem histórico — `
+                   + 'para os demais, use desativar.')) return;
       run(async () => {
         await api(`/people?id=${id}`, { method: 'DELETE' });
         if (state.me?.id === id) forgetMe();
@@ -2164,7 +2269,8 @@ function wireEvents() {
 
   $('#calendar').addEventListener('click', (e) => {
     const cell = e.target.closest('[data-date]');
-    if (!cell || cell.disabled) return;
+    // Mudar o calendario e do administrador; para os demais ele e so consulta.
+    if (!cell || cell.disabled || !isAdmin()) return;
     state.selectedDay = state.selectedDay === cell.dataset.date ? null : cell.dataset.date;
     renderCalendar();
   });
@@ -2238,6 +2344,7 @@ const monthOf = (iso) => iso.slice(0, 7);
 /* ----------------------------------------------------------------- start -- */
 
 async function start() {
+  state.admin = loadAdmin();
   wireEvents();
   try {
     await loadWeek(null);
