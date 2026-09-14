@@ -58,6 +58,11 @@ export const SCHEMA = [
   // rodizio de preferencia. NULL = participa normalmente, como todo mundo.
   `alter table people add column if not exists fixed_day int`,
 
+  // Prioridade: a pessoa escolhe UM dia a cada semana e so entra na escala
+  // nesse dia - ou nao entra naquela semana. Diferente do dia fixo, que reserva
+  // sempre o mesmo dia antes de qualquer disputa.
+  `alter table people add column if not exists priority boolean not null default false`,
+
   // Por que a escala daquela semana ficou como ficou: o que cada pessoa pediu e
   // com que contadores chegou na semana. Fica gravado junto com a semana porque
   // e o registro de uma geracao - refazer a conta depois daria outro resultado,

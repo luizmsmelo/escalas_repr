@@ -496,6 +496,106 @@ console.log('\n--- explicacao da escala ---');
   ok(r.explain.unfilled.length === 0, 'sem vaga em aberto: havia gente para todas');
 }
 
+console.log('\n--- prioridade: um dia so, ou nenhum ---');
+{
+  // Luiz tem prioridade e pede terca; o resto pede [1,2,3]. Ele fica na terca.
+  const povo = NOMES.map((_, i) => mk(i, i === 0 ? { priority: true, choices: [2] } : {}));
+  const r = solveWeek(povo, CAP);
+  const luiz = r.assignments.filter((a) => a.name === 'Luiz');
+  ok(luiz.length === 1 && luiz[0].day === 2, `Luiz ficou na terca (${JSON.stringify(luiz)})`);
+  ok(luiz[0].via === 'prioridade', `marcado como prioridade (via=${luiz[0].via})`);
+  ok(r.priorityUnplaced.length === 0, 'ninguem com prioridade ficou de fora');
+  ok(sexta(r).name !== 'Luiz', 'prioridade nao cai na fila da sexta');
+}
+{
+  // Tres com prioridade pedem terca, que tem 2 vagas. Quem decide e o contador
+  // geral - o mesmo criterio que decide quem trabalha na semana.
+  const povo = NOMES.map((_, i) => mk(i, i < 3
+    ? { priority: true, choices: [2], totalCount: [5, 1, 3][i] }
+    : { totalCount: 1 }));
+  const r = solveWeek(povo, CAP);
+  const naTerca = r.assignments.filter((a) => a.day === 2).map((a) => a.name).sort();
+  ok(naTerca.join(',') === 'Ana,Bruno', `terca ficou com os dois de menos escalas (${naTerca})`);
+  ok(!r.assignments.some((a) => a.name === 'Luiz'),
+     'quem tinha 5 escalas nao entrou em nenhum outro dia');
+  ok(r.priorityUnplaced.length === 1 && r.priorityUnplaced[0].name === 'Luiz',
+     `e e reportado como fora da semana (${JSON.stringify(r.priorityUnplaced)})`);
+  ok(r.priorityUnplaced[0].day === 2, 'com o dia que ele tinha pedido');
+  console.log(`  terca: ${naTerca.join(', ')}; fora: ${r.priorityUnplaced.map((p) => p.name)}`);
+}
+{
+  // Prioridade nao e excecao ao contador: com mais gente do que vagas, quem
+  // esta a frente no historico fica de fora - tenha a flag ou nao.
+  const MENOS = { 1: 2, 2: 2, 3: 1, 4: 1, 5: 1 };   // 7 vagas para 9 pessoas
+  const povo = NOMES.map((_, i) =>
+    mk(i, i === 0 ? { priority: true, choices: [2], totalCount: 9 } : { totalCount: 0 }));
+  const r = solveWeek(povo, MENOS);
+  const naTerca = r.assignments.filter((a) => a.day === 2).map((a) => a.name).sort();
+  ok(!naTerca.includes('Luiz'), `prioridade com 9 escalas nao levou a terca (${naTerca})`);
+  ok(r.priorityUnplaced.some((p) => p.name === 'Luiz'), 'ficou de fora da semana');
+  console.log(`  com 7 vagas para 9: terca ficou com ${naTerca.join(', ')}; ` +
+              'Luiz, com 9 escalas, ficou de fora');
+}
+{
+  // Mas "toda vaga e preenchida" continua acima de tudo: com tanta gente
+  // quanto vaga, todo mundo trabalha - inclusive quem tem prioridade e esta a
+  // frente no contador. Quem tem tres opcoes e que se move.
+  const povo = NOMES.map((_, i) => {
+    if (i === 0) return mk(i, { priority: true, choices: [2], totalCount: 9 });
+    if (i === 1) return mk(i, { choices: [2, 3, 4] });
+    if (i === 2) return mk(i, { choices: [2, 4, 3] });
+    return mk(i, { choices: [1, 3, 4] });
+  });
+  const r = solveWeek(povo, CAP);   // 9 vagas para 9 pessoas
+  ok(r.assignments.filter((a) => a.name === 'Luiz').length === 1,
+     'com vaga para todos, quem tem prioridade tambem trabalha');
+  ok(r.assignments.some((a) => a.name === 'Luiz' && a.day === 2), 'e no dia que pediu');
+  ok(r.unfilledSlots.length === 0, 'nenhuma vaga ficou vazia por causa disso');
+}
+{
+  // Prioridade na sexta: e o dia dela, nao a 4a opcao automatica de ninguem.
+  const povo = NOMES.map((_, i) => mk(i, i === 0 ? { priority: true, choices: [5] } : {}));
+  const r = solveWeek(povo, CAP);
+  ok(sexta(r).name === 'Luiz', `quem pediu a sexta com prioridade levou (${sexta(r).name})`);
+  ok(sexta(r).via === 'prioridade', `via=${sexta(r).via}`);
+  ok(!r.assignments.some((a) => a.name === 'Luiz' && a.day !== 5),
+     'e nao ganhou um dia de seg-qui por cima');
+}
+{
+  // Sem dia escolhido, quem tem prioridade nao entra - ao contrario de quem
+  // nao tem, que o app encaixa em qualquer lugar.
+  const povo = NOMES.map((_, i) => mk(i, i === 0 ? { priority: true, choices: [] } : {}));
+  const r = solveWeek(povo, CAP);
+  ok(!r.assignments.some((a) => a.name === 'Luiz'), 'quem nao escolheu dia fica de fora');
+  ok(r.priorityUnplaced[0]?.day === null, 'reportado sem dia');
+}
+{
+  // A flag ligada depois de a pessoa ja ter marcado 3 dias: vale o primeiro.
+  const povo = NOMES.map((_, i) => mk(i, i === 0 ? { priority: true, choices: [4, 1, 2] } : {}));
+  const r = solveWeek(povo, CAP);
+  const luiz = r.assignments.filter((a) => a.name === 'Luiz');
+  ok(luiz.length === 1 && luiz[0].day === 4, `vale so a 1a escolha (${JSON.stringify(luiz)})`);
+}
+{
+  // Prioridade nunca dobra: mesmo faltando gente, ela tem um dia admissivel so.
+  const povo = NOMES.slice(0, 5).map((_, i) =>
+    mk(i, i === 0 ? { priority: true, choices: [2] } : {}));
+  const r = solveWeek(povo, CAP);
+  const luiz = r.assignments.filter((a) => a.name === 'Luiz');
+  ok(luiz.length === 1, `com 5 pessoas para 9 vagas, Luiz segue com 1 dia (${luiz.length})`);
+  ok(r.assignments.some((a) => a.name !== 'Luiz'
+     && r.assignments.filter((x) => x.name === a.name).length > 1),
+     'quem dobra e quem nao tem prioridade');
+}
+{
+  // Prioridade e explicavel: a caixa "como foi gerada" precisa dos fatos.
+  const povo = NOMES.map((_, i) => mk(i, i === 0 ? { priority: true, choices: [3] } : {}));
+  const r = solveWeek(povo, CAP);
+  const luiz = r.explain.people.find((p) => p.name === 'Luiz');
+  ok(luiz.priority === true && luiz.priorityDay === 3,
+     `explain carrega a flag e o dia (${JSON.stringify({ p: luiz.priority, d: luiz.priorityDay })})`);
+}
+
 console.log('\n--- casos limite ---');
 ok(solveWeek([], CAP).unfilledSlots.length === 9, 'zero pessoas: 9 vagas em aberto');
 ok(solveWeek(NOMES.map((_, i) => mk(i)), { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }).assignments.length === 0, 'zero vagas');

@@ -174,7 +174,9 @@ async function loadMonth(ym) {
 
 function syncDraftFromServer() {
   const mine = state.data.preferences.find((p) => p.personId === state.me?.id);
-  state.draft = mine ? [...mine.choices] : [];
+  // Com prioridade vale so a primeira escolha - o mesmo criterio do solver, se
+  // a flag foi ligada depois de a pessoa ja ter marcado tres dias.
+  state.draft = mine ? mine.choices.slice(0, isPriority() ? 1 : 3) : [];
   state.away = mine ? mine.unavailable : false;
   state.noFriday = mine ? !!mine.noFriday : false;
   // Toda resposta do servidor descarta a edicao manual em andamento: a escala
@@ -257,9 +259,14 @@ function renderPicker() {
 
   renderFixedBox(meuFixo, fixoVale);
 
-  // Numa semana encurtada por feriado pode nao haver 3 dias para escolher.
+  // Numa semana encurtada por feriado pode nao haver 3 dias para escolher - e
+  // quem tem prioridade escolhe um dia so, sempre.
+  const prioridade = isPriority();
   const abertos = week.dates.filter((d) => d.works).length;
-  const exigidos = Math.min(3, abertos);
+  const exigidos = Math.min(prioridade ? 1 : 3, abertos);
+
+  $('#pickIntro').hidden = prioridade;
+  $('#pickPriorityIntro').hidden = !prioridade;
 
   const picker = $('#dayPicker');
   picker.innerHTML = week.dates
@@ -274,17 +281,19 @@ function renderPicker() {
         </button>`;
       }
       const rank = state.draft.indexOf(day) + 1;
-      const full = state.draft.length >= exigidos && !rank;
+      // Com prioridade nenhum dia trava: tocar em outro troca o dia escolhido.
+      const full = !prioridade && state.draft.length >= exigidos && !rank;
       // Sexta nao escolhida no top 3 e a 4a opcao automatica de todo mundo -
-      // por isso ela nunca aparece como "sem opção", e sim como "4ª".
-      const auto = day === FRIDAY && !rank && !state.noFriday;
-      const badge = rank ? ORDINAL[rank] : auto ? '4ª' : '·';
+      // por isso ela nunca aparece como "sem opção", e sim como "4ª". Quem tem
+      // prioridade nao entra na fila da sexta, entao nao tem 4a opcao.
+      const auto = !prioridade && day === FRIDAY && !rank && !state.noFriday;
+      const badge = rank ? (prioridade ? '★' : ORDINAL[rank]) : auto ? '4ª' : '·';
       return `<button class="daybtn" type="button" data-day="${day}"
                       data-picked="${rank ? 1 : 0}" data-auto="${auto ? 1 : 0}"
                       ${locked || full ? 'disabled' : ''}
                       aria-pressed="${rank ? 'true' : 'false'}"
                       aria-label="${DAY_NAMES[day]} ${fmtDay(date)}${
-                        rank ? `, ${ORDINAL[rank]} opção`
+                        rank ? (prioridade ? ', seu dia' : `, ${ORDINAL[rank]} opção`)
                              : auto ? ', 4ª opção automática' : ''}">
         <span class="daybtn-rank">${badge}</span>
         <span class="daybtn-name">${DAY_SHORT[day]}</span>
@@ -296,13 +305,20 @@ function renderPicker() {
   const missing = exigidos - state.draft.length;
   $('#pickHelp').textContent = abertos === 0
     ? 'Esta semana não tem expediente em nenhum dia.'
-    : missing > 0
-      ? `Faltam ${missing} ${missing === 1 ? 'dia' : 'dias'}${
-          exigidos < 3 ? ` (só ${abertos} dias com expediente nesta semana)` : ''
-        }. Toque de novo num dia escolhido para desfazer.`
-      : 'Pronto. Toque num dia escolhido para desfazer.';
+    : prioridade
+      ? missing > 0
+        ? 'Escolha o seu dia. Você fica nele — ou, se ele encher, fica de fora desta semana.'
+        : 'Pronto. Toque em outro dia para trocar, ou no mesmo para desfazer.'
+      : missing > 0
+        ? `Faltam ${missing} ${missing === 1 ? 'dia' : 'dias'}${
+            exigidos < 3 ? ` (só ${abertos} dias com expediente nesta semana)` : ''
+          }. Toque de novo num dia escolhido para desfazer.`
+        : 'Pronto. Toque num dia escolhido para desfazer.';
 
-  renderFridayBox(fridayPicked, locked, fridayOpen);
+  // Quem tem prioridade nao entra na fila da sexta: nao ha fila nem veto a
+  // discutir com ele.
+  $('#fridayBox').hidden = prioridade;
+  if (!prioridade) renderFridayBox(fridayPicked, locked, fridayOpen);
 
   const save = $('#savePrefs');
   // Com dia fixo valendo nao ha o que escolher: o botao so faz sentido para
@@ -314,7 +330,8 @@ function renderPicker() {
     save.textContent = 'Voltar a participar desta semana';
   } else {
     save.disabled = locked || (!state.away && state.draft.length !== exigidos);
-    save.textContent = state.away ? 'Salvar ausência' : 'Salvar preferência';
+    save.textContent = state.away ? 'Salvar ausência'
+      : prioridade ? 'Salvar meu dia' : 'Salvar preferência';
   }
 
   renderRespondedList();
@@ -324,6 +341,10 @@ function renderPicker() {
 function myFixedDay() {
   return state.data.people.find((p) => p.id === state.me?.id)?.fixedDay ?? null;
 }
+
+/** Quem tem prioridade escolhe UM dia por semana, e so entra nesse dia. */
+const isPriority = (personId = state.me?.id) =>
+  !!state.data?.people.find((p) => p.id === personId)?.priority;
 
 /** Ausencia desta semana como esta gravada no servidor (nao o rascunho). */
 function storedAway() {
@@ -523,6 +544,14 @@ function renderSchedule(generation) {
     messages.push(`Dia fixo sem vaga nesta semana: <b>${esc(lista)}</b>. `
       + 'Essas pessoas entraram pela preferência, como todo mundo.');
   }
+  if (generation?.priorityUnplaced?.length) {
+    const lista = generation.priorityUnplaced
+      .map((p) => `${p.name}${p.day ? ` (pediu ${DAY_NAMES[p.day].toLowerCase()})` : ' (não escolheu dia)'}`)
+      .join(', ');
+    messages.push(`Fora da escala nesta semana, por prioridade: <b>${esc(lista)}</b>. `
+      + 'Quem tem prioridade só entra no dia que pediu — quando ele enche, entra '
+      + 'quem tem menos escalas acumuladas e o resto fica para a próxima semana.');
+  }
   if (generation?.missingPreferences?.length) {
     messages.push(
       `Sem preferência registrada: <b>${esc(generation.missingPreferences.join(', '))}</b>. ` +
@@ -669,6 +698,10 @@ function whyRules() {
     <ol class="why-steps">
       <li><b>Dia fixo.</b> Quem tem dia fixo cadastrado fica sempre nele, e a vaga é
         reservada antes de qualquer disputa. É a <b>única</b> exceção ao contador.</li>
+      <li><b>Prioridade</b> não é exceção nenhuma: quem tem a flag escolhe um dia por
+        semana e disputa a vaga pelo mesmo contador de todo mundo. O que muda é que ela
+        não tem para onde ser remanejada — se o dia pedido encher, ela fica de fora da
+        semana em vez de cair em outro dia.</li>
       <li><b>Quem trabalha nesta semana.</b> Quando há mais gente do que vagas, alguém
         fica de fora — e quem fica de fora é decidido pelo <b>contador de escalas
         acumuladas</b>, nunca pela preferência. Quem tem menos escalas entra primeiro.</li>
@@ -744,7 +777,11 @@ function whyCut(explain) {
   }
 
   const contadores = explain.people.map((p) => p.totalBefore).sort((a, b) => a - b);
-  const grupo = (motivo) => fora.filter((p) => whyOutReason(p, explain) === motivo);
+  // Quem tem prioridade ficou de fora por outro motivo - o dia pedido encheu -,
+  // e contar isso como corte ou desempate seria mentira.
+  const porPrioridade = fora.filter((p) => p.priority);
+  const grupo = (motivo) => fora.filter(
+    (p) => !p.priority && whyOutReason(p, explain) === motivo);
   const nomes = (lista) => esc(listaNomes(lista.map((p) => p.name)));
   const ficou = (lista) => (lista.length === 1 ? 'ficou' : 'ficaram');
   const [porContador, porEmpate, porFrente] = ['corte', 'empate', 'frente'].map(grupo);
@@ -768,6 +805,10 @@ function whyCut(explain) {
     ${porFrente.length ? `<p class="why-p">${nomes(porFrente)} ${ficou(porFrente)} de fora
       por estar <b>à frente no contador</b>: ${porFrente.length === 1 ? 'chegou' : 'chegaram'}
       com mais escalas do que qualquer pessoa que entrou.</p>` : ''}
+    ${porPrioridade.length ? `<p class="why-p">${nomes(porPrioridade)}
+      ${ficou(porPrioridade)} de fora <b>por prioridade</b>: ${porPrioridade.length === 1
+        ? 'pediu um dia só' : 'pediram um dia só'}, esse dia ficou com quem tinha menos
+      escalas acumuladas, e prioridade <b>não é remanejada</b> para outro dia.</p>` : ''}
     <p class="why-p">Quem ficou de fora <b>não gastou escala</b>: o contador não andou, e
       por isso essas pessoas entram na frente na próxima semana.</p>`;
 }
@@ -891,8 +932,25 @@ function whyOnePerson(p, explain, byDay) {
   const chegou = `chegou com ${escalas(p.totalBefore)}`;
 
   if (!p.days.length) {
+    const naProximaPrio = ' O contador não andou, então entra na frente na próxima.';
+    // Prioridade tem motivo proprio: nao e o corte geral, e o dia pedido ter
+    // enchido. Chamar um de outro seria mentira.
+    if (p.priority) {
+      if (p.priorityDay == null) {
+        return `tem <b>prioridade</b> e <b>não escolheu dia</b> nesta semana. Quem tem
+          prioridade só entra no dia que pede, então não havia onde escalá-la.`;
+      }
+      const donos = (byDay.get(p.priorityDay) ?? []).map((x) => x.name);
+      const vagas = explain.capacity?.[p.priorityDay] ?? 0;
+      const dia = donos.length
+        ? `${vagas === 1 ? 'a vaga do dia ficou' : `as ${vagas} vagas do dia ficaram`} com ${
+            esc(listaNomes(donos))}`
+        : 'o dia não teve vaga nenhuma nesta semana';
+      return `tem <b>prioridade</b> e pediu ${nomeDia(p.priorityDay)}: ${chegou}, e ${dia}.
+        Prioridade não é remanejada para outro dia — é o dia pedido ou nenhum.${naProximaPrio}`;
+    }
     const motivo = whyOutReason(p, explain);
-    const naProxima = ' O contador não andou, então entra na frente na próxima.';
+    const naProxima = naProximaPrio;
     if (motivo === 'corte') {
       return `ficou <b>de fora</b> desta semana: ${chegou}, acima do corte de
         ${escalas(explain.cut)} — o contador da última pessoa que cabia nas vagas.
@@ -909,6 +967,10 @@ function whyOnePerson(p, explain, byDay) {
   }
 
   const partes = p.days.map((a) => {
+    if (a.via === 'prioridade') {
+      return `<b>${nomeDia(a.day)}</b>, o único dia que pediu — tem <b>prioridade</b>,
+        então ou ficava nesse dia ou ficava de fora da semana`;
+    }
     if (a.via === 'fixo') {
       return `<b>${nomeDia(a.day)}</b>, o <b>dia fixo</b> cadastrado — vaga reservada
         antes de qualquer disputa`;
@@ -993,6 +1055,7 @@ function closedRow(day, date, holiday) {
 function slotRankLabel(a) {
   if (a.via === 'manual') return a.rank ? `${ORDINAL[a.rank]} opção · manual` : 'ajuste manual';
   if (a.via === 'fixo') return 'dia fixo';
+  if (a.via === 'prioridade') return 'dia pedido · prioridade';
   if (a.via === 'fila') return '4ª opção · fila';
   if (a.via === 'voluntario') return `${ORDINAL[a.rank] ?? '4ª'} opção · voluntário`;
   return a.rank ? `${ORDINAL[a.rank]} opção` : 'fora das opções';
@@ -1001,6 +1064,7 @@ function slotRankLabel(a) {
 function slotRankTone(a) {
   if (a.via === 'manual') return 'manual';
   if (a.via === 'fixo') return 'fixo';
+  if (a.via === 'prioridade') return 'prioridade';
   if (a.via === 'voluntario') return '1';
   if (a.via === 'fila') return 'fila';
   return a.rank ?? 'none';
@@ -1198,13 +1262,25 @@ function renderFridayQueue(queue) {
 /** Quem esta fora da fila por ter dia fixo - senao a lista pareceria incompleta. */
 function renderFridayQueueFixed() {
   const el = $('#fridayQueueFixed');
-  const fixos = (state.data?.people ?? [])
-    .filter((p) => p.active && p.fixedDay != null);
-  el.hidden = fixos.length === 0;
-  if (!fixos.length) return;
-  el.innerHTML = 'Fora da fila por ter dia fixo: '
-    + fixos.map((p) => `${esc(p.name)} (${DAY_NAMES[p.fixedDay].toLowerCase()})`).join(', ')
-    + '.';
+  const ativos = (state.data?.people ?? []).filter((p) => p.active);
+  const fixos = ativos.filter((p) => p.fixedDay != null);
+  const prio = ativos.filter((p) => p.priority);
+
+  el.hidden = fixos.length === 0 && prio.length === 0;
+  if (el.hidden) return;
+
+  const partes = [];
+  if (fixos.length) {
+    partes.push('Fora da fila por ter dia fixo: '
+      + fixos.map((p) => `${esc(p.name)} (${DAY_NAMES[p.fixedDay].toLowerCase()})`).join(', ')
+      + '.');
+  }
+  if (prio.length) {
+    partes.push('Fora da fila por ter prioridade: '
+      + prio.map((p) => esc(p.name)).join(', ')
+      + ' — a sexta só é deles se for o dia que escolherem na semana.');
+  }
+  el.innerHTML = partes.join(' ');
 }
 
 function statCard(label, value, note, tone = '') {
@@ -1374,8 +1450,15 @@ function renderSettings() {
                 aria-label="${p.active ? 'Desativar' : 'Reativar'} ${esc(p.name)}">${p.active ? '◉' : '○'}</button>
         <button class="iconbtn" type="button" data-action="remove" data-danger="1"
                 title="Remover" aria-label="Remover ${esc(p.name)}">✕</button>
+        <button class="iconbtn" type="button" data-action="priority"
+                data-on="${p.priority ? 1 : 0}"
+                title="${p.priority ? 'Tirar a prioridade' : 'Dar prioridade (escolhe 1 dia por semana)'}"
+                aria-pressed="${p.priority ? 'true' : 'false'}"
+                aria-label="Prioridade de ${esc(p.name)}">★</button>
         <select class="person-fixed" data-action="fixed" data-set="${p.fixedDay ? 1 : 0}"
-                title="Dia fixo" aria-label="Dia fixo de ${esc(p.name)}">
+                ${p.priority ? 'disabled' : ''}
+                title="${p.priority ? 'Com prioridade a pessoa escolhe o dia a cada semana' : 'Dia fixo'}"
+                aria-label="Dia fixo de ${esc(p.name)}">
           <option value=""${p.fixedDay == null ? ' selected' : ''}>—</option>
           ${[1, 2, 3, 4, 5].map((d) =>
             `<option value="${d}"${p.fixedDay === d ? ' selected' : ''}>${DAY_SHORT[d]}</option>`).join('')}
@@ -1570,6 +1653,12 @@ function wireEvents() {
     const btn = e.target.closest('[data-day]');
     if (!btn || btn.disabled) return;
     const day = Number(btn.dataset.day);
+    if (isPriority()) {
+      // Um dia so: tocar noutro dia troca, tocar no mesmo desfaz.
+      state.draft = state.draft[0] === day ? [] : [day];
+      renderPicker();
+      return;
+    }
     const at = state.draft.indexOf(day);
     if (at >= 0) state.draft.splice(at, 1);
     else if (state.draft.length < 3) state.draft.push(day);
@@ -1600,7 +1689,8 @@ function wireEvents() {
       state.stats = state.data.stats;
       syncDraftFromServer();
       renderAll();
-      toast(state.away ? 'Ausência registrada.' : 'Preferência salva!');
+      toast(state.away ? 'Ausência registrada.'
+        : isPriority() ? 'Dia salvo!' : 'Preferência salva!');
     }));
 
   // escala
@@ -1709,6 +1799,14 @@ function wireEvents() {
       run(async () => {
         await post('/people', { id, active: !person.active }, 'PATCH');
         await loadWeek(state.week);
+      });
+    } else if (btn.dataset.action === 'priority') {
+      run(async () => {
+        await post('/people', { id, priority: !person.priority }, 'PATCH');
+        await loadWeek(state.week);
+        toast(person.priority
+          ? `${person.name} volta a escolher 3 dias.`
+          : `${person.name} passa a escolher 1 dia por semana, com prioridade.`);
       });
     } else if (btn.dataset.action === 'remove') {
       if (!confirm(`Remover ${person.name}? Todo o histórico de escalas dessa pessoa será apagado.`)) return;

@@ -484,6 +484,93 @@ console.log('\n=== a explicacao da escala fica gravada ===');
               `${depois.people.filter((p) => !p.days.length).length} fora da semana`);
 }
 
+console.log('\n=== prioridade ===');
+// Junho/2026: 08, 15 e 22 sao segundas cheias.
+const PRIO = '2026-06-08';
+const COM_FLAG = ['Luiz Melo', 'Ana Souza', 'Bruno Lima'];
+
+for (const n of COM_FLAG) {
+  const r = await call('PATCH', 'people', { id: ids[n], priority: true });
+  ok(r.status === 200 && r.json.person.priority === true, `${n} passa a ter prioridade`);
+}
+const stP0 = (await call('GET', `state?week=${PRIO}`)).json;
+ok(stP0.people.filter((p) => p.priority).length === 3, 'a flag chega na tela');
+ok(!stP0.stats.fridayQueue.some((q) => COM_FLAG.includes(q.name)),
+   'quem tem prioridade sai da fila da sexta');
+
+// Prioridade e dia fixo respondem a mesma pergunta: ligar um desliga o outro.
+const trocaFixo = await call('PATCH', 'people', { id: ids['Luiz Melo'], fixedDay: 1 });
+ok(trocaFixo.status === 200 && trocaFixo.json.person.priority === false,
+   'cadastrar dia fixo desliga a prioridade');
+const trocaPrio = await call('PATCH', 'people', { id: ids['Luiz Melo'], priority: true });
+ok(trocaPrio.status === 200 && trocaPrio.json.person.fixedDay === null,
+   'e voltar a prioridade tira o dia fixo');
+
+// Com a flag, tres dias nao servem mais: e um dia, exatamente.
+const tres = await call('POST', 'preferences',
+  { monday: PRIO, personId: ids['Luiz Melo'], choices: [1, 2, 3] });
+ok(tres.status === 400, 'recusa 3 dias de quem tem prioridade');
+console.log(`  ${tres.json.error}`);
+ok((await call('POST', 'preferences',
+   { monday: PRIO, personId: ids['Luiz Melo'], choices: [] })).status === 400,
+   'e recusa nenhum dia');
+
+// Os tres pedem a mesma terca, que so tem 2 vagas.
+for (const n of COM_FLAG) {
+  const r = await call('POST', 'preferences',
+    { monday: PRIO, personId: ids[n], choices: [2], noFriday: true });
+  ok(r.status === 200, `${n} escolhe a terca: ${JSON.stringify(r.json.error ?? '')}`);
+}
+const prefPrio = (await call('GET', `state?week=${PRIO}`)).json.preferences
+  .find((p) => p.personId === ids['Luiz Melo']);
+ok(prefPrio.choices.length === 1 && prefPrio.choices[0] === 2, 'fica gravado um dia so');
+ok(prefPrio.noFriday === false,
+   'o veto da sexta e ignorado: quem tem prioridade nem entra na fila');
+
+for (const [i, n] of NOMES.entries()) {
+  if (COM_FLAG.includes(n) || !ids[n]) continue;
+  await call('POST', 'preferences', { monday: PRIO, personId: ids[n], choices: TOP3[i] });
+}
+const gPrio = (await call('POST', 'generate', { monday: PRIO })).json;
+const naTerca = gPrio.assignments.filter((a) => a.day === 2);
+const deFlag = naTerca.filter((a) => COM_FLAG.includes(a.name));
+ok(deFlag.length === 2, `a terca ficou com 2 dos 3 com prioridade (${deFlag.length})`);
+ok(deFlag.every((a) => a.via === 'prioridade'), 'marcados como prioridade');
+
+const fora = gPrio.generation.priorityUnplaced;
+ok(fora.length === 1, `sobrou um de fora da semana (${JSON.stringify(fora)})`);
+ok(fora[0].day === 2, 'com o dia que ele tinha pedido');
+ok(!gPrio.assignments.some((a) => a.personId === fora[0].personId),
+   'e ele nao foi remanejado para nenhum outro dia');
+ok(!gPrio.assignments.some((a) => a.day === 5 && COM_FLAG.includes(a.name)),
+   'ninguem com prioridade caiu na sexta sem ter pedido');
+ok(!gPrio.generation.missingPreferences.includes(fora[0].name),
+   'quem ficou de fora nao e cobrado por "sem preferencia"');
+console.log(`  terca: ${naTerca.map((a) => a.name).join(', ')}; fora: ${fora[0].name}`);
+
+// A explicacao da semana precisa saber contar essa historia.
+const quemFicouFora = gPrio.generation.explain.people.find((p) => p.personId === fora[0].personId);
+ok(quemFicouFora.priority === true && quemFicouFora.priorityDay === 2,
+   'a explicacao guarda a flag e o dia pedido');
+ok(quemFicouFora.days.length === 0, 'e registra que ele nao ficou em dia nenhum');
+
+// A sexta escolhida por quem tem prioridade e o dia dela, nao a fila.
+await call('POST', 'preferences', { monday: PRIO, personId: ids['Ana Souza'], choices: [5] });
+const gSex = (await call('POST', 'generate', { monday: PRIO })).json;
+const sexPrio = gSex.assignments.find((a) => a.day === 5);
+ok(sexPrio?.name === 'Ana Souza', `quem pediu a sexta com prioridade levou (${sexPrio?.name})`);
+ok(sexPrio?.via === 'prioridade', `via=${sexPrio?.via}`);
+ok(gSex.assignments.filter((a) => a.name === 'Ana Souza').length === 1,
+   'e ficou so com a sexta');
+
+// Tirar a flag devolve a pessoa as regras gerais.
+for (const n of COM_FLAG) await call('PATCH', 'people', { id: ids[n], priority: false });
+const filaVolta = (await call('GET', `state?week=${PRIO}`)).json.stats.fridayQueue;
+ok(filaVolta.length === 8, `fila da sexta volta a ter todo mundo (${filaVolta.length})`);
+ok((await call('POST', 'preferences',
+   { monday: PRIO, personId: ids['Luiz Melo'], choices: [1, 2, 3] })).status === 200,
+   'e a pessoa volta a escolher 3 dias');
+
 console.log('\n=== rotas invalidas ===');
 ok((await call('GET', 'inexistente')).status === 404, '404 em rota desconhecida');
 ok((await call('GET', 'state?week=2026-02-30')).status === 400, 'rejeita data inexistente');

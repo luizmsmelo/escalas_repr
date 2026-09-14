@@ -931,6 +931,21 @@ body.is-busy { cursor: progress; }
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 
+/* ------------------------------------------------------------- prioridade - */
+.slot-rank[data-rank="prioridade"] {
+  color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 45%, var(--border));
+}
+/* A estrela acesa e o unico sinal, na lista de pessoas, de quem escolhe 1 dia. */
+.iconbtn[data-action="priority"] { color: var(--border-strong); }
+.iconbtn[data-action="priority"][data-on="1"] {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+/* Com prioridade o dia fixo nao se aplica: o seletor fica visivelmente inerte. */
+.person-fixed:disabled { opacity: .4; }
+
 /* O seletor fica na mesma linha do nome. Com 9 pessoas, uma segunda linha por
    pessoa viraria uma parede de "sem dia fixo" numa tela de celular. Em telas
    muito estreitas o flex-wrap deixa ele cair sozinho para a linha de baixo.

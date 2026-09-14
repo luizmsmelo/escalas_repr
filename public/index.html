@@ -71,8 +71,13 @@
         <div id="fixedBox" class="fixedbox" hidden></div>
 
         <div id="pickPrefs">
-          <p class="hint">Toque nos dias na sua <strong>ordem de preferência</strong>. O primeiro
-            toque vira sua 1ª opção.</p>
+          <p class="hint" id="pickIntro">Toque nos dias na sua <strong>ordem de preferência</strong>.
+            O primeiro toque vira sua 1ª opção.</p>
+          <p class="hint" id="pickPriorityIntro" hidden>Você tem <strong>prioridade</strong>:
+            escolhe <strong>um</strong> dia, e é nele que você fica. A vaga é disputada pelo
+            mesmo contador de todo mundo &mdash; entra quem tem menos escalas acumuladas
+            &mdash;, mas você não é remanejado para outro dia: se o dia encher, fica de fora
+            desta semana e entra na frente na próxima.</p>
           <div id="dayPicker" class="daypicker" role="group" aria-label="Dias de preferência"></div>
           <p id="pickHelp" class="hint hint-muted"></p>
 
@@ -185,6 +190,11 @@
           Desativar mantém o histórico da pessoa nos contadores;
           remover apaga tudo. <strong>Dia fixo</strong> reserva a mesma vaga toda semana e
           tira a pessoa da escolha de preferências e da fila da sexta.</p>
+        <p class="hint hint-muted">A estrela dá <strong>prioridade</strong>: a pessoa
+          escolhe <strong>1 dia</strong> a cada semana, em vez de 3, e só entra na escala
+          nesse dia &mdash; ou não entra naquela semana. A vaga é disputada pelo mesmo
+          contador de todo mundo. Prioridade e dia fixo respondem à mesma pergunta por
+          caminhos diferentes, então ligar um desliga o outro.</p>
       </section>
 
       <section class="card">
@@ -220,6 +230,14 @@
           escolhe preferência e sai da fila da sexta. Se o dia fixo cair num feriado, ela
           volta a escolher como todo mundo naquela semana &mdash; mas continua fora da
           fila da sexta, e só pega sexta se se voluntariar.
+        </p>
+        <p class="hint">
+          <strong>Prioridade é outra coisa.</strong> Quem tem a estrela escolhe um dia a
+          cada semana e disputa a vaga pelo mesmo contador de todo mundo &mdash; não
+          reserva nada. O que muda é que ela não tem para onde ser remanejada: se o dia
+          pedido encher, entra quem tem menos escalas acumuladas e a outra fica de fora
+          daquela semana, entrando na frente na próxima. Ela também não entra na fila da
+          sexta: a sexta só é dela se for o dia que escolheu.
         </p>
         <p class="hint">
           <strong>Depois, de segunda a quinta.</strong> O app testa todas as combinações
