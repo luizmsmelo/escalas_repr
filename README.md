@@ -352,6 +352,32 @@ tamanhos diferentes. No acumulado, todo mundo mediu o mesmo período.
 A referência nos gráficos é a **média do grupo** — com contadores acumulados, é
 onde todos deveriam estar.
 
+### Só conta escala publicada
+
+Gerar uma escala cria um **rascunho**: ele pode ser gerado de novo e editado à
+vontade, e **não mexe em contador nenhum**. A escala só passa a contar — nos
+gráficos, na fila da sexta, nas médias e na geração das semanas seguintes — depois
+de **publicada**. Semana que aconteceu e ficou sem publicar pode ser publicada
+depois, para entrar na conta.
+
+Para o rascunho não virar bagunça, há uma janela:
+
+| ação | vale para |
+| --- | --- |
+| gerar escala | só a semana **atual** e a **próxima** |
+| publicar | qualquer semana até a **próxima** |
+| editar à mão | qualquer semana não publicada |
+
+Semana adiantada ainda não tem preferências, e o app não tem senha: sem a janela,
+um clique à toa em "Gerar escala" enchia o histórico de escalas que ninguém ia
+cumprir. Semana que já passou não é gerada de novo, porque ela é o registro do que
+aconteceu — para corrigir, existe a edição à mão.
+
+**Quem mexeu.** Cada escala guarda quem a gerou, editou, publicou ou reabriu, com
+data, hora e o tipo de aparelho — visível na aba Escala, em "Quem mexeu nesta
+escala?". Como não há senha, o nome é o que a pessoa escolheu no app; o aparelho
+ajuda a tirar a dúvida.
+
 ### Quem entra depois
 
 Quem é cadastrado com a escala já andando **não começa do zero**: começa com o

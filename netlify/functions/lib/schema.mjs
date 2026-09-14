@@ -96,4 +96,19 @@ export const SCHEMA = [
   // mudaria esse ponto a cada semana gerada.
   `alter table people add column if not exists start_total int not null default 0`,
   `alter table people add column if not exists start_fridays int not null default 0`,
+
+  // Quem gerou, editou, publicou ou reabriu a escala de cada semana. O app nao
+  // tem senha, entao o nome e o que a pessoa escolheu na tela; o aparelho ajuda
+  // a desfazer a duvida. `person_name` e copiado para o registro sobreviver a
+  // pessoa ser removida.
+  `create table if not exists week_log (
+     id          serial primary key,
+     monday      date not null,
+     action      text not null,
+     person_id   int references people(id) on delete set null,
+     person_name text,
+     device      text,
+     created_at  timestamptz not null default now()
+   )`,
+  `create index if not exists week_log_monday_idx on week_log (monday)`,
 ];

@@ -6,11 +6,26 @@ const handler = await loadApi();
 let pass = 0, fail = 0;
 const ok = (cond, msg) => cond ? (pass++, true) : (fail++, console.log('  ✗ ' + msg), false);
 
-const call = async (method, path, body) => {
-  const res = await handler(new Request(`https://x.test/api/${path}`, {
-    method, body: body === undefined ? undefined : JSON.stringify(body),
-  }));
-  return { status: res.status, json: await res.json() };
+// O app so gera e publica escala desta semana ou da proxima. Os testes mexem em
+// semanas de varias epocas, entao cada chamada vive "no dia" da semana que ela
+// mexe (ESCALAS_HOJE = body.monday); `hoje` escolhe outro dia.
+const call = async (method, path, body, hoje = body?.monday) => {
+  if (hoje) process.env.ESCALAS_HOJE = hoje;
+  try {
+    const res = await handler(new Request(`https://x.test/api/${path}`, {
+      method, body: body === undefined ? undefined : JSON.stringify(body),
+    }));
+    return { status: res.status, json: await res.json() };
+  } finally {
+    delete process.env.ESCALAS_HOJE;
+  }
+};
+
+// So escala publicada conta nos contadores.
+const gerarEPublicar = async (monday) => {
+  const g = await call('POST', 'generate', { monday });
+  await call('POST', 'publish', { monday, published: true });
+  return g;
 };
 
 const WEEK = '2026-03-02';      // março/2026 não tem feriado nenhum
@@ -94,7 +109,7 @@ for (let w = 0; w < 12; w++) {
   for (const [i, n] of NOMES.entries()) {
     await call('POST', 'preferences', { monday, personId: ids[n], choices: TOP3[i] });
   }
-  const g = (await call('POST', 'generate', { monday })).json;
+  const g = (await gerarEPublicar(monday)).json;
   donos.push(sexta(g).name.split(' ')[0]);
 }
 console.log(`  sextas de ${inicio} em diante: ${donos.join(', ')}`);
@@ -487,6 +502,8 @@ console.log('\n=== a explicacao da escala fica gravada ===');
 console.log('\n=== prioridade ===');
 // Junho/2026: 08, 15 e 22 sao segundas cheias.
 const PRIO = '2026-06-08';
+// Publicada no teste do rodizio; reaberta, volta a aceitar preferencia e geracao.
+await call('POST', 'publish', { monday: PRIO, published: false });
 const COM_FLAG = ['Luiz Melo', 'Ana Souza', 'Bruno Lima'];
 
 for (const n of COM_FLAG) {
@@ -623,7 +640,7 @@ console.log('\n=== ferias ===');
     for (const [i, p] of ativos.entries()) {
       await call('POST', 'preferences', { monday, personId: p.id, choices: TOP3[i % TOP3.length] });
     }
-    const g = (await call('POST', 'generate', { monday })).json;
+    const g = (await gerarEPublicar(monday)).json;
     ok(!g.assignments.some((a) => a.personId === iris), `${monday}: Iris fora da escala`);
     ok(g.generation.explain.vacation?.some((v) => v.personId === iris),
        `${monday}: explicacao lista Iris como de ferias`);
@@ -650,22 +667,30 @@ console.log('\n=== ferias ===');
   // Escala real e credito nunca somam na mesma semana.
   const [, meio] = SEMANAS;
   const slots = geradas[1].assignments.map((a) => ({ day: a.day, personId: a.personId }));
+  await call('POST', 'publish', { monday: meio, published: false });
   await call('POST', 'assignments', { monday: meio, slots: [...slots, { day: 1, personId: iris }] });
+  await call('POST', 'publish', { monday: meio, published: true });
   const comEscala = await contador(iris);
   const semMeio = credito([geradas[0], geradas[2]]);
   ok(comEscala.vacationTotal === semMeio && comEscala.total === inicio + semMeio + 1,
      `semana trabalhada sai do credito (${comEscala.vacationTotal} + 1 real = ${comEscala.total})`);
-  geradas[1] = (await call('POST', 'generate', { monday: meio })).json;
+  await call('POST', 'publish', { monday: meio, published: false });
+  geradas[1] = (await gerarEPublicar(meio)).json;
   ok((await contador(iris)).vacationTotal === credito(geradas), 'gerar de novo devolve o credito');
 
+  // Rascunho nao da credito: reaberta, a semana sai da conta.
+  await call('POST', 'publish', { monday: meio, published: false });
+  ok((await contador(iris)).vacationTotal === credito([geradas[0], geradas[2]]),
+     'semana reaberta (rascunho) nao da credito');
+  await call('POST', 'publish', { monday: meio, published: true });
+
   // Semana publicada trava as ferias que caem nela.
-  await call('POST', 'publish', { monday: SEMANAS[0], published: true });
   ok((await call('DELETE', `vacations?id=${ferias.id}`)).status === 409,
      'nao apaga ferias que caem numa semana publicada');
   ok((await call('POST', 'vacations',
      { personId: ids['Diego Alves'], start: '2026-11-10', end: '2026-11-11' })).status === 409,
      'nem cadastra');
-  await call('POST', 'publish', { monday: SEMANAS[0], published: false });
+  for (const monday of SEMANAS) await call('POST', 'publish', { monday, published: false });
 
   // Semana parcial: bloqueia os dias, sem credito.
   const PARCIAL = '2026-11-30';
@@ -684,7 +709,7 @@ console.log('\n=== ferias ===');
     await call('POST', 'preferences',
       { monday: PARCIAL, personId: p.id, choices: TOP3[i % TOP3.length] });
   }
-  const gParcial = (await call('POST', 'generate', { monday: PARCIAL })).json;
+  const gParcial = (await gerarEPublicar(PARCIAL)).json;
   ok(!gParcial.assignments.some((a) => a.personId === diego && a.day >= 3),
      'Diego nao cai em dia de ferias');
   const diegoExp = gParcial.generation.explain.people.find((p) => p.personId === diego);
@@ -766,6 +791,56 @@ console.log('\n=== pessoa nova comeca na media ===');
      'desfazer o zeramento devolve o ponto de partida');
   ok((await daPessoa(kaio.person.id)).startTotal === esperadoPos,
      'e quem entrou depois do zeramento continua com o dele');
+}
+
+console.log('\n=== rascunho nao conta, janela e registro ===');
+{
+  const SEM = '2026-12-07';   // semana cheia que nenhum teste acima usa
+  const ativos = (await call('GET', `state?week=${SEM}`)).json.people.filter((p) => p.active);
+  const autor = ativos[0];
+  const totalDoGrupo = async () =>
+    (await call('GET', 'stats?month=2026-12')).json.stats.counters.grandTotal;
+
+  // Janela: gerar, so esta semana ou a proxima.
+  const cedo = await call('POST', 'generate', { monday: SEM }, '2026-11-23');
+  ok(cedo.status === 400 && /liberada a partir de 30\/11/.test(cedo.json.error),
+     `recusa gerar semana adiantada: ${cedo.json.error}`);
+  console.log(`  ${cedo.json.error}`);
+  ok((await call('POST', 'generate', { monday: SEM }, '2026-12-14')).status === 400,
+     'recusa gerar de novo semana que ja passou');
+
+  const antes = await totalDoGrupo();
+  const gerada = await call('POST', 'generate', { monday: SEM, byPersonId: autor.id }, '2026-12-01');
+  ok(gerada.status === 200, `gera a proxima semana: ${JSON.stringify(gerada.json.error ?? '')}`);
+  ok(await totalDoGrupo() === antes, 'rascunho nao mexe em contador nenhum');
+
+  // Publicar tambem tem janela, e e o que faz a escala contar.
+  ok((await call('POST', 'publish', { monday: SEM, published: true }, '2026-11-23')).status === 400,
+     'recusa publicar semana adiantada');
+  const pub = await call('POST', 'publish', { monday: SEM, published: true, byPersonId: autor.id },
+    '2026-12-01');
+  ok(pub.status === 200, 'publica a proxima semana');
+  ok(await totalDoGrupo() === antes + gerada.json.assignments.length,
+     `publicada, a escala passa a contar (+${gerada.json.assignments.length})`);
+
+  // Registro: quem gerou e quem publicou, do mais recente para o mais antigo.
+  let log = pub.json.log;
+  ok(log.length === 2 && log[0].action === 'publicar' && log[1].action === 'gerar',
+     `registro com gerar e publicar (${log.map((l) => l.action)})`);
+  ok(log.every((l) => l.personName === autor.name), `com o nome de quem fez (${autor.name})`);
+  ok(log.every((l) => !Number.isNaN(Date.parse(l.at))), 'e a hora');
+
+  // Sem nome escolhido, a acao passa e o registro fica sem nome.
+  const reaberta = await call('POST', 'publish', { monday: SEM, published: false }, '2026-12-01');
+  log = reaberta.json.log;
+  ok(log[0].action === 'reabrir' && log[0].personName === null, 'reabrir sem nome fica registrado');
+
+  const slots = reaberta.json.assignments.map((a) => ({ day: a.day, personId: a.personId }));
+  const editada = await call('POST', 'assignments',
+    { monday: SEM, slots: slots.slice(1), byPersonId: autor.id }, '2026-12-01');
+  ok(editada.json.log[0].action === 'editar' && editada.json.log[0].personName === autor.name,
+     'edicao a mao fica registrada');
+  ok(await totalDoGrupo() === antes, 'reaberta, a semana sai da conta de novo');
 }
 
 console.log('\n=== rotas invalidas ===');

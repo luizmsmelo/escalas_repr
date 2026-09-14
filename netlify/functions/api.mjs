@@ -21,7 +21,7 @@ export default async function handler(request) {
   try {
     await ensureSchema();
     const body = request.method === 'GET' ? {} : await readJson(request);
-    const data = await dispatch(route, request.method, url.searchParams, body);
+    const data = await dispatch(route, request.method, url.searchParams, body, request);
     return json(data);
   } catch (err) {
     const status = err instanceof HttpError ? err.status : 500;
@@ -70,7 +70,7 @@ class HttpError extends Error {
 }
 const bad = (msg) => new HttpError(400, msg);
 
-async function dispatch(route, method, params, body) {
+async function dispatch(route, method, params, body, request) {
   switch (`${method} ${route}`) {
     case 'GET state':       return getState(params.get('week'));
     case 'GET stats':       return getStats(params.get('month'));
@@ -78,9 +78,9 @@ async function dispatch(route, method, params, body) {
     case 'PATCH people':    return updatePerson(body);
     case 'DELETE people':   return deletePerson(params.get('id'));
     case 'POST preferences':return savePreferences(body);
-    case 'POST generate':   return generate(body);
-    case 'POST assignments':return setAssignments(body);
-    case 'POST publish':    return publish(body);
+    case 'POST generate':   return generate(body, request);
+    case 'POST assignments':return setAssignments(body, request);
+    case 'POST publish':    return publish(body, request);
     case 'POST capacity':   return setCapacity(body);
     case 'POST reset':      return resetCounters(body);
     case 'POST day':        return setDayOverride(body);
@@ -98,7 +98,7 @@ async function getState(weekParam) {
     ? requireMonday(weekParam)
     : nextMonday();
 
-  const [people, week, prefs, overrides, assignments, vacations] = await Promise.all([
+  const [people, week, prefs, overrides, assignments, vacations, log] = await Promise.all([
     loadPeople(),
     ensureWeek(monday),
     sql`select person_id, choice1, choice2, choice3, unavailable, no_friday
@@ -110,6 +110,7 @@ async function getState(weekParam) {
          order by a.day`.then((rows) =>
            rows.sort((a, b) => a.day - b.day || collator.compare(a.name, b.name))),
     loadVacations(),
+    loadWeekLog(monday),
   ]);
 
   const today = todayISO();
@@ -142,6 +143,8 @@ async function getState(weekParam) {
       rank: a.rank, via: a.via, date: isoOf(a.work_date),
     })),
     vacations,
+    // Quem mexeu na escala desta semana, do mais recente para o mais antigo.
+    log,
     stats: await computeStats(monthOf(monday), overrides),
   };
 }
@@ -372,10 +375,99 @@ async function assertVacationOpen(start, end) {
   }
 }
 
+/* ------------------------------------------------- janela e registro ----- */
+
+/**
+ * Escala so e gerada para ESTA semana ou para a PROXIMA. Semana adiantada ainda
+ * nao tem preferencias, e o botao nao tem senha: um clique a toa enchia o
+ * historico de escalas que ninguem ia cumprir. Semana que ja passou tambem nao
+ * e gerada de novo - ela e o registro do que aconteceu; para corrigir, existe a
+ * edicao a mao.
+ */
+function assertGenerable(monday) {
+  const atual = mondayOf(todayISO());
+  const proxima = nextMonday();
+  if (monday < atual) {
+    throw bad('Semana que ja passou nao e gerada de novo: ela e o registro do que '
+      + 'aconteceu. Para corrigir, use Editar escala.');
+  }
+  if (monday > proxima) {
+    throw bad(`So da para gerar a escala desta semana ou da proxima. A semana de `
+      + `${fmtBR(monday)} fica liberada a partir de ${fmtBR(addDays(monday, -7))}.`);
+  }
+}
+
+/**
+ * Publicar e o que faz a escala contar nos contadores - por isso tambem nao vale
+ * para semana adiantada. Semana passada pode ser publicada: e o jeito de registrar
+ * uma escala que aconteceu e ficou sem publicar.
+ */
+function assertPublishable(monday) {
+  if (monday > nextMonday()) {
+    throw bad(`So da para publicar a escala desta semana ou da proxima. A semana de `
+      + `${fmtBR(monday)} fica liberada a partir de ${fmtBR(addDays(monday, -7))}.`);
+  }
+}
+
+/**
+ * Quem fez a acao: o nome escolhido no app - que nao tem senha, entao e quem a
+ * pessoa disse ser - e um resumo do aparelho. Sem nome valido, fica sem nome,
+ * mas a acao nao e recusada por isso.
+ */
+async function actorOf(byPersonId, request) {
+  const id = Number(byPersonId);
+  let nome = null;
+  if (Number.isInteger(id) && id > 0) {
+    const [p] = await sql`select name from people where id = ${id}`;
+    nome = p?.name ?? null;
+  }
+  return {
+    personId: nome ? id : null,
+    name: nome,
+    device: resumoAparelho(request?.headers?.get('user-agent') ?? ''),
+  };
+}
+
+/**
+ * "Android · Chrome", "iPhone · Safari": o bastante para distinguir um aparelho
+ * do outro, sem guardar o texto inteiro do navegador.
+ */
+function resumoAparelho(ua) {
+  if (!ua) return null;
+  const sistema = /iPhone/.test(ua) ? 'iPhone'
+    : /iPad/.test(ua) ? 'iPad'
+    : /Android/.test(ua) ? 'Android'
+    : /Windows/.test(ua) ? 'Windows'
+    : /Macintosh|Mac OS X/.test(ua) ? 'Mac'
+    : /Linux/.test(ua) ? 'Linux' : 'outro sistema';
+  const navegador = /Edg\//.test(ua) ? 'Edge'
+    : /OPR\/|Opera/.test(ua) ? 'Opera'
+    : /SamsungBrowser/.test(ua) ? 'Samsung Internet'
+    : /Firefox\/|FxiOS/.test(ua) ? 'Firefox'
+    : /Chrome\/|CriOS/.test(ua) ? 'Chrome'
+    : /Safari\//.test(ua) ? 'Safari' : 'outro navegador';
+  return `${sistema} · ${navegador}`;
+}
+
+const logQuery = (monday, action, quem) => sql`
+  insert into week_log (monday, action, person_id, person_name, device)
+  values (${monday}, ${action}, ${quem.personId}, ${quem.name}, ${quem.device})`;
+
+const loadWeekLog = (monday) =>
+  sql`select action, person_name, device, created_at from week_log
+       where monday = ${monday} order by created_at desc, id desc limit 30`
+    .then((rows) => rows.map((r) => ({
+      action: r.action,
+      personName: r.person_name,
+      device: r.device,
+      at: new Date(r.created_at).toISOString(),
+    })));
+
 /* ------------------------------------------------------------------- escala */
 
-async function generate({ monday }) {
+async function generate({ monday, byPersonId }, request) {
   const week = requireMonday(monday);
+  assertGenerable(week);
   await assertOpen(week);
   const cfg = await ensureWeek(week);
 
@@ -440,6 +532,7 @@ async function generate({ monday }) {
   }
 
   const result = solveWeek(input, capacity);
+  const quem = await actorOf(byPersonId, request);
   const dates = Object.fromEntries(situacao.map((d) => [d.day, d.date]));
 
   // O registro de POR QUE esta escala ficou assim, gravado junto com a semana.
@@ -468,6 +561,7 @@ async function generate({ monday }) {
     ),
     sql`update weeks set generated_at = now(), explain = ${JSON.stringify(explain)}
          where monday = ${week}`,
+    logQuery(week, 'gerar', quem),
   ]);
 
   const state = await getState(week);
@@ -506,7 +600,7 @@ async function generate({ monday }) {
  * `rank` originais: quem foi escalado pelo solver continua aparecendo como 1a
  * opcao ou como fila da sexta, e so o que a mao mexeu vira 'manual'.
  */
-async function setAssignments({ monday, slots }) {
+async function setAssignments({ monday, slots, byPersonId }, request) {
   const week = requireMonday(monday);
   await ensureWeek(week);
   await assertOpen(week);
@@ -557,6 +651,7 @@ async function setAssignments({ monday, slots }) {
       : { day, personId: id, via: 'manual', rank: manualRank(escolhas.get(id) ?? [], day) });
   }
 
+  const quem = await actorOf(byPersonId, request);
   await sql.transaction([
     sql`delete from assignments where monday = ${week}`,
     ...linhas.map(
@@ -564,6 +659,7 @@ async function setAssignments({ monday, slots }) {
         insert into assignments (monday, person_id, day, rank, via, work_date)
         values (${week}, ${a.personId}, ${a.day}, ${a.rank}, ${a.via}, ${dates[a.day]})`,
     ),
+    logQuery(week, 'editar', quem),
   ]);
 
   return getState(week);
@@ -576,14 +672,19 @@ function manualRank(choices, day) {
   return day === FRIDAY ? 4 : null;
 }
 
-async function publish({ monday, published }) {
+async function publish({ monday, published, byPersonId }, request) {
   const week = requireMonday(monday);
   await ensureWeek(week);
   const count = await sql`select count(*)::int as n from assignments where monday = ${week}`;
   if (published && count[0].n === 0) {
     throw bad('Gere a escala antes de publicar.');
   }
-  await sql`update weeks set published = ${!!published} where monday = ${week}`;
+  if (published) assertPublishable(week);
+  const quem = await actorOf(byPersonId, request);
+  await sql.transaction([
+    sql`update weeks set published = ${!!published} where monday = ${week}`,
+    logQuery(week, published ? 'publicar' : 'reabrir', quem),
+  ]);
   return getState(week);
 }
 
@@ -688,10 +789,16 @@ async function computeStats(ym, overrides) {
 async function allTimeCounts(excludeMonday = null) {
   const desde = await countersResetAt();
   const [rows, people, vacations] = await Promise.all([
+    // So escala PUBLICADA conta. Rascunho - gerado e ainda nao publicado - pode
+    // ser refeito a vontade, e um clique a toa em "Gerar escala" nao pode mexer
+    // no contador de ninguem.
     excludeMonday
-      ? sql`select person_id, day, monday from assignments
-             where monday <> ${excludeMonday} and work_date >= ${desde}`
-      : sql`select person_id, day, monday from assignments where work_date >= ${desde}`,
+      ? sql`select a.person_id, a.day, a.monday from assignments a
+              join weeks w on w.monday = a.monday and w.published
+             where a.monday <> ${excludeMonday} and a.work_date >= ${desde}`
+      : sql`select a.person_id, a.day, a.monday from assignments a
+              join weeks w on w.monday = a.monday and w.published
+             where a.work_date >= ${desde}`,
     // O ponto de partida so vale para quem foi cadastrado DEPOIS do ultimo
     // zeramento: zerar recomeca todo mundo do zero, e desfazer o zeramento (que
     // apaga o marco) devolve tudo. A comparacao e feita no banco, com o instante

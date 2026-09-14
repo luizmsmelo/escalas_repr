@@ -2,9 +2,15 @@
 // que o resultado nao mude conforme o fuso do servidor. O unico ponto que olha
 // para o fuso de Brasilia e o "hoje".
 
+import { env } from './env.mjs';
+
 const TZ = 'America/Sao_Paulo';
 
 export function todayISO() {
+  // ESCALAS_HOJE fixa o "hoje" (YYYY-MM-DD). Existe para os testes poderem
+  // mexer em semanas de qualquer epoca; em producao nao e definida.
+  const fixo = env().ESCALAS_HOJE;
+  if (fixo) return fixo;
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date());

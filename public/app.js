@@ -647,6 +647,15 @@ function renderSchedule(generation) {
       + 'Quem tem prioridade só entra no dia que pediu — quando ele enche, entra '
       + 'quem tem menos escalas acumuladas e o resto fica para a próxima semana.');
   }
+  // Rascunho nao conta nos contadores - e o que explica por que eles nao andaram.
+  if (hasAny && !week.published) {
+    messages.push('Esta escala ainda é um <b>rascunho</b>: ela só passa a contar nos '
+      + 'contadores depois de <b>publicada</b>.');
+  }
+  if (!week.published && week.monday > addDays(state.data.currentMonday, 7)) {
+    messages.push('A escala desta semana só pode ser gerada e publicada a partir de '
+      + `<b>${fmtDay(addDays(week.monday, -7))}</b>, quando ela passar a ser a próxima semana.`);
+  }
   // Ferias sao estado da semana, como a vaga em aberto: o aviso vale ao
   // recarregar a pagina, e nao so no instante da geracao.
   const deFeriasAgora = state.data.people
@@ -705,14 +714,40 @@ function renderSchedule(generation) {
 
   $('#schedActions').hidden = false;
   $('#editActions').hidden = true;
+  renderWeekLog();
 
+  // A mesma janela da API: gerar, so esta semana ou a proxima; publicar, ate a
+  // proxima. O servidor recusa de qualquer jeito - aqui e para nem oferecer.
+  const proxima = addDays(state.data.currentMonday, 7);
+  const adiantada = week.monday > proxima;
   $('#generateBtn').textContent = hasAny ? 'Gerar escala de novo' : 'Gerar escala';
-  $('#generateBtn').disabled = week.published;
+  $('#generateBtn').disabled = week.published || adiantada
+    || week.monday < state.data.currentMonday;
   $('#editBtn').textContent = hasAny ? 'Editar escala' : 'Montar escala à mão';
   // Sem nenhum dia com expediente nao ha o que editar.
   $('#editBtn').disabled = week.published || !week.dates.some((d) => d.works);
   $('#publishBtn').textContent = week.published ? 'Reabrir escala' : 'Publicar escala';
-  $('#publishBtn').disabled = !hasAny && !week.published;
+  $('#publishBtn').disabled = (!hasAny && !week.published) || (!week.published && adiantada);
+}
+
+/* --- quem mexeu nesta escala ---------------------------------------------- */
+
+const LOG_ACAO = {
+  gerar: 'Gerada', editar: 'Editada à mão', publicar: 'Publicada', reabrir: 'Reaberta',
+};
+
+/** Quem gerou, editou, publicou ou reabriu a escala da semana, e quando. */
+function renderWeekLog() {
+  const log = state.data.log ?? [];
+  $('#schedLog').hidden = log.length === 0;
+  $('#schedLogList').innerHTML = log.map((l) => {
+    const d = new Date(l.at);
+    const quando = `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${
+      d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+    const quem = l.personName ? ` por ${esc(l.personName)}` : ' · <i>sem nome escolhido</i>';
+    return `<li><b>${esc(LOG_ACAO[l.action] ?? l.action)}</b>${quem} · ${esc(quando)}${
+      l.device ? ` · ${esc(l.device)}` : ''}</li>`;
+  }).join('');
 }
 
 /* --- "Como essa escala foi gerada?" --------------------------------------- */
@@ -1314,8 +1349,8 @@ function renderCounters() {
   const c = s.counters;
 
   $('#countersSince').textContent = c.since
-    ? `Contando desde ${fmtLongDate(c.since)}.`
-    : 'Contando desde o início. Os contadores não zeram por mês.';
+    ? `Só contam escalas publicadas, desde ${fmtLongDate(c.since)}.`
+    : 'Só contam escalas publicadas, desde o início. Os contadores não zeram por mês.';
 
   const mine = c.perPerson.find((p) => p.personId === state.me?.id);
   const queue = s.fridayQueue ?? [];
@@ -2069,7 +2104,7 @@ function wireEvents() {
                     + 'Gerar de novo monta tudo outra vez pelas preferências e '
                     + 'descarta esses ajustes. Continuar?')) return;
     run(async () => {
-      const result = await post('/generate', { monday: state.week });
+      const result = await post('/generate', { monday: state.week, byPersonId: state.me?.id });
       state.data = result;
       state.stats = result.stats;
       state.month = result.stats.month;
@@ -2099,7 +2134,8 @@ function wireEvents() {
     run(async () => {
       const slots = Object.entries(state.edit).flatMap(([day, ids]) =>
         ids.map((personId) => ({ day: Number(day), personId })));
-      state.data = await post('/assignments', { monday: state.week, slots });
+      state.data = await post('/assignments',
+        { monday: state.week, slots, byPersonId: state.me?.id });
       state.stats = state.data.stats;
       syncDraftFromServer();   // encerra o modo de edicao
       renderAll();
@@ -2127,7 +2163,8 @@ function wireEvents() {
   $('#publishBtn').addEventListener('click', () =>
     run(async () => {
       const next = !state.data.week.published;
-      state.data = await post('/publish', { monday: state.week, published: next });
+      state.data = await post('/publish',
+        { monday: state.week, published: next, byPersonId: state.me?.id });
       state.stats = state.data.stats;
       syncDraftFromServer();
       renderAll();
