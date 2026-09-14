@@ -19,6 +19,7 @@
   --good:     #1baf7a;
   --warn:     #eda100;
   --danger:   #e34948;
+  --prio:     #7c4dde;    /* dia pedido por quem tem prioridade */
 
   --radius: 14px;
   --radius-sm: 10px;
@@ -47,6 +48,7 @@
     --good:     #199e70;
     --warn:     #c98500;
     --danger:   #e66767;
+    --prio:     #a584f5;
     --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 6px 16px -10px rgb(0 0 0 / .6);
   }
 }
@@ -962,10 +964,14 @@ body.is-busy { cursor: progress; }
 }
 
 /* ------------------------------------------------------------- prioridade - */
+/* Cor propria: o verde ja e da 1a opcao e o ambar, da fila da sexta. */
 .slot-rank[data-rank="prioridade"] {
-  color: var(--good);
-  border-color: color-mix(in srgb, var(--good) 45%, var(--border));
+  color: var(--prio);
+  border-color: color-mix(in srgb, var(--prio) 55%, var(--border));
+  background: color-mix(in srgb, var(--prio) 12%, transparent);
 }
+/* Estrela antes do nome, na escala e na lista de quem respondeu. */
+.prio-star { color: var(--warn); margin-right: 3px; }
 /* A estrela acesa e o unico sinal, na lista de pessoas, de quem escolhe 1 dia. */
 .iconbtn[data-action="priority"] { color: var(--border-strong); }
 .iconbtn[data-action="priority"][data-on="1"] {

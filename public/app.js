@@ -379,6 +379,11 @@ function myFixedDay() {
 const isPriority = (personId = state.me?.id) =>
   !!state.data?.people.find((p) => p.id === personId)?.priority;
 
+/** Estrela na frente do nome de quem tem prioridade - a mesma da lista de pessoas. */
+const prioStar = (personId) => (isPriority(personId)
+  ? '<span class="prio-star" title="Tem prioridade" aria-label="Tem prioridade">★</span>'
+  : '');
+
 /**
  * Ferias de uma pessoa na semana aberta - o mesmo criterio da API: `blocked`
  * sao os dias com expediente que caem nas ferias, e `fullWeek` e ter ferias em
@@ -548,7 +553,7 @@ function renderRespondedList() {
             : state_ === 'fixed' ? ` · fixo ${DAY_SHORT[p.fixedDay].toLowerCase()}`
             : state_ === 'pending' ? ' · pendente' : '';
           return `<li class="chip" data-state="${state_}">
-            <span class="chip-dot"></span>${esc(p.name)}${suffix}</li>`;
+            <span class="chip-dot"></span>${prioStar(p.id)}${esc(p.name)}${suffix}</li>`;
         })
         .join('')
     : '<li class="empty">Nenhuma pessoa ativa cadastrada.</li>';
@@ -596,7 +601,7 @@ function renderSchedule(generation) {
               .map(
                 (a) => `<div class="slot" data-me="${a.personId === state.me?.id ? 1 : 0}">
                   <span class="avatar">${esc(initials(a.name))}</span>
-                  <span class="slot-name">${esc(a.name)}</span>
+                  <span class="slot-name">${prioStar(a.personId)}${esc(a.name)}</span>
                   <span class="slot-rank" data-rank="${slotRankTone(a)}">${
                     slotRankLabel(a)
                   }</span>
@@ -1307,7 +1312,7 @@ function renderScheduleEditor() {
           const nome = p?.name ?? 'Desconhecido';
           return `<div class="slot" data-me="${id === state.me?.id ? 1 : 0}">
             <span class="avatar">${esc(initials(nome))}</span>
-            <span class="slot-name">${esc(nome)}</span>
+            <span class="slot-name">${prioStar(id)}${esc(nome)}</span>
             <button class="iconbtn" type="button" data-danger="1" data-remove="${day}:${id}"
                     aria-label="Tirar ${esc(nome)} de ${DAY_NAMES[day].toLowerCase()}">×</button>
           </div>`;
