@@ -238,6 +238,22 @@ fora do próprio top 3 por causa disso.
 
 ---
 
+## Tour guiado
+
+O app tem um passeio pelos próprios botões, pensado para quem tem pouca prática
+com celular. Ele destaca um botão de cada vez, com um balão explicando o que
+fazer: não participar da semana, escolher o dia, salvar, cadastrar férias e ver a
+escala.
+
+- **Abre sozinho** na primeira vez que alguém com **prioridade** entra no app,
+  naquele aparelho. Depois, qualquer pessoa o abre pelo **?** no topo.
+- **Só mostra**: não toca em nada e não salva nada pela pessoa. Enquanto ele está
+  aberto, o resto da página não responde a toques.
+- Pula o que não está na tela. Quem tem dia fixo, por exemplo, não vê a dica de
+  escolher dia.
+
+---
+
 ## "Como essa escala foi gerada?"
 
 Embaixo de toda escala gerada há uma caixa recolhida com esse título. Aberta, ela

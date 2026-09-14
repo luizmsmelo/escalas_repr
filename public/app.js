@@ -220,6 +220,7 @@ function pickMe(person) {
   $('#app').hidden = false;
   syncDraftFromServer();
   renderAll();
+  maybeStartTour();
 }
 
 function forgetMe() {
@@ -1748,6 +1749,166 @@ function renderCalMath(s) {
   ].join('');
 }
 
+/* ----------------------------------------------------------- tour guiado -- */
+/* Um passeio pelos botoes de verdade, um de cada vez: destaca e explica, e
+ * nunca toca em nada nem salva nada pela pessoa. Abre sozinho na primeira vez
+ * de quem tem prioridade - quem mais precisa dele - e depois pelo "?" do topo,
+ * para qualquer pessoa. */
+
+const STORAGE_TOUR = 'escalas.tourVisto.';
+const tour = { passos: [], i: 0, alvo: null };
+
+const aparece = (el) => !!el && el.getClientRects().length > 0;
+const reduzMovimento = () =>
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+
+function tourSteps() {
+  const prioridade = isPriority();
+  const nome = String(state.me?.name ?? '').trim().split(/\s+/)[0];
+  return [
+    { titulo: `Olá, ${nome}!`,
+      texto: 'Vou mostrar, em poucos passos, como usar o app. Nada é salvo sem você '
+        + 'tocar em Salvar.' },
+    { alvo: '#awaySwitch', titulo: 'Não vai poder participar?',
+      texto: 'Se não puder ficar até as 18h nesta semana, toque aqui para ligar. '
+        + 'Depois, toque em Salvar ausência.' },
+    { alvo: '#dayPicker',
+      titulo: prioridade ? 'Escolha o seu dia' : 'Escolha os seus dias',
+      texto: prioridade
+        ? 'Toque no dia em que você quer ficar até as 18h. Aparece uma estrela ★ nele.'
+        : 'Toque em 3 dias, na ordem que você prefere. O primeiro toque é a 1ª opção.' },
+    { alvo: '#savePrefs', titulo: 'Agora, toque em Salvar',
+      texto: `Depois de escolher, toque em ${prioridade ? 'Salvar meu dia' : 'Salvar preferência'}. `
+        + 'Só vale depois de salvar!' },
+    // So o formulario, e nao o cartao inteiro: o cartao e alto demais para
+    // caber na tela junto com o balao.
+    { alvo: '#vacationForm', titulo: 'Vai tirar férias?',
+      texto: 'Preencha o primeiro e o último dia das férias e toque em Adicionar. '
+        + 'Nesses dias você não entra na escala.' },
+    { alvo: '.tabbtn[data-goto="escala"]', titulo: 'Veja a escala',
+      texto: 'Para ver quem fica em cada dia, toque em Escala, aqui embaixo.' },
+    { titulo: 'Pronto!',
+      texto: 'Se quiser ver estas dicas de novo, toque no ? lá no topo da tela.' },
+  ];
+}
+
+/** Na primeira vez de quem tem prioridade neste aparelho, o tour abre sozinho. */
+function maybeStartTour() {
+  if (!isPriority()) return;
+  let visto;
+  // Sem acesso ao armazenamento, nao da para lembrar que ja abriu - melhor
+  // nao abrir sozinho do que abrir toda vez.
+  try { visto = localStorage.getItem(STORAGE_TOUR + state.me.id); } catch { visto = '1'; }
+  if (!visto) startTour();
+}
+
+function startTour() {
+  if (!state.me) return;
+  goTab('escolher');
+  window.scrollTo(0, 0);
+  // So entram os passos cujo botao esta na tela: quem esta de ferias a semana
+  // inteira, por exemplo, nao tem dia para escolher nem botao de salvar.
+  tour.passos = tourSteps().filter((p) => !p.alvo || aparece($(p.alvo)));
+  // A pagina fica inerte: durante o tour so os botoes do balao respondem.
+  $('#app').inert = true;
+  $('#tour').hidden = false;
+  window.addEventListener('resize', placeTour);
+  window.addEventListener('scroll', placeTour, { passive: true });
+  showTourStep(0);
+}
+
+function showTourStep(i) {
+  const { passos } = tour;
+  if (i < 0) return;
+  if (i >= passos.length) { endTour(); return; }
+  tour.i = i;
+  const passo = passos[i];
+  const dicas = passos.filter((p) => p.alvo);
+  const ultimo = i === passos.length - 1;
+
+  $('#tourCount').hidden = !passo.alvo;
+  $('#tourCount').textContent = passo.alvo
+    ? `Dica ${dicas.indexOf(passo) + 1} de ${dicas.length}` : '';
+  $('#tourTitle').textContent = passo.titulo;
+  $('#tourText').textContent = passo.texto;
+  $('[data-tour="back"]').hidden = i === 0;
+  $('[data-tour="next"]').textContent = i === 0 ? 'Começar' : ultimo ? 'Entendi' : 'Próximo';
+  const sair = $('[data-tour="close"]');
+  sair.hidden = ultimo;
+  sair.textContent = i === 0 ? 'Agora não' : 'Sair das dicas';
+
+  tour.alvo = passo.alvo ? $(passo.alvo) : null;
+  tour.alvo?.scrollIntoView({ block: 'center', behavior: reduzMovimento() ? 'auto' : 'smooth' });
+  placeTour();
+  $('[data-tour="next"]').focus({ preventScroll: true });
+}
+
+/**
+ * Poe o anel em volta do botao, escurece o resto com quatro faixas e leva o
+ * balao para o maior espaco livre da tela. Faixas, e nao uma sombra gigante em
+ * volta do anel: sombra desse tamanho pesa para desenhar e deixa a rolagem
+ * lenta justamente nos celulares mais antigos.
+ */
+function placeTour() {
+  const box = $('#tour');
+  if (box.hidden) return;
+  const card = $('.tour-card', box);
+  const alvo = tour.alvo;
+  box.dataset.alvo = alvo ? '1' : '0';
+  card.style.top = '';
+  card.style.bottom = '';
+
+  const vw = document.documentElement.clientWidth;
+  const vh = window.innerHeight;
+  const faixa = (lado, top, left, width, height) => Object.assign(
+    $(`.tour-shade[data-lado="${lado}"]`, box).style, {
+      top: `${top}px`, left: `${left}px`,
+      width: `${Math.max(0, width)}px`, height: `${Math.max(0, height)}px`,
+    });
+
+  if (!alvo) {
+    faixa('cima', 0, 0, vw, vh);
+    ['baixo', 'esq', 'dir'].forEach((lado) => faixa(lado, 0, 0, 0, 0));
+    card.dataset.pos = 'center';
+    return;
+  }
+
+  const folga = 8;
+  const r = alvo.getBoundingClientRect();
+  // O anel nunca sai da tela: a barra de abas fica colada na borda de baixo.
+  const t = Math.max(2, r.top - folga);
+  const l = Math.max(2, r.left - folga);
+  const w = Math.min(vw - 2, r.right + folga) - l;
+  const h = Math.min(vh - 2, r.bottom + folga) - t;
+  Object.assign($('.tour-ring', box).style, {
+    top: `${t}px`, left: `${l}px`, width: `${w}px`, height: `${h}px`,
+  });
+  faixa('cima', 0, 0, vw, t);
+  faixa('baixo', t + h, 0, vw, vh - (t + h));
+  faixa('esq', t, 0, l, h);
+  faixa('dir', t, l + w, vw - (l + w), h);
+
+  const margem = 16;
+  const altura = card.offsetHeight;
+  if (vh - r.bottom >= r.top) {
+    card.dataset.pos = 'below';
+    card.style.top = `${Math.max(margem, Math.min(r.bottom + folga + 12, vh - altura - margem))}px`;
+  } else {
+    card.dataset.pos = 'above';
+    card.style.bottom = `${Math.max(margem, Math.min(vh - r.top + folga + 12, vh - altura - margem))}px`;
+  }
+}
+
+function endTour() {
+  $('#tour').hidden = true;
+  $('#app').inert = false;
+  window.removeEventListener('resize', placeTour);
+  window.removeEventListener('scroll', placeTour);
+  tour.alvo = null;
+  try { localStorage.setItem(STORAGE_TOUR + state.me?.id, '1'); } catch { /* modo privado */ }
+  $('#helpBtn').focus({ preventScroll: true });
+}
+
 /* ------------------------------------------------------------------ abas -- */
 
 function goTab(name) {
@@ -1781,6 +1942,19 @@ function wireEvents() {
   });
 
   $('#whoami').addEventListener('click', forgetMe);
+
+  // tour guiado
+  $('#helpBtn').addEventListener('click', startTour);
+  $('#tour').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-tour]');
+    if (!btn) return;
+    if (btn.dataset.tour === 'next') showTourStep(tour.i + 1);
+    else if (btn.dataset.tour === 'back') showTourStep(tour.i - 1);
+    else endTour();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('#tour').hidden) endTour();
+  });
   $('#switchUser').addEventListener('click', forgetMe);
 
   // abas
@@ -2138,6 +2312,7 @@ async function start() {
     $('#app').hidden = false;
     syncDraftFromServer();
     renderAll();
+    maybeStartTour();
   } else {
     renderIdentity();
   }

@@ -38,6 +38,8 @@
 
   <header class="topbar">
     <div class="topbar-title">Escala&nbsp;18h</div>
+    <button id="helpBtn" class="helpbtn" type="button" title="Como usar o app"
+            aria-label="Ver as dicas de como usar o app">?</button>
     <button id="whoami" class="whoami" type="button">
       <span id="whoamiInitials" class="avatar"></span>
       <span id="whoamiName"></span>
@@ -99,7 +101,7 @@
         <button id="savePrefs" class="btn btn-primary btn-block" type="button">Salvar preferência</button>
       </div>
 
-      <section class="card">
+      <section class="card" id="vacationCard">
         <h2 class="card-title">
           Minhas férias
           <span class="card-sub">você não entra na escala nesses dias</span>
@@ -348,6 +350,27 @@
     <button class="tabbtn" data-goto="ajustes" role="tab" type="button">
       <span class="tabicon" aria-hidden="true">⚙</span>Ajustes</button>
   </nav>
+</div>
+
+<!-- Tour guiado: destaca um botao de verdade por vez. Fica fora de #app para a
+     pagina poder ficar inerte enquanto ele esta aberto. -->
+<div id="tour" class="tour" role="dialog" aria-modal="true" aria-labelledby="tourTitle"
+     aria-describedby="tourText" data-alvo="0" hidden>
+  <div class="tour-shade" data-lado="cima"></div>
+  <div class="tour-shade" data-lado="baixo"></div>
+  <div class="tour-shade" data-lado="esq"></div>
+  <div class="tour-shade" data-lado="dir"></div>
+  <div class="tour-ring" aria-hidden="true"></div>
+  <div class="tour-card" data-pos="center">
+    <p id="tourCount" class="tour-count"></p>
+    <h2 id="tourTitle" class="tour-title"></h2>
+    <p id="tourText" class="tour-text"></p>
+    <div class="tour-actions">
+      <button class="btn btn-ghost" type="button" data-tour="back">Voltar</button>
+      <button class="btn btn-primary" type="button" data-tour="next">Próximo</button>
+    </div>
+    <button class="linkbtn tour-skip" type="button" data-tour="close">Sair das dicas</button>
+  </div>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
