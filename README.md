@@ -298,6 +298,51 @@ onde todos deveriam estar.
 
 ---
 
+## Férias
+
+Cada pessoa cadastra os próprios períodos de férias na aba Escolher. Nesses dias
+ela **nunca é escalada** — nem pela preferência, nem pela fila da sexta, nem pelo
+dia fixo. O que muda com o tamanho do período:
+
+| a semana | o que acontece |
+| --- | --- |
+| **inteira** de férias (todos os dias com expediente) | a pessoa fica fora da semana e o contador dela recebe a **média do grupo** |
+| **em parte** de férias | a pessoa escolhe entre os dias livres, disputa como todo mundo e não recebe crédito |
+
+**Por que crédito.** Quem fica fora não soma escala, e o contador decide quem
+trabalha. Sem o crédito, quem volta de três semanas de férias chega atrás de todo
+mundo e é escalado toda semana — e ainda vai para a frente da fila da sexta — até
+alcançar. Seria punido por tirar férias.
+
+**A conta.** Para cada semana gerada que caiu inteira nas férias da pessoa:
+
+```
+crédito de escalas += escalas da semana ÷ pessoas disponíveis na semana
+crédito de sextas  += sextas da semana  ÷ pessoas disponíveis na semana
+```
+
+"Pessoas disponíveis" é o número gravado na geração — quem de fato disputou, sem
+contar quem estava de férias ou ausente. Somando essa média, o contador da pessoa
+anda o mesmo que o do grupo andou em média, e ela volta no mesmo ponto.
+
+- As frações são somadas e **arredondadas uma vez só**, no total da pessoa: os
+  contadores continuam inteiros, e o erro nunca passa de meia escala, por mais
+  férias que ela tire.
+- **Escala real e crédito não somam na mesma semana.** Se alguém de férias for
+  escalado à mão, aquela semana conta como trabalhada.
+- **Semana parcial não rende crédito**, porque a pessoa ainda podia pegar a
+  escala dela. Se os dias livres encherem, ela fica de fora e o contador parado a
+  põe na frente na semana seguinte — o mesmo rodízio de sempre.
+- O crédito **não fica gravado**: sai das escalas como estão agora. Editar uma
+  semana, apagar as férias ou zerar os contadores muda o crédito junto.
+- Semana publicada trava as férias que caem nela, como trava preferência e
+  geração.
+
+**Ausência avulsa não recebe crédito.** "Não vou participar desta semana" continua
+só tirando a pessoa da semana. Se rendesse a média, faltar sairia de graça.
+
+---
+
 ## Dias sem expediente
 
 Um dia sem expediente **não tem vaga**: ninguém é escalado, e a fila da sexta não

@@ -176,7 +176,11 @@ function syncDraftFromServer() {
   const mine = state.data.preferences.find((p) => p.personId === state.me?.id);
   // Com prioridade vale so a primeira escolha - o mesmo criterio do solver, se
   // a flag foi ligada depois de a pessoa ja ter marcado tres dias.
-  state.draft = mine ? mine.choices.slice(0, isPriority() ? 1 : 3) : [];
+  // Escolha salva antes de as ferias serem cadastradas nao vale no dia de ferias.
+  const bloqueados = vacationWeek().blocked;
+  state.draft = mine
+    ? mine.choices.filter((d) => !bloqueados.includes(d)).slice(0, isPriority() ? 1 : 3)
+    : [];
   state.away = mine ? mine.unavailable : false;
   state.noFriday = mine ? !!mine.noFriday : false;
   // Toda resposta do servidor descarta a edicao manual em andamento: a escala
@@ -244,25 +248,31 @@ function renderPicker() {
   applyWeekBadge($('#pickWeekBadge'), week.monday);
 
   const locked = week.published;
+  // Dia de ferias e, para quem esta de ferias, um dia sem expediente.
+  const ferias = vacationWeek();
   // Dia fixo so dispensa a escolha nas semanas em que ele tem expediente.
   const meuFixo = myFixedDay();
   const fixoVale = meuFixo != null
-    && week.dates.find((d) => d.day === meuFixo)?.works === true;
+    && week.dates.find((d) => d.day === meuFixo)?.works === true
+    && !ferias.blocked.includes(meuFixo);
 
   $('#pickLocked').hidden = !locked;
+  // Semana inteira de ferias: nao ha o que responder, nem ausencia a marcar.
+  $('#awaySwitch').hidden = ferias.fullWeek;
   $('#awayToggle').checked = state.away;
   $('#awayToggle').disabled = locked;
-  $('#pickPrefs').hidden = state.away || fixoVale;
+  $('#pickPrefs').hidden = state.away || fixoVale || ferias.fullWeek;
 
   const fridayPicked = state.draft.includes(FRIDAY);
   const fridayOpen = week.dates.find((d) => d.day === FRIDAY)?.works !== false;
 
-  renderFixedBox(meuFixo, fixoVale);
+  renderVacationBox(ferias);
+  renderFixedBox(meuFixo, fixoVale, ferias);
 
   // Numa semana encurtada por feriado pode nao haver 3 dias para escolher - e
   // quem tem prioridade escolhe um dia so, sempre.
   const prioridade = isPriority();
-  const abertos = week.dates.filter((d) => d.works).length;
+  const abertos = week.dates.filter((d) => d.works && !ferias.blocked.includes(d.day)).length;
   const exigidos = Math.min(prioridade ? 1 : 3, abertos);
 
   $('#pickIntro').hidden = prioridade;
@@ -276,6 +286,15 @@ function renderPicker() {
                         title="${esc(holiday?.name ?? 'Sem expediente')}"
                         aria-label="${DAY_NAMES[day]} ${fmtDay(date)}: sem expediente, ${esc(holiday?.name ?? '')}">
           <span class="daybtn-closed">${esc(SHORT_TYPE[holiday?.type] ?? 'fechado')}</span>
+          <span class="daybtn-name">${DAY_SHORT[day]}</span>
+          <span class="daybtn-date">${fmtDay(date)}</span>
+        </button>`;
+      }
+      if (ferias.blocked.includes(day)) {
+        return `<button class="daybtn" type="button" data-day="${day}" data-closed="1" disabled
+                        title="Suas férias"
+                        aria-label="${DAY_NAMES[day]} ${fmtDay(date)}: suas férias">
+          <span class="daybtn-closed">férias</span>
           <span class="daybtn-name">${DAY_SHORT[day]}</span>
           <span class="daybtn-date">${fmtDay(date)}</span>
         </button>`;
@@ -311,20 +330,23 @@ function renderPicker() {
         : 'Pronto. Toque em outro dia para trocar, ou no mesmo para desfazer.'
       : missing > 0
         ? `Faltam ${missing} ${missing === 1 ? 'dia' : 'dias'}${
-            exigidos < 3 ? ` (só ${abertos} dias com expediente nesta semana)` : ''
+            exigidos < 3 ? ` (só ${abertos} ${ferias.blocked.length
+              ? 'dias fora das suas férias' : 'dias com expediente'} nesta semana)` : ''
           }. Toque de novo num dia escolhido para desfazer.`
         : 'Pronto. Toque num dia escolhido para desfazer.';
 
   // Quem tem prioridade nao entra na fila da sexta: nao ha fila nem veto a
   // discutir com ele.
   $('#fridayBox').hidden = prioridade;
-  if (!prioridade) renderFridayBox(fridayPicked, locked, fridayOpen);
+  if (!prioridade) {
+    renderFridayBox(fridayPicked, locked, fridayOpen, ferias.blocked.includes(FRIDAY));
+  }
 
   const save = $('#savePrefs');
   // Com dia fixo valendo nao ha o que escolher: o botao so faz sentido para
   // desfazer uma ausencia ja salva, e some quando nao ha nada a salvar.
   const soDesfazerAusencia = fixoVale && !state.away;
-  save.hidden = soDesfazerAusencia && !storedAway();
+  save.hidden = (soDesfazerAusencia && !storedAway()) || ferias.fullWeek;
   if (soDesfazerAusencia) {
     save.disabled = locked;
     save.textContent = 'Voltar a participar desta semana';
@@ -335,6 +357,7 @@ function renderPicker() {
   }
 
   renderRespondedList();
+  renderVacations();
 }
 
 /** Dia fixo de quem esta usando o app, ou null. */
@@ -346,15 +369,71 @@ function myFixedDay() {
 const isPriority = (personId = state.me?.id) =>
   !!state.data?.people.find((p) => p.id === personId)?.priority;
 
+/**
+ * Ferias de uma pessoa na semana aberta - o mesmo criterio da API: `blocked`
+ * sao os dias com expediente que caem nas ferias, e `fullWeek` e ter ferias em
+ * todos eles, que e quando a pessoa sai da semana e recebe credito.
+ */
+function vacationWeek(personId = state.me?.id) {
+  const minhas = (state.data?.vacations ?? []).filter((v) => v.personId === personId);
+  const abertos = (state.data?.week.dates ?? []).filter((d) => d.works);
+  const blocked = abertos
+    .filter((d) => minhas.some((v) => v.start <= d.date && d.date <= v.end))
+    .map((d) => d.day);
+  return { blocked, fullWeek: abertos.length > 0 && blocked.length === abertos.length };
+}
+
+const fmtFull = (iso) => iso.split('-').reverse().join('/');
+
+/** Semana inteira de ferias: ocupa o lugar do seletor e diz o que acontece com o contador. */
+function renderVacationBox(ferias) {
+  const box = $('#vacationBox');
+  box.hidden = !ferias.fullWeek;
+  if (!ferias.fullWeek) return;
+
+  const primeiro = state.data.week.dates.find((d) => ferias.blocked.includes(d.day));
+  const periodo = state.data.vacations.find((v) => v.personId === state.me?.id
+    && v.start <= primeiro.date && primeiro.date <= v.end);
+  box.innerHTML = `<div class="fixedbox-head">
+      <span class="fixedbox-title">Você está de férias</span>
+      <span class="fixedbox-day">${fmtDay(periodo.start)} a ${fmtDay(periodo.end)}</span>
+    </div>
+    <p class="hint">Não há dia para escolher nesta semana, e você não entra na escala.
+      Quando ela for gerada, seu contador recebe a <b>média do grupo</b> nesta semana
+      &mdash; você volta das férias no mesmo ponto de todo mundo.</p>`;
+}
+
+/** Os periodos de ferias de quem esta usando o app. */
+function renderVacations() {
+  const hoje = state.data.today;
+  const minhas = (state.data.vacations ?? []).filter((v) => v.personId === state.me?.id);
+  $('#vacationList').innerHTML = minhas.length
+    ? minhas.map((v) => {
+        const dias = (Date.parse(v.end) - Date.parse(v.start)) / 86400000 + 1;
+        const quando = v.end < hoje ? ' · já passou' : v.start <= hoje ? ' · em andamento' : '';
+        return `<li class="vacation-row" data-past="${v.end < hoje ? 1 : 0}">
+          <div class="vacation-text">
+            <span class="vacation-dates">${fmtFull(v.start)} a ${fmtFull(v.end)}</span>
+            <span class="vacation-note">${plural(dias, 'dia', 'dias')}${quando}</span>
+          </div>
+          <button class="iconbtn" type="button" data-danger="1" data-vacation-remove="${v.id}"
+                  title="Apagar"
+                  aria-label="Apagar férias de ${fmtFull(v.start)} a ${fmtFull(v.end)}">✕</button>
+        </li>`;
+      }).join('')
+    : '<li class="empty">Nenhum período cadastrado.</li>';
+}
+
 /** Ausencia desta semana como esta gravada no servidor (nao o rascunho). */
 function storedAway() {
   return state.data.preferences.find((p) => p.personId === state.me?.id)?.unavailable ?? false;
 }
 
 /** Explica o dia fixo de quem tem um - e o que muda quando ele cai em feriado. */
-function renderFixedBox(fixedDay, fixoVale) {
+function renderFixedBox(fixedDay, fixoVale, ferias) {
   const box = $('#fixedBox');
-  if (fixedDay == null || state.away) { box.hidden = true; return; }
+  if (fixedDay == null || state.away || ferias.fullWeek) { box.hidden = true; return; }
+  const deFerias = ferias.blocked.includes(fixedDay);
   box.hidden = false;
 
   const info = state.data.week.dates.find((d) => d.day === fixedDay);
@@ -371,16 +450,28 @@ function renderFixedBox(fixedDay, fixoVale) {
          <span class="fixedbox-title">Seu dia fixo</span>
          <span class="fixedbox-day">${DAY_NAMES[fixedDay]}</span>
        </div>
-       <p class="hint">Nesta semana <b>a ${DAY_NAMES[fixedDay].toLowerCase()}-feira não tem
-         expediente</b>${info?.holiday?.name ? ` (${esc(info.holiday.name)})` : ''}, então
+       <p class="hint">Nesta semana <b>a ${DAY_NAMES[fixedDay].toLowerCase()}-feira ${
+         deFerias ? 'cai nas suas férias' : 'não tem expediente'}</b>${
+         !deFerias && info?.holiday?.name ? ` (${esc(info.holiday.name)})` : ''}, então
          você escolhe seus dias como todo mundo. Você continua fora da fila da sexta: só
          pega sexta se colocá-la no seu top 3.</p>`;
 }
 
 /** Explica a posicao da pessoa na fila da sexta e oferece o veto da semana. */
-function renderFridayBox(fridayPicked, locked, fridayOpen = true) {
+function renderFridayBox(fridayPicked, locked, fridayOpen = true, fridayVacation = false) {
   const box = $('#fridayBox');
   const toggle = $('#noFridayToggle');
+
+  // Sexta de ferias: a pessoa nem entra na fila, entao nao ha veto a oferecer.
+  if (fridayVacation) {
+    box.dataset.state = 'fechado';
+    toggle.checked = false;
+    toggle.disabled = true;
+    $('#fridayPos').textContent = '';
+    $('#fridayText').innerHTML =
+      'A <b>sexta cai nas suas férias</b>, então você fica fora da fila nesta semana.';
+    return;
+  }
 
   // Sexta feriado: nao ha vaga, entao nao ha fila nem veto a discutir.
   if (!fridayOpen) {
@@ -438,10 +529,12 @@ function renderRespondedList() {
           // Quem tem dia fixo valendo nesta semana nunca fica "pendente": nao ha
           // o que ele responder.
           const fixo = p.fixedDay != null && aberto.has(p.fixedDay);
-          const state_ = pref?.unavailable ? 'away'
+          const state_ = vacationWeek(p.id).fullWeek ? 'vacation'
+            : pref?.unavailable ? 'away'
             : fixo ? 'fixed'
             : pref ? 'done' : 'pending';
-          const suffix = state_ === 'away' ? ' · fora'
+          const suffix = state_ === 'vacation' ? ' · férias'
+            : state_ === 'away' ? ' · fora'
             : state_ === 'fixed' ? ` · fixo ${DAY_SHORT[p.fixedDay].toLowerCase()}`
             : state_ === 'pending' ? ' · pendente' : '';
           return `<li class="chip" data-state="${state_}">
@@ -539,7 +632,8 @@ function renderSchedule(generation) {
   if (generation?.fixed?.spill?.length) {
     const lista = generation.fixed.spill
       .map((f) => `${f.name} (${DAY_NAMES[f.day].toLowerCase()}, ${
-        f.reason === 'sem-expediente' ? 'sem expediente' : 'sem vaga livre'})`)
+        f.reason === 'sem-expediente' ? 'sem expediente'
+          : f.reason === 'ferias' ? 'de férias' : 'sem vaga livre'})`)
       .join(', ');
     messages.push(`Dia fixo sem vaga nesta semana: <b>${esc(lista)}</b>. `
       + 'Essas pessoas entraram pela preferência, como todo mundo.');
@@ -551,6 +645,21 @@ function renderSchedule(generation) {
     messages.push(`Fora da escala nesta semana, por prioridade: <b>${esc(lista)}</b>. `
       + 'Quem tem prioridade só entra no dia que pediu — quando ele enche, entra '
       + 'quem tem menos escalas acumuladas e o resto fica para a próxima semana.');
+  }
+  // Ferias sao estado da semana, como a vaga em aberto: o aviso vale ao
+  // recarregar a pagina, e nao so no instante da geracao.
+  const deFeriasAgora = state.data.people
+    .filter((p) => p.active && vacationWeek(p.id).fullWeek).map((p) => p.name);
+  if (deFeriasAgora.length) {
+    messages.push(`De férias nesta semana: <b>${esc(listaNomes(deFeriasAgora))}</b>. `
+      + 'Ficam fora da escala e, nos contadores, recebem a média do grupo.');
+  }
+  const escaladosNasFerias = [...new Set(assignments
+    .filter((a) => vacationWeek(a.personId).blocked.includes(a.day)).map((a) => a.name))];
+  if (escaladosNasFerias.length) {
+    messages.push(`Na escala em dia de férias: <b>${esc(listaNomes(escaladosNasFerias))}</b>. `
+      + 'As férias foram cadastradas depois de a escala ser montada — gere de novo ou use '
+      + '<b>Editar escala</b>.');
   }
   if (generation?.missingPreferences?.length) {
     messages.push(
@@ -683,7 +792,8 @@ function whyIntro(explain, edits) {
     <p class="why-meta">${quando ? `Gerada em ${esc(quando)} · ` : ''}
       ${explain.totalSlots} ${explain.totalSlots === 1 ? 'vaga' : 'vagas'} ·
       ${plural(explain.headcount, 'pessoa disponível', 'pessoas disponíveis')}
-      ${explain.away?.length ? ` · ${plural(explain.away.length, 'ausente', 'ausentes')}` : ''}</p>
+      ${explain.away?.length ? ` · ${plural(explain.away.length, 'ausente', 'ausentes')}` : ''}
+      ${explain.vacation?.length ? ` · ${explain.vacation.length} de férias` : ''}</p>
     ${mexeu ? `<p class="why-warn">Depois de gerada, esta escala foi <b>ajustada à
       mão</b>: ${esc(listaNomes([
         ...edits.entraram.map((a) => `${a.name} entrou na ${nomeDia(a.day)}`),
@@ -732,7 +842,10 @@ function whyFixed(explain) {
     const coube = p.days.some((d) => d.via === 'fixo');
     return `<li><b>${esc(p.name)}</b> — ${coube
       ? `tem ${nomeDia(p.fixedDay)} como dia fixo; a vaga foi reservada antes de tudo`
-      : `tem ${nomeDia(p.fixedDay)} como dia fixo, mas ela <b>não coube</b> nesta semana
+      : p.blockedDays?.includes(p.fixedDay)
+        ? `tem ${nomeDia(p.fixedDay)} como dia fixo, mas estava de <b>férias</b> nesse dia,
+           então disputou os outros dias`
+        : `tem ${nomeDia(p.fixedDay)} como dia fixo, mas ela <b>não coube</b> nesta semana
          (feriado, ou a vaga já estava ocupada), então disputou como todo mundo`}</li>`;
   }).join('');
   return `<h3 class="why-h">Camada 1 — dia fixo</h3><ul class="why-list">${linhas}</ul>`;
@@ -913,7 +1026,12 @@ function whyPeople(explain, byDay, assignments) {
 
   const linhas = ordem
     .map((p) => `<li><b>${esc(p.name)}</b> — ${whyOnePerson(p, explain, byDay)}${
-      whyHandNote(p, agora.get(p.personId) ?? [])}</li>`)
+      whyVacationNote(p)}${whyHandNote(p, agora.get(p.personId) ?? [])}</li>`)
+    .join('');
+  const ferias = (explain.vacation ?? [])
+    .map((p) => `<li><b>${esc(p.name)}</b> — está de <b>férias</b> a semana inteira, então
+      não entrou na conta. Nos contadores recebe a <b>média do grupo</b> nesta semana, para
+      voltar das férias no mesmo ponto de todo mundo.</li>`)
     .join('');
   const ausentes = (explain.away ?? [])
     .map((p) => `<li><b>${esc(p.name)}</b> — marcou que <b>não participa</b> desta semana,
@@ -921,7 +1039,19 @@ function whyPeople(explain, byDay, assignments) {
     .join('');
 
   return `<h3 class="why-h">Pessoa por pessoa</h3>
-    <ul class="why-people">${linhas}${ausentes}</ul>`;
+    <ul class="why-people">${linhas}${ferias}${ausentes}</ul>`;
+}
+
+/** Semana so em parte de ferias: os dias bloqueados explicam o resto da frase. */
+function whyVacationNote(p) {
+  const dias = p.blockedDays ?? [];
+  if (!dias.length) return '';
+  const quais = dias.length === 1
+    ? `A ${nomeDia(dias[0])} caía nas <b>férias</b> e ficou fora de alcance.`
+    : `Os dias ${esc(listaNomes(dias.map(nomeDia)))} caíam nas <b>férias</b> e ficaram fora
+       de alcance.`;
+  return ` <span class="why-hand">${quais} Semana só em parte de férias não rende crédito:
+    ainda dava para pegar a escala da semana.</span>`;
 }
 
 /** A frase de uma pessoa - sempre citando o numero que decidiu o caso dela. */
@@ -1088,6 +1218,9 @@ function renderScheduleEditor() {
   const pessoas = new Map(state.data.people.map((p) => [p.id, p]));
   const fora = new Set(
     state.data.preferences.filter((p) => p.unavailable).map((p) => p.personId));
+  // Semana inteira de ferias tambem e fora: deixar essa pessoa sem dia nao e descuido.
+  const deFerias = new Set(
+    state.data.people.filter((p) => vacationWeek(p.id).fullWeek).map((p) => p.id));
   const ativos = state.data.people.filter((p) => p.active);
   const capOf = (d) => (d === FRIDAY ? week.capFriday : week.capWeekday);
 
@@ -1116,7 +1249,8 @@ function renderScheduleEditor() {
                    aria-label="Acrescentar alguém em ${DAY_NAMES[day].toLowerCase()}">
              <option value="">+ Acrescentar pessoa</option>
              ${livres.map((p) => `<option value="${p.id}">${esc(p.name)}${
-                 fora.has(p.id) ? ' · fora esta semana' : ''}</option>`).join('')}
+                 vacationWeek(p.id).blocked.includes(day) ? ' · de férias'
+                   : fora.has(p.id) ? ' · fora esta semana' : ''}</option>`).join('')}
            </select>`
         : '';
 
@@ -1145,7 +1279,7 @@ function renderScheduleEditor() {
   const vezes = new Map();
   Object.values(state.edit).flat()
     .forEach((id) => vezes.set(id, (vezes.get(id) ?? 0) + 1));
-  const semDia = ativos.filter((p) => !vezes.has(p.id) && !fora.has(p.id));
+  const semDia = ativos.filter((p) => !vezes.has(p.id) && !fora.has(p.id) && !deFerias.has(p.id));
   const repetidos = ativos.filter((p) => (vezes.get(p.id) ?? 0) > 1);
 
   const partes = [];
@@ -1187,9 +1321,12 @@ function renderCounters() {
   const myPos = queue.findIndex((q) => q.personId === state.me?.id) + 1;
 
   $('#myStats').innerHTML = [
-    statCard('Minhas escalas', mine?.total ?? 0, `média ${fmtNum(c.avgTotal)}`,
+    // O credito de ferias ja esta no numero; a nota so diz quanto dele veio dali.
+    statCard('Minhas escalas', mine?.total ?? 0, `média ${fmtNum(c.avgTotal)}${
+      mine?.vacationTotal ? ` · ${mine.vacationTotal} de férias` : ''}`,
       diffTone(mine?.total ?? 0, c.avgTotal)),
-    statCard('Minhas sextas', mine?.fridays ?? 0, `média ${fmtNum(c.avgFridays)}`,
+    statCard('Minhas sextas', mine?.fridays ?? 0, `média ${fmtNum(c.avgFridays)}${
+      mine?.vacationFridays ? ` · ${mine.vacationFridays} de férias` : ''}`,
       diffTone(mine?.fridays ?? 0, c.avgFridays)),
     statCard('Posição na fila', myPos || '—',
       myPos ? `de ${queue.length} pessoas`
@@ -1675,6 +1812,46 @@ function wireEvents() {
   $('#noFridayToggle').addEventListener('change', (e) => {
     state.noFriday = e.target.checked;
     renderPicker();
+  });
+
+  // ferias
+  $('#vacStart').addEventListener('change', (e) => {
+    const fim = $('#vacEnd');
+    fim.min = e.target.value;
+    if (!fim.value || fim.value < e.target.value) fim.value = e.target.value;
+  });
+
+  $('#vacationForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    run(async () => {
+      state.data = await post('/vacations', {
+        monday: state.week,
+        personId: state.me.id,
+        start: $('#vacStart').value,
+        end: $('#vacEnd').value,
+      });
+      state.stats = state.data.stats;
+      $('#vacStart').value = '';
+      $('#vacEnd').value = '';
+      syncDraftFromServer();
+      renderAll();
+      toast('Férias cadastradas.');
+    });
+  });
+
+  $('#vacationList').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-vacation-remove]');
+    if (!btn) return;
+    if (!confirm('Apagar este período de férias?\n\n'
+                 + 'O crédito que ele deu no seu contador sai junto.')) return;
+    run(async () => {
+      state.data = await api(`/vacations?id=${btn.dataset.vacationRemove}&week=${state.week}`,
+        { method: 'DELETE' });
+      state.stats = state.data.stats;
+      syncDraftFromServer();
+      renderAll();
+      toast('Férias apagadas.');
+    });
   });
 
   $('#savePrefs').addEventListener('click', () =>

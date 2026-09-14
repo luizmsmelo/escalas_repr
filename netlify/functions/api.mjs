@@ -1,7 +1,7 @@
 import { sql, ensureSchema } from './lib/db.mjs';
 import { solveWeek, rankOf, DAYS, DAY_NAMES, FRIDAY } from './lib/solver.mjs';
 import {
-  todayISO, mondayOf, nextMonday, addDays, weekDates, monthOf,
+  todayISO, mondayOf, nextMonday, addDays, weekDates, monthOf, parseISO,
   isValidISO, isValidMonth,
 } from './lib/dates.mjs';
 import { dayStatus, workingDaysInMonth, monthDays, isLocked,
@@ -82,6 +82,8 @@ async function dispatch(route, method, params, body) {
     case 'POST capacity':   return setCapacity(body);
     case 'POST reset':      return resetCounters(body);
     case 'POST day':        return setDayOverride(body);
+    case 'POST vacations':  return createVacation(body);
+    case 'DELETE vacations':return deleteVacation(params);
     default:
       throw new HttpError(404, `Rota desconhecida: ${method} /api/${route}`);
   }
@@ -94,7 +96,7 @@ async function getState(weekParam) {
     ? requireMonday(weekParam)
     : nextMonday();
 
-  const [people, week, prefs, overrides, assignments] = await Promise.all([
+  const [people, week, prefs, overrides, assignments, vacations] = await Promise.all([
     loadPeople(),
     ensureWeek(monday),
     sql`select person_id, choice1, choice2, choice3, unavailable, no_friday
@@ -105,6 +107,7 @@ async function getState(weekParam) {
          where a.monday = ${monday}
          order by a.day`.then((rows) =>
            rows.sort((a, b) => a.day - b.day || collator.compare(a.name, b.name))),
+    loadVacations(),
   ]);
 
   const today = todayISO();
@@ -136,6 +139,7 @@ async function getState(weekParam) {
       personId: a.person_id, name: a.name, day: a.day,
       rank: a.rank, via: a.via, date: isoOf(a.work_date),
     })),
+    vacations,
     stats: await computeStats(monthOf(monday), overrides),
   };
 }
@@ -213,8 +217,15 @@ async function savePreferences({ monday, personId, choices, unavailable, noFrida
 
   if (!away) {
     // Numa semana encurtada por feriado pode nao haver 3 dias para escolher.
-    const overrides = await loadOverrides();
-    const abertos = weekDayStatus(week, overrides).filter((d) => d.works);
+    const [overrides, vacations] = await Promise.all([loadOverrides(), loadVacations()]);
+    const dias = weekDayStatus(week, overrides);
+    // Para quem esta de ferias, dia de ferias e como dia sem expediente: nao
+    // conta nos dias exigidos e nao pode ser escolhido.
+    const ferias = vacationWeek(id, dias, vacations);
+    if (ferias.fullWeek && Array.isArray(choices) && choices.length) {
+      throw bad('Voce esta de ferias nesta semana: nao ha dia para escolher.');
+    }
+    const abertos = dias.filter((d) => d.works && !ferias.blocked.includes(d.day));
     // Quem tem prioridade escolhe um dia so - e e nele ou em nenhum.
     const exigidos = Math.min(person.priority ? 1 : 3, abertos.length);
 
@@ -235,11 +246,17 @@ async function savePreferences({ monday, personId, choices, unavailable, noFrida
             : 'Esta semana nao tem nenhum dia com expediente.')
           : exigidos === 3
             ? 'Escolha exatamente 3 dias, em ordem de preferencia.'
-            : `Esta semana so tem ${abertos.length} dia(s) com expediente: escolha ${exigidos}.`);
+            : ferias.blocked.length
+              ? `Fora das suas ferias, esta semana so tem ${abertos.length} dia(s) com `
+                + `expediente: escolha ${exigidos}.`
+              : `Esta semana so tem ${abertos.length} dia(s) com expediente: escolha ${exigidos}.`);
     }
     if (list.length) {
       if (list.some((d) => !DAYS.includes(d))) throw bad('Dia invalido: use de segunda a sexta.');
       if (new Set(list).size !== list.length) throw bad('Os dias precisam ser diferentes entre si.');
+      if (list.some((d) => ferias.blocked.includes(d))) {
+        throw bad('Um dos dias escolhidos cai nas suas ferias.');
+      }
       const fechado = list.find((d) => !abertos.some((a) => a.day === d));
       if (fechado) throw bad('Um dos dias escolhidos nao tem expediente nesta semana.');
       picks = list;
@@ -267,6 +284,68 @@ async function savePreferences({ monday, personId, choices, unavailable, noFrida
   return getState(week);
 }
 
+/* ------------------------------------------------------------------- ferias */
+
+// Barreira contra erro de digitacao (um ano trocado vira um periodo enorme),
+// nao uma regra de RH.
+const MAX_VACATION_DAYS = 120;
+
+async function createVacation({ monday, personId, start, end }) {
+  const id = requireId(personId);
+  if (!isValidISO(start) || !isValidISO(end)) {
+    throw bad('Datas invalidas (esperado YYYY-MM-DD).');
+  }
+  if (end < start) throw bad('As ferias precisam terminar no mesmo dia ou depois de comecar.');
+  const dias = (parseISO(end) - parseISO(start)) / 86400000 + 1;
+  if (dias > MAX_VACATION_DAYS) {
+    throw bad(`Periodo longo demais: no maximo ${MAX_VACATION_DAYS} dias de uma vez.`);
+  }
+
+  const [person] = await sql`select id from people where id = ${id}`;
+  if (!person) throw new HttpError(404, 'Pessoa nao encontrada.');
+
+  // Dois periodos sobrepostos contariam a mesma semana duas vezes na tela, e
+  // nao ha caso em que isso seja o que se quer.
+  const [choque] = await sql`
+    select start_date, end_date from vacations
+     where person_id = ${id} and start_date <= ${end} and end_date >= ${start}`;
+  if (choque) {
+    throw bad(`Esse periodo se sobrepoe a ferias ja cadastradas `
+      + `(${fmtBR(isoOf(choque.start_date))} a ${fmtBR(isoOf(choque.end_date))}).`);
+  }
+  await assertVacationOpen(start, end);
+
+  await sql`insert into vacations (person_id, start_date, end_date)
+            values (${id}, ${start}, ${end})`;
+  return getState(monday ? requireMonday(monday) : null);
+}
+
+async function deleteVacation(params) {
+  const id = requireId(params.get('id'));
+  const [ferias] = await sql`select start_date, end_date from vacations where id = ${id}`;
+  if (!ferias) throw new HttpError(404, 'Ferias nao encontradas.');
+  await assertVacationOpen(isoOf(ferias.start_date), isoOf(ferias.end_date));
+  await sql`delete from vacations where id = ${id}`;
+  const week = params.get('week');
+  return getState(week ? requireMonday(week) : null);
+}
+
+/**
+ * Ferias mudam quem pode ser escalado e o credito dos contadores - numa semana
+ * publicada, as duas coisas ja estao fechadas. A mesma trava de preferencia e
+ * geracao: reabra a semana antes.
+ */
+async function assertVacationOpen(start, end) {
+  const [travada] = await sql`
+    select monday from weeks
+     where published = true and monday >= ${mondayOf(start)} and monday <= ${end}
+     order by monday limit 1`;
+  if (travada) {
+    throw new HttpError(409, `A semana de ${fmtBR(isoOf(travada.monday))} ja foi publicada `
+      + 'e cai nesse periodo. Reabra a escala dela antes de mexer nessas ferias.');
+  }
+}
+
 /* ------------------------------------------------------------------- escala */
 
 async function generate({ monday }) {
@@ -284,7 +363,16 @@ async function generate({ monday }) {
      where p.active = true
      order by p.id`;
 
-  const participants = rows.filter((r) => !r.unavailable);
+  const [overrides, vacations] = await Promise.all([loadOverrides(), loadVacations()]);
+  const situacao = weekDayStatus(week, overrides);
+
+  // Ferias vem antes da ausencia. Quem esta de ferias a semana inteira nao
+  // disputa nada - e, ao contrario de quem so marcou ausencia, recebe a media do
+  // grupo nos contadores (ver addVacationCredit). Quem esta de ferias em parte
+  // da semana disputa como todo mundo, mas nunca nos dias de ferias.
+  const ferias = new Map(rows.map((r) => [r.id, vacationWeek(r.id, situacao, vacations)]));
+  const deFerias = rows.filter((r) => ferias.get(r.id).fullWeek);
+  const participants = rows.filter((r) => !r.unavailable && !ferias.get(r.id).fullWeek);
   if (!participants.length) {
     throw bad('Ninguem disponivel nesta semana - nao ha escala para montar.');
   }
@@ -294,21 +382,26 @@ async function generate({ monday }) {
   // fechar e metade do grupo nunca pegaria sexta.
   const history = await allTimeCounts(week);
 
-  const input = participants.map((r) => ({
-    id: r.id,
-    name: r.name,
-    choices: [r.choice1, r.choice2, r.choice3].filter((d) => d != null),
-    noFriday: r.no_friday,
-    fixedDay: r.fixed_day ?? null,
-    priority: r.priority,
-    totalCount: history.get(r.id)?.total ?? 0,
-    fridayCount: history.get(r.id)?.fridays ?? 0,
-  }));
+  const input = participants.map((r) => {
+    const blockedDays = ferias.get(r.id).blocked;
+    return {
+      id: r.id,
+      name: r.name,
+      // Uma escolha salva antes de as ferias serem cadastradas nao vale no dia
+      // de ferias - as outras posicoes da lista continuam valendo.
+      choices: [r.choice1, r.choice2, r.choice3]
+        .filter((d) => d != null && !blockedDays.includes(d)),
+      noFriday: r.no_friday,
+      fixedDay: r.fixed_day ?? null,
+      priority: r.priority,
+      blockedDays,
+      totalCount: history.get(r.id)?.total ?? 0,
+      fridayCount: history.get(r.id)?.fridays ?? 0,
+    };
+  });
 
   // Dia sem expediente nao tem vaga: a capacidade dele vai a zero, e nem a fila
   // da sexta avanca numa semana em que a sexta e feriado.
-  const overrides = await loadOverrides();
-  const situacao = weekDayStatus(week, overrides);
   const capacity = {};
   for (const { day, works } of situacao) {
     const base = day === 5 ? cfg.cap_friday : cfg.cap_weekday;
@@ -330,7 +423,11 @@ async function generate({ monday }) {
   const explain = {
     ...result.explain,
     generatedAt: new Date().toISOString(),
-    away: rows.filter((r) => r.unavailable).map((r) => ({ personId: r.id, name: r.name })),
+    away: rows.filter((r) => r.unavailable && !ferias.get(r.id).fullWeek)
+      .map((r) => ({ personId: r.id, name: r.name })),
+    // Separado de `away`: a tela precisa dizer que esta pessoa recebe a media da
+    // semana, e quem so marcou ausencia nao recebe.
+    vacation: deFerias.map((r) => ({ personId: r.id, name: r.name })),
     closedDays: fechados.map((d) => ({
       day: d.day, date: d.date, name: d.holiday?.name ?? 'Sem expediente',
     })),
@@ -357,11 +454,12 @@ async function generate({ monday }) {
       // Quem ja tem a vaga garantida pelo dia fixo nao esta "sem preferencia":
       // nao ha nada que ele devesse ter respondido. Quem tem prioridade e nao
       // escolheu aparece na lista de fora da semana, que diz mais.
-      missingPreferences: rows
-        .filter((r) => !r.unavailable && r.choice1 == null && !r.priority
+      missingPreferences: participants
+        .filter((r) => r.choice1 == null && !r.priority
           && !result.fixed.placed.some((f) => f.personId === r.id))
         .map((r) => r.name),
-      awayCount: rows.length - participants.length,
+      awayCount: rows.length - participants.length - deFerias.length,
+      vacationCount: deFerias.length,
       explain,
       friday: result.friday,
       fixed: result.fixed,
@@ -528,6 +626,9 @@ async function computeStats(ym, overrides) {
         name: p.name,
         total: allTime.get(p.id)?.total ?? 0,
         fridays: allTime.get(p.id)?.fridays ?? 0,
+        // Quanto de `total` e `fridays` veio de credito de ferias.
+        vacationTotal: allTime.get(p.id)?.vacationTotal ?? 0,
+        vacationFridays: allTime.get(p.id)?.vacationFridays ?? 0,
       })),
       avgTotal: round2(sumOf(activePeople, allTime, 'total') / (activePeople.length || 1)),
       avgFridays: round2(sumOf(activePeople, allTime, 'fridays') / (activePeople.length || 1)),
@@ -550,25 +651,98 @@ async function computeStats(ym, overrides) {
  * mensal compara periodos de tamanhos diferentes e o rodizio nunca fecha.
  * `excludeMonday` tira a propria semana da conta, para que regerar uma escala
  * nao conte duas vezes.
+ *
+ * `total` e `fridays` ja incluem o credito de ferias; `vacationTotal` e
+ * `vacationFridays` dizem quanto dele veio dali.
  */
 async function allTimeCounts(excludeMonday = null) {
   const desde = await countersResetAt();
-  const [rows, people] = await Promise.all([
+  const [rows, people, vacations] = await Promise.all([
     excludeMonday
-      ? sql`select person_id, day from assignments
+      ? sql`select person_id, day, monday from assignments
              where monday <> ${excludeMonday} and work_date >= ${desde}`
-      : sql`select person_id, day from assignments where work_date >= ${desde}`,
-    sql`select id from people`,
+      : sql`select person_id, day, monday from assignments where work_date >= ${desde}`,
+    sql`select id, active from people`,
+    loadVacations(),
   ]);
 
-  const map = new Map(people.map((p) => [p.id, { total: 0, fridays: 0 }]));
+  const map = new Map(people.map((p) => [p.id, {
+    total: 0, fridays: 0, vacationTotal: 0, vacationFridays: 0,
+  }]));
   for (const r of rows) {
     const c = map.get(r.person_id);
     if (!c) continue;
     c.total++;
     if (r.day === FRIDAY) c.fridays++;
   }
+  if (vacations.length) await addVacationCredit(map, rows, vacations, people);
   return map;
+}
+
+/**
+ * Credito de ferias: por semana INTEIRA de ferias, a pessoa recebe a media de
+ * escalas - e de sextas - de quem estava disponivel naquela semana. Sem isso,
+ * quem volta de ferias chega atras no contador e o solver o escala toda semana
+ * ate alcancar o grupo: seria punido por ter tirado ferias.
+ *
+ * A media e a de quem DISPUTOU a semana (`explain.headcount`, gravado na
+ * geracao, que ja exclui quem estava de ferias ou ausente). Somado a media, o
+ * contador da pessoa anda o mesmo que o do grupo andou em media.
+ *
+ * Nada disto e gravado: sai das escalas como estao agora. Editar uma semana a
+ * mao, apagar as ferias ou zerar os contadores muda o credito junto, sem nenhum
+ * estado para ficar desatualizado.
+ *
+ *   - so conta semana gerada e que a pessoa nao trabalhou - escala real e
+ *     credito nunca somam na mesma semana;
+ *   - semana parcial nao conta: a pessoa ainda podia pegar a escala dela;
+ *   - as fracoes sao somadas e arredondadas uma vez so, no total da pessoa,
+ *     para o erro nunca passar de meia escala por mais ferias que ela tire.
+ */
+async function addVacationCredit(map, rows, vacations, people) {
+  const semanas = new Map();   // segunda -> { total, fridays, escalados }
+  for (const r of rows) {
+    const monday = isoOf(r.monday);
+    if (!semanas.has(monday)) semanas.set(monday, { total: 0, fridays: 0, escalados: new Set() });
+    const s = semanas.get(monday);
+    s.total++;
+    if (r.day === FRIDAY) s.fridays++;
+    s.escalados.add(r.person_id);
+  }
+  if (!semanas.size) return;
+
+  const [overrides, gravadas] = await Promise.all([
+    loadOverrides(),
+    sql`select monday, (explain->>'headcount')::int as headcount
+          from weeks where explain is not null`,
+  ]);
+  const disponiveisEm = new Map(gravadas.map((w) => [isoOf(w.monday), w.headcount]));
+  const ativos = people.filter((p) => p.active).length;
+  const comFerias = [...new Set(vacations.map((v) => v.personId))].filter((id) => map.has(id));
+  const exato = new Map(comFerias.map((id) => [id, { total: 0, fridays: 0 }]));
+
+  for (const [monday, s] of semanas) {
+    const dias = weekDayStatus(monday, overrides);
+    const quem = comFerias.filter((id) =>
+      !s.escalados.has(id) && vacationWeek(id, dias, vacations).fullWeek);
+    if (!quem.length) continue;
+    // Semana montada a mao, sem geracao, nao tem o numero gravado: a melhor
+    // aproximacao e quem esta ativo, menos quem estava de ferias.
+    const disponiveis = disponiveisEm.get(monday) ?? ativos - quem.length;
+    if (!(disponiveis > 0)) continue;
+    for (const id of quem) {
+      exato.get(id).total += s.total / disponiveis;
+      exato.get(id).fridays += s.fridays / disponiveis;
+    }
+  }
+
+  for (const [id, e] of exato) {
+    const c = map.get(id);
+    c.vacationTotal = Math.round(e.total);
+    c.vacationFridays = Math.round(e.fridays);
+    c.total += c.vacationTotal;
+    c.fridays += c.vacationFridays;
+  }
 }
 
 /** Data a partir da qual os contadores contam. '1900-01-01' = desde sempre. */
@@ -666,6 +840,31 @@ async function loadOverrides() {
   return Object.fromEntries(
     rows.map((r) => [isoOf(r.work_date), { works: r.works, note: r.note }]),
   );
+}
+
+/** Todos os periodos de ferias, como a tela e as contas os usam. */
+const loadVacations = () =>
+  sql`select id, person_id, start_date, end_date from vacations
+       order by start_date, id`
+    .then((rows) => rows.map((r) => ({
+      id: r.id, personId: r.person_id, start: isoOf(r.start_date), end: isoOf(r.end_date),
+    })));
+
+/**
+ * Ferias de uma pessoa numa semana. `blocked` sao os dias COM expediente que
+ * caem nas ferias - dia fechado ja nao tem vaga, e lista-lo so confundiria a
+ * explicacao. `fullWeek` e ter ferias em todos os dias com expediente: ai a
+ * pessoa sai da semana e recebe credito. Semana sem expediente nenhum nao e
+ * semana de ferias, porque nao havia o que perder.
+ */
+function vacationWeek(personId, days, vacations) {
+  const minhas = vacations.filter((v) => v.personId === personId);
+  const abertos = days.filter((d) => d.works);
+  const blocked = minhas.length
+    ? abertos.filter((d) => minhas.some((v) => v.start <= d.date && d.date <= v.end))
+      .map((d) => d.day)
+    : [];
+  return { blocked, fullWeek: abertos.length > 0 && blocked.length === abertos.length };
 }
 
 /** Situação de cada dia da semana, para a tela e para a geração da escala. */
@@ -775,6 +974,8 @@ function clampInt(value, min, max, label) {
   }
   return n;
 }
+
+const fmtBR = (iso) => iso.split('-').reverse().join('/');
 
 function isoOf(value) {
   if (typeof value === 'string') return value.slice(0, 10);

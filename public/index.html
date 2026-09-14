@@ -62,12 +62,13 @@
       </div>
 
       <div id="pickBody">
-        <label class="switch">
+        <label class="switch" id="awaySwitch">
           <input id="awayToggle" type="checkbox">
           <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
           <span class="switch-label">Não vou participar desta semana</span>
         </label>
 
+        <div id="vacationBox" class="fixedbox" data-state="ferias" hidden></div>
         <div id="fixedBox" class="fixedbox" hidden></div>
 
         <div id="pickPrefs">
@@ -97,6 +98,29 @@
 
         <button id="savePrefs" class="btn btn-primary btn-block" type="button">Salvar preferência</button>
       </div>
+
+      <section class="card">
+        <h2 class="card-title">
+          Minhas férias
+          <span class="card-sub">você não entra na escala nesses dias</span>
+        </h2>
+        <p class="hint hint-muted">Cada semana <strong>inteira</strong> de férias rende a
+          <strong>média do grupo</strong> naquela semana no seu contador &mdash; você volta
+          no mesmo ponto de todo mundo, sem ficar devendo escala. Semana só em parte de
+          férias não rende crédito: você ainda escolhe entre os dias livres.</p>
+        <ul id="vacationList" class="vacation-list"></ul>
+        <form id="vacationForm" class="vacation-form">
+          <label class="field">
+            <span>De</span>
+            <input id="vacStart" type="date" required>
+          </label>
+          <label class="field">
+            <span>Até</span>
+            <input id="vacEnd" type="date" required>
+          </label>
+          <button type="submit" class="btn btn-primary">Adicionar</button>
+        </form>
+      </section>
 
       <div class="card">
         <h2 class="card-title">Quem já respondeu</h2>
@@ -238,6 +262,14 @@
           pedido encher, entra quem tem menos escalas acumuladas e a outra fica de fora
           daquela semana, entrando na frente na próxima. Ela também não entra na fila da
           sexta: a sexta só é dela se for o dia que escolheu.
+        </p>
+        <p class="hint">
+          <strong>Férias não atrasam ninguém.</strong> Quem cadastra férias, na aba
+          Escolher, nunca é escalado nesses dias. Numa semana inteira de férias a pessoa
+          fica fora e o contador dela recebe a <strong>média do grupo</strong> naquela
+          semana &mdash; senão ela voltaria atrás de todo mundo e seria escalada toda
+          semana até alcançar. Ausência avulsa não recebe nada: se recebesse, faltar
+          sairia de graça.
         </p>
         <p class="hint">
           <strong>Depois, de segunda a quinta.</strong> O app testa todas as combinações

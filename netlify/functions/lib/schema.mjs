@@ -76,4 +76,16 @@ export const SCHEMA = [
      value      text not null,
      updated_at timestamptz not null default now()
    )`,
+
+  // Ferias: periodos em que a pessoa nao pode ser escalada. Semana inteira de
+  // ferias vale como ausencia com credito - a pessoa recebe a media do grupo
+  // naquela semana, para nao voltar atras no contador. O credito nao e gravado:
+  // sai das escalas das semanas cobertas, e acompanha qualquer edicao delas.
+  `create table if not exists vacations (
+     id         serial primary key,
+     person_id  int  not null references people(id) on delete cascade,
+     start_date date not null,
+     end_date   date not null check (end_date >= start_date),
+     created_at timestamptz not null default now()
+   )`,
 ];

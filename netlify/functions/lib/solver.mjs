@@ -102,8 +102,13 @@ export function priorityDay(person) {
   return person.priority ? ((person.choices || [])[0] ?? null) : null;
 }
 
-/** Dias em que a pessoa pode ser escalada nesta semana. */
+/**
+ * Dias em que a pessoa pode ser escalada nesta semana. Dia de ferias nunca: e a
+ * mesma restricao da prioridade, so que pelo lado oposto - em vez de um dia
+ * aceito, alguns dias recusados.
+ */
 function allowsDay(person, day) {
+  if ((person.blockedDays || []).includes(day)) return false;
   return person.priority ? priorityDay(person) === day : true;
 }
 
@@ -277,7 +282,13 @@ function placeFixed(people, capacity) {
     // `people` ja vem ordenado por id: com mais fixos que vagas, quem cadastrou
     // antes fica com o dia, e o resultado nao muda de uma geracao para a outra.
     const fixos = people.filter((p) => p.fixedDay === day);
-    fixos.forEach((person, i) => {
+    // Quem esta de ferias no proprio dia fixo nao ocupa a vaga - ela fica para
+    // o proximo fixo, ou para a disputa.
+    const deFerias = fixos.filter((p) => (p.blockedDays || []).includes(day));
+    for (const person of deFerias) {
+      spill.push({ personId: person.id, name: person.name, day, reason: 'ferias' });
+    }
+    fixos.filter((p) => !deFerias.includes(p)).forEach((person, i) => {
       if (i < vagas) {
         placed.push({
           personId: person.id, name: person.name, day, rank: null, via: 'fixo',
@@ -554,6 +565,7 @@ function buildExplain(people, capacity, assignments, friday, unfilledSlots) {
       priority: !!p.priority,
       priorityDay: priorityDay(p),
       noFriday: !!p.noFriday,
+      blockedDays: [...(p.blockedDays || [])],
       fridayPos: posNaFila.get(p.id) ?? null,
       aboveCut: cut != null && (p.totalCount ?? 0) > cut,
       days: porPessoa.get(p.id) ?? [],

@@ -596,6 +596,47 @@ console.log('\n--- prioridade: um dia so, ou nenhum ---');
      `explain carrega a flag e o dia (${JSON.stringify({ p: luiz.priority, d: luiz.priorityDay })})`);
 }
 
+console.log('\n--- ferias ---');
+{
+  // Dia de ferias nunca recebe a pessoa: com 9 pessoas para 9 vagas todo mundo
+  // trabalha, e Luiz so tem a quinta livre.
+  const povo = NOMES.map((_, i) => mk(i, i === 0 ? { blockedDays: [1, 2, 3, 5] } : {}));
+  const r = solveWeek(povo, CAP);
+  const luiz = r.assignments.filter((a) => a.name === 'Luiz');
+  ok(luiz.length === 1 && luiz[0].day === 4, `Luiz so cabe na quinta (${JSON.stringify(luiz)})`);
+  ok(r.assignments.length === 9, `as 9 vagas saem mesmo assim (${r.assignments.length})`);
+  const exp = r.explain.people.find((p) => p.name === 'Luiz');
+  ok(JSON.stringify(exp.blockedDays) === '[1,2,3,5]', `explain guarda os dias de ferias (${exp.blockedDays})`);
+}
+{
+  // Sexta de ferias: fora da fila, mesmo sendo o primeiro dela.
+  const povo = NOMES.map((_, i) => mk(i, {
+    fridayCount: i === 0 ? 0 : 3, blockedDays: i === 0 ? [5] : [],
+  }));
+  const r = solveWeek(povo, CAP);
+  ok(sexta(r).name !== 'Luiz', `quem esta de ferias na sexta nao leva (levou ${sexta(r).name})`);
+  ok(!r.friday.queue.some((q) => q.name === 'Luiz'), 'e nem aparece na fila');
+}
+{
+  // Dia fixo que cai nas ferias: a vaga nao fica reservada, e a pessoa disputa
+  // os outros dias.
+  const povo = NOMES.map((_, i) => mk(i, i === 0 ? { fixedDay: 3, blockedDays: [3] } : {}));
+  const r = solveWeek(povo, CAP);
+  ok(r.fixed.spill.some((f) => f.name === 'Luiz' && f.reason === 'ferias'),
+     `dia fixo de ferias vira spill com motivo ferias (${JSON.stringify(r.fixed.spill)})`);
+  ok(!r.assignments.some((a) => a.name === 'Luiz' && a.day === 3), 'ninguem o poe na quarta');
+  ok(r.assignments.some((a) => a.name === 'Luiz'), 'e ele entra em outro dia');
+}
+{
+  // Um segundo fixo no mesmo dia herda a vaga de quem esta de ferias.
+  const cap1 = { ...CAP, 3: 1 };
+  const povo = NOMES.map((_, i) => mk(i,
+    i === 0 ? { fixedDay: 3, blockedDays: [3] } : i === 1 ? { fixedDay: 3 } : {}));
+  const r = solveWeek(povo, cap1);
+  ok(r.fixed.placed.some((f) => f.name === 'Ana' && f.day === 3),
+     `Ana fica com a quarta que Luiz liberou (${JSON.stringify(r.fixed.placed)})`);
+}
+
 console.log('\n--- casos limite ---');
 ok(solveWeek([], CAP).unfilledSlots.length === 9, 'zero pessoas: 9 vagas em aberto');
 ok(solveWeek(NOMES.map((_, i) => mk(i)), { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }).assignments.length === 0, 'zero vagas');

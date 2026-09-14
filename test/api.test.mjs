@@ -571,6 +571,138 @@ ok((await call('POST', 'preferences',
    { monday: PRIO, personId: ids['Luiz Melo'], choices: [1, 2, 3] })).status === 200,
    'e a pessoa volta a escolher 3 dias');
 
+console.log('\n=== ferias ===');
+{
+  // Conta desde sempre: assim o credito nao depende do dia em que o teste roda.
+  await call('POST', 'reset', { undo: true });
+  const iris = (await call('POST', 'people', { name: 'Iris Rocha' })).json.person.id;
+  const contador = async (id) => (await call('GET', 'stats?month=2026-11')).json.stats
+    .counters.perPerson.find((p) => p.personId === id);
+
+  // Validacao.
+  ok((await call('POST', 'vacations',
+     { personId: iris, start: '2026-11-20', end: '2026-11-10' })).status === 400,
+     'rejeita ferias que terminam antes de comecar');
+  ok((await call('POST', 'vacations',
+     { personId: iris, start: '2026-11-02', end: '2027-06-30' })).status === 400,
+     'rejeita periodo longo demais');
+  ok((await call('POST', 'vacations',
+     { personId: iris, start: '2026-11-31', end: '2026-12-02' })).status === 400,
+     'rejeita data inexistente');
+  ok((await call('POST', 'vacations',
+     { personId: 99999, start: '2026-11-09', end: '2026-11-10' })).status === 404,
+     'rejeita pessoa inexistente');
+
+  // Tres semanas inteiras de ferias.
+  const SEMANAS = ['2026-11-09', '2026-11-16', '2026-11-23'];
+  const criada = await call('POST', 'vacations',
+    { monday: SEMANAS[0], personId: iris, start: '2026-11-09', end: '2026-11-27' });
+  ok(criada.status === 200, `ferias cadastradas: ${JSON.stringify(criada.json.error ?? '')}`);
+  const ferias = criada.json.vacations?.find((v) => v.personId === iris);
+  ok(ferias?.start === '2026-11-09' && ferias?.end === '2026-11-27', 'e voltam no estado');
+
+  ok((await call('POST', 'vacations',
+     { personId: iris, start: '2026-11-20', end: '2026-12-04' })).status === 400,
+     'rejeita periodo sobreposto');
+  const escolheu = await call('POST', 'preferences',
+    { monday: SEMANAS[0], personId: iris, choices: [1, 2, 3] });
+  ok(escolheu.status === 400, 'de ferias a semana inteira, nao ha dia para escolher');
+  console.log(`  ${escolheu.json.error}`);
+
+  const antes = await contador(iris);
+  ok(antes.total === 0 && antes.vacationTotal === 0, 'nenhum credito antes de gerar');
+
+  const ativos = (await call('GET', `state?week=${SEMANAS[0]}`)).json.people
+    .filter((p) => p.active && p.id !== iris);
+  const geradas = [];
+  for (const monday of SEMANAS) {
+    for (const [i, p] of ativos.entries()) {
+      await call('POST', 'preferences', { monday, personId: p.id, choices: TOP3[i % TOP3.length] });
+    }
+    const g = (await call('POST', 'generate', { monday })).json;
+    ok(!g.assignments.some((a) => a.personId === iris), `${monday}: Iris fora da escala`);
+    ok(g.generation.explain.vacation?.some((v) => v.personId === iris),
+       `${monday}: explicacao lista Iris como de ferias`);
+    ok(!g.generation.explain.people.some((p) => p.personId === iris),
+       `${monday}: e ela nao entra na conta das pessoas disponiveis`);
+    ok(g.generation.vacationCount === 1, `${monday}: vacationCount = 1`);
+    geradas.push(g);
+  }
+
+  // Credito = soma, semana a semana, das escalas / quem estava disponivel.
+  const credito = (gs, so = () => true) => Math.round(gs.reduce((s, g) =>
+    s + g.assignments.filter(so).length / g.generation.explain.headcount, 0));
+  const esperado = credito(geradas);
+  const esperadoSex = credito(geradas, (a) => a.day === 5);
+  const depois = await contador(iris);
+  ok(esperado >= 2, `tres semanas de ferias valem ao menos 2 escalas (${esperado})`);
+  ok(depois.vacationTotal === esperado, `credito de escalas = ${esperado} (${depois.vacationTotal})`);
+  ok(depois.total === esperado, `e entra no contador (${depois.total})`);
+  ok(depois.vacationFridays === esperadoSex && depois.fridays === esperadoSex,
+     `credito de sextas = ${esperadoSex} (${depois.vacationFridays})`);
+  console.log(`  3 semanas de ferias: ${depois.vacationTotal} escalas e ` +
+              `${depois.vacationFridays} sextas de credito`);
+
+  // Escala real e credito nunca somam na mesma semana.
+  const [, meio] = SEMANAS;
+  const slots = geradas[1].assignments.map((a) => ({ day: a.day, personId: a.personId }));
+  await call('POST', 'assignments', { monday: meio, slots: [...slots, { day: 1, personId: iris }] });
+  const comEscala = await contador(iris);
+  const semMeio = credito([geradas[0], geradas[2]]);
+  ok(comEscala.vacationTotal === semMeio && comEscala.total === semMeio + 1,
+     `semana trabalhada sai do credito (${comEscala.vacationTotal} + 1 real = ${comEscala.total})`);
+  geradas[1] = (await call('POST', 'generate', { monday: meio })).json;
+  ok((await contador(iris)).vacationTotal === credito(geradas), 'gerar de novo devolve o credito');
+
+  // Semana publicada trava as ferias que caem nela.
+  await call('POST', 'publish', { monday: SEMANAS[0], published: true });
+  ok((await call('DELETE', `vacations?id=${ferias.id}`)).status === 409,
+     'nao apaga ferias que caem numa semana publicada');
+  ok((await call('POST', 'vacations',
+     { personId: ids['Diego Alves'], start: '2026-11-10', end: '2026-11-11' })).status === 409,
+     'nem cadastra');
+  await call('POST', 'publish', { monday: SEMANAS[0], published: false });
+
+  // Semana parcial: bloqueia os dias, sem credito.
+  const PARCIAL = '2026-11-30';
+  const diego = ids['Diego Alves'];
+  ok((await call('POST', 'vacations',
+     { personId: diego, start: '2026-12-02', end: '2026-12-04' })).status === 200,
+     'ferias de quarta a sexta cadastradas');
+  ok((await call('POST', 'preferences',
+     { monday: PARCIAL, personId: diego, choices: [3, 1, 2] })).status === 400,
+     'rejeita escolher dia de ferias');
+  const doisDias = await call('POST', 'preferences',
+    { monday: PARCIAL, personId: diego, choices: [1, 2] });
+  ok(doisDias.status === 200, `fora das ferias, bastam os 2 dias livres: ${doisDias.json.error ?? ''}`);
+  for (const [i, p] of ativos.entries()) {
+    if (p.id === diego) continue;
+    await call('POST', 'preferences',
+      { monday: PARCIAL, personId: p.id, choices: TOP3[i % TOP3.length] });
+  }
+  const gParcial = (await call('POST', 'generate', { monday: PARCIAL })).json;
+  ok(!gParcial.assignments.some((a) => a.personId === diego && a.day >= 3),
+     'Diego nao cai em dia de ferias');
+  const diegoExp = gParcial.generation.explain.people.find((p) => p.personId === diego);
+  ok(JSON.stringify(diegoExp?.blockedDays) === '[3,4,5]',
+     `explicacao guarda os dias bloqueados (${diegoExp?.blockedDays})`);
+  ok(!gParcial.generation.explain.vacation.some((v) => v.personId === diego),
+     'semana parcial nao conta como semana de ferias');
+  ok((await contador(diego)).vacationTotal === 0, 'e nao da credito');
+
+  // Apagar as ferias leva o credito junto.
+  const apagada = await call('DELETE', `vacations?id=${ferias.id}&week=${SEMANAS[0]}`);
+  ok(apagada.status === 200 && !apagada.json.vacations.some((v) => v.id === ferias.id),
+     'ferias apagadas');
+  const semFerias = await contador(iris);
+  // Na semana parcial de Diego, Iris ja nao estava de ferias e foi escalada: o
+  // que sobra no contador dela e so escala real.
+  const reais = gParcial.assignments.filter((a) => a.personId === iris).length;
+  ok(semFerias.vacationTotal === 0 && semFerias.total === reais,
+     `o credito some junto (sobram ${semFerias.total} escalas reais, esperado ${reais})`);
+  ok((await call('DELETE', `vacations?id=${ferias.id}`)).status === 404, '404 ao apagar de novo');
+}
+
 console.log('\n=== rotas invalidas ===');
 ok((await call('GET', 'inexistente')).status === 404, '404 em rota desconhecida');
 ok((await call('GET', 'state?week=2026-02-30')).status === 400, 'rejeita data inexistente');
