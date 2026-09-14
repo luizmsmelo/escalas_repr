@@ -1,3 +1,6 @@
+# O app roda no Cloudflare Pages (ver README). Este arquivo fica para o deploy
+# no Netlify continuar possivel. Os cabecalhos estao em public/_headers, que as
+# duas plataformas leem.
 [build]
   publish = "public"
   functions = "netlify/functions"
@@ -5,14 +8,3 @@
 
 [functions]
   node_bundler = "esbuild"
-
-[[headers]]
-  for = "/*"
-  [headers.values]
-    X-Content-Type-Options = "nosniff"
-    Referrer-Policy = "no-referrer"
-
-[[headers]]
-  for = "/index.html"
-  [headers.values]
-    Cache-Control = "no-cache"

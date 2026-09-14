@@ -1,4 +1,5 @@
 import { sql, ensureSchema } from './lib/db.mjs';
+import { env, platform } from './lib/env.mjs';
 import { solveWeek, rankOf, DAYS, DAY_NAMES, FRIDAY } from './lib/solver.mjs';
 import {
   todayISO, mondayOf, nextMonday, addDays, weekDates, monthOf, parseISO,
@@ -34,28 +35,29 @@ export default async function handler(request) {
  * se elas estao definidas - nunca o valor, que e uma credencial de banco.
  */
 function health() {
-  const esperadas = ['NETLIFY_DATABASE_URL', 'NETLIFY_DATABASE_URL_UNPOOLED', 'DATABASE_URL'];
-  const encontradas = Object.keys(process.env)
+  const vars = env();
+  const esperadas = ['DATABASE_URL', 'NETLIFY_DATABASE_URL', 'NETLIFY_DATABASE_URL_UNPOOLED'];
+  const encontradas = Object.keys(vars)
     .filter((k) => /DATABASE|NEON|POSTGRES/i.test(k))
     .sort();
 
-  const configurado = esperadas.some((k) => !!process.env[k]);
+  const configurado = esperadas.some((k) => !!vars[k]);
 
   return {
     ok: configurado,
     banco: configurado ? 'configurado' : 'NAO configurado',
     variaveisEsperadas: Object.fromEntries(
-      esperadas.map((k) => [k, process.env[k] ? 'definida' : 'ausente']),
+      esperadas.map((k) => [k, vars[k] ? 'definida' : 'ausente']),
     ),
     // Nomes de variaveis relacionadas a banco que existem neste ambiente.
     outrasVariaveisDeBancoPresentes: encontradas.filter((k) => !esperadas.includes(k)),
-    contexto: process.env.CONTEXT ?? null,
-    deploy: process.env.DEPLOY_ID ?? null,
-    node: process.version,
+    plataforma: platform(),
+    // No Cloudflare, sem compatibilidade com Node, `process` nem existe.
+    node: typeof process !== 'undefined' ? (process.version ?? null) : null,
     dica: configurado
       ? 'Variavel encontrada. Se ainda houver erro, ele vem da conexao, nao da configuracao.'
-      : 'Nenhuma variavel de banco visivel PARA A FUNCAO. Se voce ja criou a variavel no '
-        + 'painel, confira o escopo dela: precisa incluir Functions, nao so Builds. '
+      : 'Nenhuma variavel de banco visivel PARA A FUNCAO. No Cloudflare Pages, cadastre '
+        + 'DATABASE_URL em Settings > Variables and Secrets, no ambiente Production. '
         + 'Depois de mexer, e preciso um novo deploy.',
   };
 }

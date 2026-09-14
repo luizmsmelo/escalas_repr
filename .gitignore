@@ -6,3 +6,5 @@ node_modules/
 test/.tmp/
 files/
 docs/*.pdf
+.dev.vars
+.wrangler/

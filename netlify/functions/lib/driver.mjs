@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless';
+import { env } from './env.mjs';
 
 // Unico ponto do codigo que fala com o driver do Neon. Fica isolado aqui para
 // que os testes possam trocar SO a conexao, deixando toda a logica de db.mjs
@@ -10,12 +11,18 @@ import { neon } from '@neondatabase/serverless';
 //   driver.transaction([q1, q2])    -> varias consultas num round-trip so
 // As consultas sao PREGUICOSAS: so vao ao banco quando aguardadas ou quando
 // entregues a transaction().
+//
+// O neon() fala com o banco por HTTP (fetch), e por isso roda igual no Node e
+// no Cloudflare.
 
 export function createDriver() {
+  const vars = env();
+  // NETLIFY_* ficam por compatibilidade com o deploy antigo; no Cloudflare a
+  // variavel e DATABASE_URL.
   const url =
-    process.env.NETLIFY_DATABASE_URL ||
-    process.env.NETLIFY_DATABASE_URL_UNPOOLED ||
-    process.env.DATABASE_URL;
+    vars.DATABASE_URL ||
+    vars.NETLIFY_DATABASE_URL ||
+    vars.NETLIFY_DATABASE_URL_UNPOOLED;
 
   if (!url) {
     throw new Error(

@@ -21,6 +21,46 @@ aberto só existe se não houver ninguém para ela nem assim.
 
 ---
 
+## Onde o app roda
+
+O front-end são arquivos estáticos em `public/`; a API é uma função só, servida em
+`/api/*`, que fala com um Postgres no **Neon**. Hospedagem: **Cloudflare Pages**,
+no plano gratuito — só as chamadas a `/api/*` contam na cota de funções (100 mil
+por dia), e cada push em `main` publica de novo (500 builds por mês).
+
+### Publicar
+
+1. No painel do Cloudflare: **Workers & Pages → Create → Pages → Connect to Git**,
+   e escolha este repositório.
+2. Configuração do build:
+
+   | campo | valor |
+   | --- | --- |
+   | Framework preset | None |
+   | Build command | `npm ci` |
+   | Build output directory | `public` |
+
+3. Em **Environment variables**, crie `DATABASE_URL` (tipo *Secret*) com a
+   connection string do Neon — a mesma que ficava em `NETLIFY_DATABASE_URL`.
+4. Salve e publique. Se a variável for criada ou alterada depois, ela só vale a
+   partir do próximo deploy (**Deployments → Retry deployment**).
+5. Abra `https://<projeto>.pages.dev/api/health`: tem que responder `"ok": true`.
+
+O banco cria as próprias tabelas no primeiro acesso; não há migração a rodar.
+
+### Rodar localmente
+
+Crie um arquivo `.dev.vars` (fica fora do git) com `DATABASE_URL=...` e rode:
+
+```
+npx wrangler pages dev public --compatibility-date=2025-09-01
+```
+
+`npm test` não precisa de banco nem de conta nenhuma: a API roda contra um
+Postgres em memória.
+
+---
+
 ## Como a escala é montada
 
 A semana é resolvida em três fases: primeiro quem tem dia fixo, depois a sexta,
