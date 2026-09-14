@@ -403,6 +403,20 @@ um clique à toa em "Gerar escala" enchia o histórico de escalas que ninguém i
 cumprir. Semana que já passou não é gerada de novo, porque ela é o registro do que
 aconteceu — para corrigir, existe a edição à mão.
 
+**Publicação automática.** A escala da semana é publicada sozinha a partir de
+**segunda-feira 00h00** (horário de Brasília), no primeiro acesso ao app — não há
+agendador, e não precisa: basta alguém abrir o app.
+
+- O **prazo** das preferências é **domingo 23h59**. Na segunda a semana é
+  publicada e as preferências travam; a aba Escolher avisa o prazo.
+- Na hora de publicar, a semana é **montada de novo**, com as respostas como ficaram
+  no prazo e os contadores como estão. Rascunho é só prévia — um rascunho gerado
+  dias antes, com outros contadores, não vira a escala oficial.
+- **Exceção:** rascunho ajustado à mão pelo administrador é publicado como está.
+- Semana **reaberta pelo administrador** fica fora da publicação automática até ele
+  publicar de novo.
+- No registro, aparece como "Gerada automaticamente" e "Publicada automaticamente".
+
 **Quem mexeu.** Cada escala guarda quem a gerou, editou, publicou ou reabriu, com
 data, hora e o tipo de aparelho — visível na aba Escala, em "Quem mexeu nesta
 escala?". Como não há senha, o nome é o que a pessoa escolheu no app; o aparelho

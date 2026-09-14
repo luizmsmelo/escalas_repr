@@ -115,6 +115,10 @@ export const SCHEMA = [
   // Tentativas de entrar no modo administrador. Serve ao freio contra adivinhar
   // a senha - erros seguidos bloqueiam novas tentativas por um tempo - e deixa
   // rastro de quem tentou, de qual aparelho.
+  // Semana reaberta pelo administrador: a publicacao automatica nao a
+  // republica ate ele publicar de novo.
+  `alter table weeks add column if not exists auto_hold boolean not null default false`,
+
   `create table if not exists admin_attempts (
      id     serial primary key,
      ok     boolean not null,

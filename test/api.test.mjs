@@ -16,6 +16,9 @@ const ok = (cond, msg) => cond ? (pass++, true) : (fail++, console.log('  ✗ ' 
 const SENHA_ADMIN = 'senha de teste bem longa';
 process.env.ADMIN_PASSWORD = SENHA_ADMIN;
 let passeAdmin = null;
+// A publicacao automatica fica desligada: com "hoje" na semana mexida, ela
+// publicaria cada semana antes de o teste chegar nela. A secao dela a liga.
+process.env.ESCALAS_SEM_PUBLICACAO_AUTOMATICA = '1';
 
 const call = async (method, path, body, hoje = body?.monday, { admin = true } = {}) => {
   if (hoje) process.env.ESCALAS_HOJE = hoje;
@@ -942,6 +945,64 @@ console.log('\n=== modo administrador ===');
   ok(bloqueada.status === 429, `depois de 5 erros, bloqueia ate a senha certa (${bloqueada.status})`);
   console.log(`  ${bloqueada.json.error}`);
   ok((await call('GET', 'admin/backup')).status === 200, 'o passe ja emitido continua valendo');
+}
+
+console.log('\n=== publicacao automatica ===');
+{
+  delete process.env.ESCALAS_SEM_PUBLICACAO_AUTOMATICA;
+  const comum = { admin: false };
+  const SEM = '2027-01-18';                                  // segunda
+  const SEXTA = '2027-01-15', DOMINGO = '2027-01-17', SEGUNDA = '2027-01-18';
+  const estado = async (hoje, semana = SEM) =>
+    (await call('GET', `state?week=${semana}`, undefined, hoje)).json;
+
+  const ativos = (await estado(SEXTA)).people.filter((p) => p.active);
+  for (const [i, p] of ativos.entries()) {
+    await call('POST', 'preferences',
+      { monday: SEM, personId: p.id, choices: TOP3[i % TOP3.length] }, SEXTA, comum);
+  }
+  const rascunho = await call('POST', 'generate', { monday: SEM, byPersonId: ativos[0].id },
+    SEXTA, comum);
+  ok(rascunho.status === 200 && rascunho.json.week.published === false,
+     'na sexta, gerar cria so o rascunho');
+  const geradoNaSexta = rascunho.json.week.explain.generatedAt;
+
+  ok((await estado(DOMINGO)).week.published === false, 'no domingo ainda nao publica');
+
+  await new Promise((r) => setTimeout(r, 15));
+  const segunda = await estado(SEGUNDA);
+  ok(segunda.week.published === true, 'na segunda, o primeiro acesso publica a semana');
+  ok(segunda.log[0].action === 'auto-publicar' && segunda.log[1].action === 'auto-gerar',
+     `registro de gerar e publicar automaticos (${segunda.log.map((l) => l.action)})`);
+  ok(segunda.log[0].personName === null && segunda.log[0].device === null, 'sem nome nem aparelho');
+  ok(segunda.week.explain.generatedAt !== geradoNaSexta,
+     'a escala e montada de novo na hora de publicar, e nao a do rascunho');
+  ok(segunda.assignments.length > 0, 'com a escala preenchida');
+
+  ok((await call('POST', 'preferences', { monday: SEM, personId: ativos[1].id, choices: [1, 2, 3] },
+     SEGUNDA, comum)).status === 409, 'preferencia depois do prazo e recusada');
+  ok((await estado(SEGUNDA)).log.filter((l) => l.action === 'auto-publicar').length === 1,
+     'publica uma vez so');
+
+  // Reaberta pelo administrador, nao volta a ser publicada sozinha.
+  const reaberta = await call('POST', 'publish', { monday: SEM, published: false }, SEGUNDA);
+  ok(reaberta.json.week.autoHold === true, 'reaberta pelo admin fica marcada');
+  ok((await estado(SEGUNDA)).week.published === false, 'e o acesso seguinte nao a republica');
+  const republicada = await call('POST', 'publish', { monday: SEM, published: true }, SEGUNDA);
+  ok(republicada.json.week.published === true && republicada.json.week.autoHold === false,
+     'o admin publica de novo e a marca sai');
+
+  // Rascunho ajustado a mao pelo administrador e publicado como esta.
+  const SEM2 = '2027-01-25';
+  const g2 = await call('POST', 'generate', { monday: SEM2 }, '2027-01-22', comum);
+  const slots = g2.json.assignments.slice(1).map((a) => ({ day: a.day, personId: a.personId }));
+  await call('POST', 'assignments', { monday: SEM2, slots }, '2027-01-22');
+  const segunda2 = await estado('2027-01-25', SEM2);
+  ok(segunda2.week.published === true && segunda2.assignments.length === slots.length,
+     `ajuste a mao e publicado como esta (${segunda2.assignments.length} de ${slots.length})`);
+  ok(!segunda2.log.some((l) => l.action === 'auto-gerar'), 'sem ser montado de novo');
+
+  process.env.ESCALAS_SEM_PUBLICACAO_AUTOMATICA = '1';
 }
 
 console.log('\n=== rotas invalidas ===');

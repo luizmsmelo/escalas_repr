@@ -20,6 +20,9 @@ export default async function handler(request) {
 
   try {
     await ensureSchema();
+    // Antes de qualquer rota: quem abre o app na segunda ja encontra a semana
+    // publicada, e ninguem salva preferencia depois do prazo.
+    await autoPublishSafe();
     const body = request.method === 'GET' ? {} : await readJson(request);
     const data = await dispatch(route, request.method, url.searchParams, body, request);
     return json(data);
@@ -135,6 +138,8 @@ async function getState(weekParam) {
       capWeekday: week.cap_weekday,
       capFriday: week.cap_friday,
       generatedAt: week.generated_at,
+      // Reaberta pelo administrador: a publicacao automatica nao a republica.
+      autoHold: !!week.auto_hold,
       // Gravada na geracao: e o que explica a escala que esta na tela, mesmo
       // depois de recarregar a pagina ou de trocar de semana e voltar.
       explain: week.explain ?? null,
@@ -502,6 +507,71 @@ async function assertVacationOpen(start, end) {
   }
 }
 
+/* ------------------------------------------------ publicacao automatica -- */
+
+/** Quem publica sozinho: nao ha pessoa nem aparelho por tras. */
+const AUTOMATICO = { personId: null, name: null, device: null };
+
+/**
+ * A escala da semana e publicada sozinha a partir de segunda-feira 00h00
+ * (horario de Brasilia), no primeiro acesso ao app. Nao precisa de agendador:
+ * basta alguem abrir o app - e so importa que ela esteja publicada para quem
+ * abre o app.
+ *
+ * Na hora de publicar, a semana e GERADA DE NOVO: rascunho e so previa, e a
+ * escala oficial sai com as preferencias como ficaram no prazo (domingo 23h59)
+ * e com o historico como esta agora - senao um rascunho gerado dias antes, com
+ * outros contadores, viraria a escala oficial. A excecao e o rascunho ajustado
+ * a mao pelo administrador: esse e publicado como esta.
+ *
+ * Semana que o administrador reabriu (`auto_hold`) fica de fora ate ele
+ * publicar de novo.
+ */
+async function autoPublish() {
+  const semana = mondayOf(todayISO());
+  const [atual] = await sql`select published, auto_hold from weeks where monday = ${semana}`;
+  if (atual?.published || atual?.auto_hold) return;
+
+  // "Ajustado a mao" e o registro dizer que a ultima coisa feita na escala foi
+  // uma edicao, depois da ultima geracao. Olhar as linhas nao basta: tirar
+  // alguem da escala nao deixa nenhuma linha marcada como manual.
+  const [ultima] = await sql`
+    select action from week_log
+     where monday = ${semana} and action in ('gerar', 'auto-gerar', 'editar')
+     order by created_at desc, id desc limit 1`;
+  if (ultima?.action !== 'editar') {
+    try {
+      await gerarSemana(semana, AUTOMATICO, 'auto-gerar');
+    } catch (err) {
+      // Ninguem disponivel, ou semana inteira sem expediente: publica o que
+      // houver - e, nao havendo nada, nao publica.
+      if (!(err instanceof HttpError)) throw err;
+    }
+  }
+
+  const [{ n }] = await sql`select count(*)::int as n from assignments where monday = ${semana}`;
+  if (!n) return;
+  // A condicao no proprio update impede publicar duas vezes quando dois
+  // acessos chegam juntos.
+  const publicadas = await sql`
+    update weeks set published = true
+     where monday = ${semana} and not published and not auto_hold
+    returning monday`;
+  if (publicadas.length) await logQuery(semana, 'auto-publicar', AUTOMATICO);
+}
+
+/** A publicacao automatica nunca derruba o pedido de quem abriu o app. */
+async function autoPublishSafe() {
+  // So os testes desligam: eles mexem em semanas de varias epocas e decidem
+  // quando a publicacao automatica entra.
+  if (env().ESCALAS_SEM_PUBLICACAO_AUTOMATICA) return;
+  try {
+    await autoPublish();
+  } catch (err) {
+    console.error('[publicacao automatica]', err);
+  }
+}
+
 /* ------------------------------------------------- janela e registro ----- */
 
 /**
@@ -596,6 +666,15 @@ async function generate({ monday, byPersonId }, request) {
   const week = requireMonday(monday);
   assertGenerable(week);
   await assertOpen(week);
+  const quem = await actorOf(byPersonId, request);
+  return respostaDaGeracao(week, await gerarSemana(week, quem, 'gerar'));
+}
+
+/**
+ * Monta e grava a escala de uma semana. Serve ao botao "Gerar escala" e a
+ * publicacao automatica; nao confere janela nem trava - quem chama confere.
+ */
+async function gerarSemana(week, quem, acao) {
   const cfg = await ensureWeek(week);
 
   const rows = await sql`
@@ -659,7 +738,6 @@ async function generate({ monday, byPersonId }, request) {
   }
 
   const result = solveWeek(input, capacity);
-  const quem = await actorOf(byPersonId, request);
   const dates = Object.fromEntries(situacao.map((d) => [d.day, d.date]));
 
   // O registro de POR QUE esta escala ficou assim, gravado junto com a semana.
@@ -688,9 +766,13 @@ async function generate({ monday, byPersonId }, request) {
     ),
     sql`update weeks set generated_at = now(), explain = ${JSON.stringify(explain)}
          where monday = ${week}`,
-    logQuery(week, 'gerar', quem),
+    logQuery(week, acao, quem),
   ]);
 
+  return { result, explain, fechados, rows, participants, deFerias };
+}
+
+async function respostaDaGeracao(week, { result, explain, fechados, rows, participants, deFerias }) {
   const state = await getState(week);
   return {
     ...state,
@@ -809,7 +891,10 @@ async function publish({ monday, published, byPersonId }, request) {
   if (published) assertPublishable(week);
   const quem = await actorOf(byPersonId, request);
   await sql.transaction([
-    sql`update weeks set published = ${!!published} where monday = ${week}`,
+    // Reaberta pelo administrador, a semana fica fora da publicacao automatica
+    // ate ele publicar de novo - senao o proximo acesso republicaria na hora.
+    sql`update weeks set published = ${!!published}, auto_hold = ${!published}
+         where monday = ${week}`,
     logQuery(week, published ? 'publicar' : 'reabrir', quem),
   ]);
   return getState(week);
@@ -1214,7 +1299,7 @@ async function ensureWeek(monday) {
   const [row] = await sql`
     insert into weeks (monday) values (${monday})
     on conflict (monday) do update set monday = excluded.monday
-    returning monday, published, cap_weekday, cap_friday, generated_at, explain`;
+    returning monday, published, cap_weekday, cap_friday, generated_at, explain, auto_hold`;
   return row;
 }
 

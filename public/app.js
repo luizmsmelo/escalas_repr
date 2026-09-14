@@ -248,6 +248,15 @@ function renderPicker() {
     && !ferias.blocked.includes(meuFixo);
 
   $('#pickLocked').hidden = !locked;
+  // Prazo: na segunda 00h00 a semana e gerada com as respostas salvas e
+  // publicada sozinha - e dai em diante as preferencias travam.
+  const comPrazo = !locked && week.monday > state.data.currentMonday;
+  $('#pickDeadline').hidden = !comPrazo;
+  if (comPrazo) {
+    $('#pickDeadline').innerHTML = 'Prazo para responder: <b>domingo, '
+      + `${fmtDay(addDays(week.monday, -1))}, até 23h59</b>. Na segunda-feira a escala é `
+      + 'montada com as respostas salvas e publicada automaticamente.';
+  }
   // Semana inteira de ferias: nao ha o que responder, nem ausencia a marcar.
   $('#awaySwitch').hidden = ferias.fullWeek;
   $('#awayToggle').checked = state.away;
@@ -656,8 +665,17 @@ function renderSchedule(generation) {
   }
   // Rascunho nao conta nos contadores - e o que explica por que eles nao andaram.
   if (hasAny && !week.published) {
-    messages.push('Esta escala ainda é um <b>rascunho</b>: ela só passa a contar nos '
-      + 'contadores depois de <b>publicada</b>.');
+    if (week.autoHold) {
+      messages.push('Esta escala foi <b>reaberta pelo administrador</b> e não é publicada '
+        + 'automaticamente: ela só volta a contar quando ele publicar de novo.');
+    } else if (week.monday > state.data.currentMonday) {
+      messages.push('Esta escala ainda é um <b>rascunho</b>, só uma prévia. Na segunda-feira, '
+        + `${fmtDay(week.monday)}, ela é montada de novo com as respostas salvas até domingo `
+        + '23h59 e <b>publicada automaticamente</b>.');
+    } else {
+      messages.push('Esta escala ainda é um <b>rascunho</b>: ela só passa a contar nos '
+        + 'contadores depois de <b>publicada</b>.');
+    }
   }
   if (!week.published && week.monday > addDays(state.data.currentMonday, 7)) {
     messages.push('A escala desta semana só pode ser gerada e publicada a partir de '
@@ -746,6 +764,7 @@ function renderSchedule(generation) {
 
 const LOG_ACAO = {
   gerar: 'Gerada', editar: 'Editada à mão', publicar: 'Publicada', reabrir: 'Reaberta',
+  'auto-gerar': 'Gerada automaticamente', 'auto-publicar': 'Publicada automaticamente',
 };
 
 /** Quem gerou, editou, publicou ou reabriu a escala da semana, e quando. */
@@ -756,7 +775,9 @@ function renderWeekLog() {
     const d = new Date(l.at);
     const quando = `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${
       d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
-    const quem = l.personName ? ` por ${esc(l.personName)}` : ' · <i>sem nome escolhido</i>';
+    // O que o app fez sozinho nao tem autor a mostrar.
+    const quem = l.action.startsWith('auto-') ? ''
+      : l.personName ? ` por ${esc(l.personName)}` : ' · <i>sem nome escolhido</i>';
     return `<li><b>${esc(LOG_ACAO[l.action] ?? l.action)}</b>${quem} · ${esc(quando)}${
       l.device ? ` · ${esc(l.device)}` : ''}</li>`;
   }).join('');
