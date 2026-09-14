@@ -24,7 +24,9 @@ aberto só existe se não houver ninguém para ela nem assim.
 ## Como a escala é montada
 
 A semana é resolvida em três fases: primeiro quem tem dia fixo, depois a sexta,
-depois o resto — porque cada um desses é um problema de natureza diferente.
+depois o resto — porque cada um desses é um problema de natureza diferente. A
+*prioridade* não é uma quarta fase: é uma restrição que entra nas mesmas fases,
+descrita logo abaixo da fase 0.
 
 ### Fase 0 — os dias fixos
 
@@ -57,6 +59,36 @@ Duas situações devolvem a pessoa ao fluxo normal **naquela semana**:
 Nos dois casos ela **continua fora da fila da sexta**: só pega sexta se se
 voluntariar, colocando sexta no próprio top 3. Senão, ser fixo na segunda viraria
 uma garantia de pegar toda sexta em que a segunda fosse feriado.
+
+### Prioridade — um dia por semana, e é nele ou em nenhum
+
+O dia fixo serve para quem trabalha *sempre* no mesmo dia. Para quem precisa
+escolher um dia **diferente a cada semana**, existe a **prioridade** (a estrela
+ao lado do nome, na aba Ajustes). Quem tem a flag:
+
+- **escolhe 1 dia em vez de 3**, semana a semana, na tela de sempre;
+- **só pode ser escalado nesse dia.** Não é remanejado para outro: ou fica no
+  dia que pediu, ou fica de fora daquela semana;
+- **fica fora da fila da sexta.** A sexta só é dela se for o dia que ela
+  escolheu — nesse caso ela entra como quem pediu, não como quem a fila
+  alcançou.
+
+**Prioridade não é exceção ao contador** — essa continua sendo só o dia fixo. A
+pessoa disputa a vaga como todo mundo, e quando o dia pedido não comporta todo
+mundo que o pediu, entra **quem tem menos escalas acumuladas**. Quem sobra fica
+de fora, não acumula escala, e por isso entra na frente na semana seguinte: o
+rodízio se fecha sozinho.
+
+Dia fixo e prioridade respondem à mesma pergunta — "em que dia essa pessoa
+fica?" — por caminhos diferentes, e não fazem sentido juntos. Ligar um desliga o
+outro.
+
+**O limite da regra:** "toda vaga é preenchida" continua valendo acima de tudo.
+Numa semana com tanta vaga quanto gente, todo mundo trabalha, inclusive quem tem
+prioridade e está à frente no contador — quem tem três opções é que se move para
+a segunda. A prioridade deixa alguém de fora só quando alguém teria de ficar de
+fora de qualquer jeito: mais gente do que vagas, ou mais gente pedindo aquele
+dia do que ele comporta.
 
 ### Fase 1 — a sexta
 

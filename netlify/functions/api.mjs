@@ -152,11 +152,11 @@ async function createPerson({ name }) {
 
   const [person] = await sql`
     insert into people (name) values (${clean})
-    returning id, name, active, fixed_day`;
+    returning id, name, active, fixed_day, priority`;
   return { person: toPerson(person) };
 }
 
-async function updatePerson({ id, name, active, fixedDay }) {
+async function updatePerson({ id, name, active, fixedDay, priority }) {
   const personId = requireId(id);
   if (name !== undefined) {
     const clean = String(name).trim().replace(/\s+/g, ' ');
@@ -169,13 +169,24 @@ async function updatePerson({ id, name, active, fixedDay }) {
   if (active !== undefined) {
     await sql`update people set active = ${!!active} where id = ${personId}`;
   }
+  // Dia fixo e prioridade sao dois jeitos de responder a mesma pergunta - "em
+  // que dia essa pessoa fica?" - e nao fazem sentido juntos: o dia fixo ja
+  // reserva a vaga, entao a prioridade nao teria o que decidir. Ligar um
+  // desliga o outro, em vez de recusar: quem clica esta trocando de regime.
   if (fixedDay !== undefined) {
     const dia = parseFixedDay(fixedDay);
     if (dia !== null) await assertFixedDayFits(personId, dia);
-    await sql`update people set fixed_day = ${dia} where id = ${personId}`;
+    await sql`update people set fixed_day = ${dia},
+                priority = case when ${dia}::int is null then priority else false end
+              where id = ${personId}`;
+  }
+  if (priority !== undefined) {
+    await sql`update people set priority = ${!!priority},
+                fixed_day = case when ${!!priority} then null else fixed_day end
+              where id = ${personId}`;
   }
   const [person] = await sql`
-    select id, name, active, fixed_day from people where id = ${personId}`;
+    select id, name, active, fixed_day, priority from people where id = ${personId}`;
   if (!person) throw new HttpError(404, 'Pessoa nao encontrada.');
   return { person: toPerson(person) };
 }
@@ -193,7 +204,7 @@ async function savePreferences({ monday, personId, choices, unavailable, noFrida
   const id = requireId(personId);
   await assertOpen(week);
 
-  const [person] = await sql`select id, fixed_day from people where id = ${id}`;
+  const [person] = await sql`select id, fixed_day, priority from people where id = ${id}`;
   if (!person) throw new HttpError(404, 'Pessoa nao encontrada.');
 
   const away = !!unavailable;
@@ -204,7 +215,8 @@ async function savePreferences({ monday, personId, choices, unavailable, noFrida
     // Numa semana encurtada por feriado pode nao haver 3 dias para escolher.
     const overrides = await loadOverrides();
     const abertos = weekDayStatus(week, overrides).filter((d) => d.works);
-    const exigidos = Math.min(3, abertos.length);
+    // Quem tem prioridade escolhe um dia so - e e nele ou em nenhum.
+    const exigidos = Math.min(person.priority ? 1 : 3, abertos.length);
 
     // Quem tem dia fixo COM expediente nesta semana ja tem a vaga reservada e
     // nao precisa escolher nada. Se o dia fixo cair num feriado, ela escolhe
@@ -217,9 +229,13 @@ async function savePreferences({ monday, personId, choices, unavailable, noFrida
       throw bad(fixoVale
         ? `Voce fica sempre na ${DAY_NAMES[person.fixed_day].toLowerCase()}-feira: `
           + `salve sem escolher dia, ou escolha ${exigidos}.`
-        : exigidos === 3
-          ? 'Escolha exatamente 3 dias, em ordem de preferencia.'
-          : `Esta semana so tem ${abertos.length} dia(s) com expediente: escolha ${exigidos}.`);
+        : person.priority
+          ? (exigidos === 1
+            ? 'Voce tem prioridade: escolha exatamente 1 dia.'
+            : 'Esta semana nao tem nenhum dia com expediente.')
+          : exigidos === 3
+            ? 'Escolha exatamente 3 dias, em ordem de preferencia.'
+            : `Esta semana so tem ${abertos.length} dia(s) com expediente: escolha ${exigidos}.`);
     }
     if (list.length) {
       if (list.some((d) => !DAYS.includes(d))) throw bad('Dia invalido: use de segunda a sexta.');
@@ -236,6 +252,8 @@ async function savePreferences({ monday, personId, choices, unavailable, noFrida
   } else {
     veto = false; // quem esta fora da semana ja nao entra na fila da sexta
   }
+  // Prioridade nao passa pela fila da sexta: o veto da semana nao tem sentido.
+  if (person.priority) veto = false;
 
   await sql`
     insert into preferences
@@ -257,7 +275,7 @@ async function generate({ monday }) {
   const cfg = await ensureWeek(week);
 
   const rows = await sql`
-    select p.id, p.name, p.fixed_day,
+    select p.id, p.name, p.fixed_day, p.priority,
            pr.choice1, pr.choice2, pr.choice3,
            coalesce(pr.unavailable, false) as unavailable,
            coalesce(pr.no_friday, false)   as no_friday
@@ -282,6 +300,7 @@ async function generate({ monday }) {
     choices: [r.choice1, r.choice2, r.choice3].filter((d) => d != null),
     noFriday: r.no_friday,
     fixedDay: r.fixed_day ?? null,
+    priority: r.priority,
     totalCount: history.get(r.id)?.total ?? 0,
     fridayCount: history.get(r.id)?.fridays ?? 0,
   }));
@@ -334,10 +353,12 @@ async function generate({ monday }) {
     generation: {
       ...result.summary,
       unfilledSlots: result.unfilledSlots,
+      priorityUnplaced: result.priorityUnplaced,
       // Quem ja tem a vaga garantida pelo dia fixo nao esta "sem preferencia":
-      // nao ha nada que ele devesse ter respondido.
+      // nao ha nada que ele devesse ter respondido. Quem tem prioridade e nao
+      // escolheu aparece na lista de fora da semana, que diz mais.
       missingPreferences: rows
-        .filter((r) => !r.unavailable && r.choice1 == null
+        .filter((r) => !r.unavailable && r.choice1 == null && !r.priority
           && !result.fixed.placed.some((f) => f.personId === r.id))
         .map((r) => r.name),
       awayCount: rows.length - participants.length,
@@ -584,14 +605,18 @@ async function resetCounters({ undo } = {}) {
  * Voluntariado tambem nao entra aqui: depende das preferencias da semana, que
  * ainda podem mudar.
  *
- * Quem tem dia fixo fica de fora da fila: a vaga dele ja esta reservada em
- * outro dia, e o contador de sextas dele nao anda - deixa-lo na fila o poria
+ * Quem tem dia fixo ou prioridade fica de fora da fila: a vaga do primeiro ja
+ * esta reservada em outro dia, o segundo so entra no dia que escolher, e o
+ * contador de sextas dos dois nao anda - deixa-los na fila os poria
  * eternamente em primeiro.
  */
 function buildFridayQueue(people, counts, weekSlots) {
-  const fixos = people.filter((p) => p.fixedDay != null).length;
+  // Fora da fila, pelo mesmo motivo por dois caminhos: quem tem dia fixo ja tem
+  // a vaga reservada, e quem tem prioridade so entra no dia que escolher. Os
+  // dois ocupam vaga da semana, entao contam para o corte.
+  const fixos = people.filter((p) => p.fixedDay != null || p.priority).length;
   const disputa = people
-    .filter((p) => p.fixedDay == null)
+    .filter((p) => p.fixedDay == null && !p.priority)
     .map((p) => ({
       personId: p.id,
       name: p.name,
@@ -668,11 +693,13 @@ const collator = new Intl.Collator('pt-BR', { sensitivity: 'base' });
 const byName = (rows) => rows.sort((a, b) => collator.compare(a.name, b.name));
 
 const toPerson = (r) => ({
-  id: r.id, name: r.name, active: r.active, fixedDay: r.fixed_day ?? null,
+  id: r.id, name: r.name, active: r.active,
+  fixedDay: r.fixed_day ?? null, priority: !!r.priority,
 });
 
 const loadPeople = () =>
-  sql`select id, name, active, fixed_day from people`.then((rows) => byName(rows.map(toPerson)));
+  sql`select id, name, active, fixed_day, priority from people`
+    .then((rows) => byName(rows.map(toPerson)));
 
 /** Dia fixo vindo da tela: '' e 0 significam "sem dia fixo". */
 function parseFixedDay(value) {

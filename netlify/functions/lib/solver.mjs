@@ -11,13 +11,20 @@
 // e quem larga o dia fixo volta a valer pelo contador, ou seja, fica de fora
 // ate o resto alcancar.
 //
+// A PRIORIDADE e o meio-termo entre o dia fixo e a escolha livre: a pessoa
+// escolhe UM dia a cada semana, e esse e o unico dia em que ela pode ser
+// escalada. Ela nao reserva nada - disputa a vaga como todo mundo, pelo mesmo
+// contador -, mas nao tem para onde ser remanejada: ou fica no dia que pediu,
+// ou fica de fora da semana. No grafo isso e uma aresta so, em vez de quatro,
+// e as duas metades da regra caem sozinhas dessa restricao.
+//
 // E ACIMA DE TUDO ISSO, DUAS REGRAS: toda vaga e preenchida, e ninguem faz
 // duas escalas na mesma semana. Quando as duas nao cabem juntas - menos gente
 // do que vagas -, a primeira vence: alguem dobra, o MINIMO de gente possivel,
 // e dobra quem tem menos escalas acumuladas. Quem ja esta na sexta e o ultimo a
 // dobrar. Vaga em aberto so existe se nao houver ninguem para ela nem assim.
 //
-// FASE 0 - OS DIAS FIXOS. Quem tem um dia fixo cadastrado fica sempre naquele
+// FASE 0 - OS DIAS FIXOS. (A prioridade NAO passa por aqui: ela disputa.) Quem tem um dia fixo cadastrado fica sempre naquele
 // dia e nao entra em disputa nenhuma: a vaga e reservada antes de tudo, e o que
 // sobra de capacidade e que vai para as outras duas fases. Quem tem dia fixo
 // tambem sai da fila da sexta - senao acumularia sexta sem nunca ter concorrido
@@ -83,6 +90,21 @@ const NO_PREFERENCE_COST = 8000;   // dia de seg-qui que a pessoa nao pediu
 export function rankOf(person, day) {
   const idx = (person.choices || []).indexOf(day);
   return idx === -1 ? null : idx + 1;
+}
+
+/**
+ * O unico dia que quem tem prioridade aceita nesta semana - ou null se ainda
+ * nao escolheu. Le so a primeira escolha de proposito: se a flag foi ligada
+ * depois de a pessoa ja ter marcado tres dias, vale o primeiro, e nao ha estado
+ * intermediario em que a prioridade renda mais de um dia.
+ */
+export function priorityDay(person) {
+  return person.priority ? ((person.choices || [])[0] ?? null) : null;
+}
+
+/** Dias em que a pessoa pode ser escalada nesta semana. */
+function allowsDay(person, day) {
+  return person.priority ? priorityDay(person) === day : true;
 }
 
 class MinCostFlow {
@@ -157,9 +179,12 @@ class MinCostFlow {
 
 /**
  * @param {object[]} participants pessoas presentes na semana:
- *   { id, name, choices: [dia,dia,dia], fridayCount, totalCount, noFriday, fixedDay }
+ *   { id, name, choices: [dia,dia,dia], fridayCount, totalCount, noFriday,
+ *     fixedDay, priority }
  *   fridayCount e totalCount sao GERAIS (historico inteiro).
  *   fixedDay e 1..5 para quem tem dia fixo, ou null/undefined para todo mundo.
+ *   priority marca quem escolhe um dia so - `choices` tem um dia, e e o unico
+ *   dia admissivel dela nesta semana.
  * @param {object} capacity { 1: 2, 2: 2, 3: 2, 4: 2, 5: 1 }
  * @returns {{ assignments, unfilledSlots, fixed, friday, summary }}
  */
@@ -189,18 +214,26 @@ export function solveWeek(participants, capacity) {
       personId: person.id,
       name: person.name,
       day: FRIDAY,
-      // Voluntario mantem a posicao que ele mesmo deu; quem vem da fila entra
-      // na 4a opcao automatica.
-      rank: via === 'voluntario' ? rankOf(person, FRIDAY) : 4,
+      // Voluntario e prioridade mantem a posicao que a pessoa mesma deu; quem
+      // vem da fila entra na 4a opcao automatica.
+      rank: via === 'fila' ? 4 : rankOf(person, FRIDAY),
       via,
     })),
   ].sort((a, b) => a.day - b.day || a.name.localeCompare(b.name, 'pt-BR'));
 
   const unfilledSlots = [...weekdays.unfilledSlots, ...friday.unfilled];
 
+  // Quem tem prioridade ou fica no dia que pediu ou nao fica na semana. Nao e
+  // erro, mas precisa estar escrito na tela: a pessoa espera trabalhar.
+  const escalados = new Set(assignments.map((a) => a.personId));
+  const priorityUnplaced = people
+    .filter((p) => p.priority && !escalados.has(p.id))
+    .map((p) => ({ personId: p.id, name: p.name, day: priorityDay(p) }));
+
   return {
     assignments,
     unfilledSlots,
+    priorityUnplaced,
     fixed: {
       placed: fixed.placed.map((a) => ({ personId: a.personId, name: a.name, day: a.day })),
       // Fixos que nao couberam nesta semana e voltaram a disputar como todo mundo.
@@ -269,8 +302,12 @@ function pickFriday(people, slots, weekSlots) {
   // Quem tem dia fixo so entra na sexta se se voluntariar: a vaga dele ja esta
   // reservada em outro dia, e o contador de sextas dele nao anda - deixa-lo na
   // fila o poria em primeiro em toda semana em que o dia fixo cai em feriado.
+  // Quem tem prioridade so entra na sexta se a sexta for o dia que ela escolheu:
+  // a fila e uma 4a opcao automatica, e prioridade nao tem 4a opcao.
   const candidates = people.filter(
-    (p) => !p.noFriday && (p.fixedDay == null || rankOf(p, FRIDAY) !== null));
+    (p) => !p.noFriday
+      && (p.fixedDay == null || rankOf(p, FRIDAY) !== null)
+      && allowsDay(p, FRIDAY));
 
   // A sexta e uma vaga como as outras: quem esta a frente no contador geral nao
   // trabalha nesta semana, e por isso nao leva a sexta. Quem esta acima do
@@ -282,7 +319,8 @@ function pickFriday(people, slots, weekSlots) {
 
   const ordered = queue.map((person) => ({
     person,
-    via: rankOf(person, FRIDAY) !== null ? 'voluntario' : 'fila',
+    via: person.priority ? 'prioridade'
+      : rankOf(person, FRIDAY) !== null ? 'voluntario' : 'fila',
   }));
   const picked = ordered.slice(0, slots);
 
@@ -407,6 +445,9 @@ function solveWeekdays(people, capacity, { onFriday, fixedOn }) {
       // Ja reservado neste dia pela fase 0: uma segunda aresta para o mesmo dia
       // colocaria a pessoa duas vezes na mesma data.
       if (fixedOn.get(id) === d) continue;
+      // Prioridade: uma aresta so, para o dia escolhido. Sem outra saida no
+      // grafo, ou a pessoa fica nesse dia ou fica de fora da semana.
+      if (!allowsDay(people[i], d)) continue;
       graph.addEdge(personNode(i), dayNode(d), 1, weekdayCost(people[i], d));
     }
   }
@@ -429,7 +470,7 @@ function solveWeekdays(people, capacity, { onFriday, fixedOn }) {
         name: people[i].name,
         day: d,
         rank: rankOf(people[i], d),
-        via: 'preferencia',
+        via: people[i].priority ? 'prioridade' : 'preferencia',
       });
       filled[d]++;
     }
@@ -510,6 +551,8 @@ function buildExplain(people, capacity, assignments, friday, unfilledSlots) {
       totalBefore: p.totalCount ?? 0,
       fridayBefore: p.fridayCount ?? 0,
       fixedDay: p.fixedDay ?? null,
+      priority: !!p.priority,
+      priorityDay: priorityDay(p),
       noFriday: !!p.noFriday,
       fridayPos: posNaFila.get(p.id) ?? null,
       aboveCut: cut != null && (p.totalCount ?? 0) > cut,
