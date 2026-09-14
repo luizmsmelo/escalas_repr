@@ -418,7 +418,7 @@ agendador, e não precisa: basta alguém abrir o app.
 - No registro, aparece como "Gerada automaticamente" e "Publicada automaticamente".
 
 **Quem mexeu.** Cada escala guarda quem a gerou, editou, publicou ou reabriu, com
-data, hora e o tipo de aparelho — visível na aba Escala, em "Quem mexeu nesta
+data, hora e o tipo de aparelho — visível só no modo admin, na aba Escala, em "Quem mexeu nesta
 escala?". Como não há senha, o nome é o que a pessoa escolheu no app; o aparelho
 ajuda a tirar a dúvida.
 

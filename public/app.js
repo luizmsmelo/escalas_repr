@@ -770,7 +770,9 @@ const LOG_ACAO = {
 /** Quem gerou, editou, publicou ou reabriu a escala da semana, e quando. */
 function renderWeekLog() {
   const log = state.data.log ?? [];
-  $('#schedLog').hidden = log.length === 0;
+  // So no modo admin: para os colegas e ruido - publicar e editar sao do
+  // administrador. O registro continua sendo gravado para todo mundo.
+  $('#schedLog').hidden = log.length === 0 || !isAdmin();
   $('#schedLogList').innerHTML = log.map((l) => {
     const d = new Date(l.at);
     const quando = `${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${
