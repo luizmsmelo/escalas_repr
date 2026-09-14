@@ -1,11 +1,15 @@
 # Escala 18h
 
 Os colegas da equipe escolhem, semana a semana, em que dia ficam até as 18h.
-Cada um marca três dias em ordem de preferência; o app resolve os conflitos e
-mantém os contadores. Quem preferir sempre o mesmo dia pode ter um **dia fixo** e sair da
-escolha semanal.
+Cada um marca três dias em ordem de preferência — quem tem **prioridade** marca um
+só — até **domingo 23h59**. Na segunda-feira o app monta a escala, resolvendo os
+conflitos pelos contadores, e a **publica sozinho**. Quem preferir sempre o mesmo
+dia escolhe um **dia fixo** e sai da escolha semanal. O que mexe no sistema
+inteiro — pessoas, vagas, calendário, editar e publicar escala — fica com o
+**administrador**, que tem senha.
 
 **Vagas por semana:** 2 pessoas de segunda a quinta, 1 pessoa na sexta — 9 vagas.
+Hoje são 19 pessoas para essas 9 vagas.
 Com 9 pessoas, cada um fica exatamente um dia por semana e o app só decide *qual*
 dia. Com mais gente do que vagas, ele decide também **quem** fica de fora naquela
 semana — e aí quem entra é quem tem menos escalas acumuladas, não quem pediu o
@@ -40,8 +44,10 @@ por dia), e cada push em `main` publica de novo (500 builds por mês).
    | Build command | `npm ci` |
    | Build output directory | `public` |
 
-3. Em **Environment variables**, crie `DATABASE_URL` (tipo *Secret*) com a
-   connection string do Neon — a mesma que ficava em `NETLIFY_DATABASE_URL`.
+3. Em **Environment variables**, crie duas variáveis do tipo *Secret*:
+   `DATABASE_URL`, com a connection string do Neon (a mesma que ficava em
+   `NETLIFY_DATABASE_URL`), e `ADMIN_PASSWORD`, com a senha de administrador (ver
+   [Modo administrador](#modo-administrador)).
 4. Salve e publique. Se a variável for criada ou alterada depois, ela só vale a
    partir do próximo deploy (**Deployments → Retry deployment**).
 5. Abra `https://<projeto>.pages.dev/api/health`: tem que responder `"ok": true`.
@@ -70,8 +76,9 @@ descrita logo abaixo da fase 0.
 
 ### Fase 0 — os dias fixos
 
-Uma pessoa pode ter um **dia fixo** cadastrado na aba Ajustes: ela fica sempre
-naquele dia da semana. A vaga é reservada antes de qualquer disputa, e o que
+Uma pessoa pode ter um **dia fixo**: ela fica sempre naquele dia da semana. Ela
+mesma escolhe, no card "Meu dia fixo" da aba Escolher; o administrador também pode
+definir, em Ajustes. A vaga é reservada antes de qualquer disputa, e o que
 sobra de capacidade é que vai para as duas fases seguintes.
 
 Quem tem dia fixo:
@@ -86,8 +93,8 @@ Quem tem dia fixo:
 
 Só cabe fixar tanta gente num dia quanto há vaga nele: com 2 vagas de segunda a
 quinta, no máximo duas pessoas por dia; com 1 vaga na sexta, uma pessoa. O app
-recusa o cadastro que estouraria a conta, em vez de deixar o problema aparecer
-só na hora de gerar a escala.
+recusa o pedido que estouraria a conta, em vez de deixar o problema aparecer só na
+hora de gerar a escala — na prática, quem pede primeiro fica com a vaga.
 
 Duas situações devolvem a pessoa ao fluxo normal **naquela semana**:
 
@@ -104,7 +111,7 @@ uma garantia de pegar toda sexta em que a segunda fosse feriado.
 
 O dia fixo serve para quem trabalha *sempre* no mesmo dia. Para quem precisa
 escolher um dia **diferente a cada semana**, existe a **prioridade** (a estrela
-ao lado do nome, na aba Ajustes). Quem tem a flag:
+ao lado do nome, que só o administrador dá ou tira, em Ajustes). Quem tem a flag:
 
 - **escolhe 1 dia em vez de 3**, semana a semana, na tela de sempre;
 - **só pode ser escalado nesse dia.** Não é remanejado para outro: ou fica no
@@ -121,7 +128,8 @@ rodízio se fecha sozinho.
 
 Dia fixo e prioridade respondem à mesma pergunta — "em que dia essa pessoa
 fica?" — por caminhos diferentes, e não fazem sentido juntos. Ligar um desliga o
-outro.
+outro. Por isso quem tem prioridade não escolhe dia fixo sozinho: ligar o dia fixo
+desligaria a estrela, que é do administrador.
 
 **O limite da regra:** "toda vaga é preenchida" continua valendo acima de tudo.
 Numa semana com tanta vaga quanto gente, todo mundo trabalha, inclusive quem tem
@@ -218,9 +226,10 @@ na sexta, e a preferência.
 | mais vagas do que gente na semana | alguém dobra — quem tem menos escalas, e nunca quem já está na sexta se houver outra pessoa no mesmo pé |
 | equipe do tamanho exato da escala | todo mundo trabalha toda semana, então uma defasagem de 1 escala não fecha sozinha (fecharia só dobrando por equilíbrio, que não é permitido) |
 
-Com **mais gente do que vagas** — o caso normal, e o de hoje: 12 pessoas para 9
+Com **mais gente do que vagas** — o caso normal, e o de hoje: 19 pessoas para 9
 vagas — ninguém dobra e a defasagem fecha em poucas semanas. Numa semana cheia,
-com 12 pessoas cadastradas, só há dobra a partir de **4 ausências**.
+com 19 pessoas ativas, só há dobra a partir de **11 ausências** (entre ausência
+avulsa e férias).
 
 **Por que o contador vem antes da preferência.** Com mais gente do que vagas,
 alguém fica de fora toda semana, e quem fica de fora é decidido aqui. Preferência
@@ -247,7 +256,7 @@ que, nas mãos erradas, quebrariam o sistema pedem a **senha de administrador**:
 | --- | --- |
 | escolher dias, marcar ausência, cadastrar férias | cadastrar, renomear, desativar e remover pessoas |
 | escolher o **próprio dia fixo** (aba Escolher) | dar ou tirar prioridade (estrela) |
-| gerar escala (rascunho) | editar, publicar e reabrir escala |
+| gerar escala (rascunho) — a publicação é automática, na segunda | editar, publicar e reabrir escala |
 | ver escalas, contadores e calendário | vagas da semana, calendário e zerar contadores |
 
 - A senha fica **só no servidor**, como *Secret* `ADMIN_PASSWORD` no Cloudflare
@@ -313,8 +322,9 @@ contador tirou alguém que, na verdade, uma pessoa tirou.
 
 ## Editar a escala à mão
 
-A escala que o app monta é um ponto de partida, não uma sentença. Na aba Escala,
-o botão **Editar escala** abre a semana para ajuste: em cada dia dá para tirar
+A escala que o app monta é um ponto de partida, não uma sentença: é assim que a
+teoria se acerta com a prática. Na aba Escala, **no modo admin**, o botão
+**Editar escala** abre a semana para ajuste: em cada dia dá para tirar
 quem está e acrescentar quem falta, e **Salvar escala** grava tudo de uma vez.
 
 O que a edição faz e o que ela não faz:
@@ -331,19 +341,23 @@ O que a edição faz e o que ela não faz:
   exatamente o que se quer —, mas nenhum dos dois passa despercebido.
 
 O que ela recusa: dia sem expediente, pessoa inativa e a mesma pessoa duas vezes
-no mesmo dia. Semana publicada fica travada, como já ficava para preferência e
-geração — reabra antes de editar.
+no mesmo dia. Semana publicada fica travada, como fica para preferência e geração:
+o administrador reabre antes de editar, e a semana reaberta **não volta a ser
+publicada sozinha** até ele publicar de novo. Semana sem escala gerada não se
+monta do zero à mão — o caminho é gerar.
 
 **Gerar escala de novo descarta os ajustes**, porque remonta a semana inteira
-pelas preferências. O app pergunta antes de fazer isso.
+pelas preferências. O app pergunta antes de fazer isso. Já a publicação automática
+de segunda **respeita** o ajuste feito depois da última geração: a escala é
+publicada como está.
 
 ---
 
 ## Os contadores
 
 São dois, por pessoa: **escalas** e **sextas**. Ambos são acumulados e **nunca
-zeram sozinhos** — nem por mês, nem por ano. Só zeram se alguém mandar zerar, na
-aba Ajustes, e mesmo assim o histórico das escalas não é apagado: o app apenas
+zeram sozinhos** — nem por mês, nem por ano. Só zeram se o administrador mandar
+zerar, em Ajustes, e mesmo assim o histórico das escalas não é apagado: o app apenas
 passa a contar a partir daquela data.
 
 Não são só um placar: cada um decide uma coisa na hora de montar a semana.
@@ -395,12 +409,12 @@ Para o rascunho não virar bagunça, há uma janela:
 | ação | vale para |
 | --- | --- |
 | gerar escala | só a semana **atual** e a **próxima** |
-| publicar | qualquer semana até a **próxima** |
-| editar à mão | semana não publicada que já tenha escala gerada — não há como montar uma escala do zero à mão |
+| publicar | automática na segunda-feira; o administrador publica qualquer semana até a **próxima** |
+| editar à mão | só o administrador, em semana não publicada que já tenha escala gerada — não há como montar uma escala do zero à mão |
 
-Semana adiantada ainda não tem preferências, e o app não tem senha: sem a janela,
-um clique à toa em "Gerar escala" enchia o histórico de escalas que ninguém ia
-cumprir. Semana que já passou não é gerada de novo, porque ela é o registro do que
+Semana adiantada ainda não tem preferências, e gerar é livre para qualquer pessoa:
+sem a janela, um clique à toa em "Gerar escala" enchia o histórico de escalas que
+ninguém ia cumprir. Semana que já passou não é gerada de novo, porque ela é o registro do que
 aconteceu — para corrigir, existe a edição à mão.
 
 **Publicação automática.** A escala da semana é publicada sozinha a partir de
@@ -424,7 +438,7 @@ ajuda a tirar a dúvida.
 
 ### Quem entra depois
 
-Quem é cadastrado com a escala já andando **não começa do zero**: começa com o
+Quem é cadastrado pelo administrador com a escala já andando **não começa do zero**: começa com o
 inteiro mais próximo da média de escalas e da média de sextas das pessoas ativas,
 calculadas na hora do cadastro. Começando do zero, o contador escalaria essa
 pessoa toda semana — e a fila da sexta lhe daria as sextas seguidas — até ela
@@ -458,7 +472,7 @@ trabalha. Sem o crédito, quem volta de três semanas de férias chega atrás de
 mundo e é escalado toda semana — e ainda vai para a frente da fila da sexta — até
 alcançar. Seria punido por tirar férias.
 
-**A conta.** Para cada semana gerada que caiu inteira nas férias da pessoa:
+**A conta.** Para cada semana **publicada** que caiu inteira nas férias da pessoa:
 
 ```
 crédito de escalas += escalas da semana ÷ pessoas disponíveis na semana
@@ -497,8 +511,8 @@ Numa semana encurtada por feriado, o app pede menos preferências: se sobraram s
 3 dias com expediente, ele pede 3; se sobraram 2, pede 2. Semana inteira fechada
 não gera escala.
 
-Quais dias não têm expediente é o que o calendário da aba Ajustes mostra e
-controla.
+Quais dias não têm expediente é o que o calendário da aba Ajustes mostra; só o
+administrador abre ou fecha um dia.
 
 ---
 
@@ -510,7 +524,7 @@ meta por pessoa = vagas do mês ÷ nº de pessoas ativas
 ```
 
 Os dias com expediente não são um número digitado: saem do calendário da aba
-Ajustes. Fechar ou abrir um dia lá recalcula a meta na hora, e a conta inteira
+Ajustes. Quando o administrador fecha ou abre um dia lá, a meta é recalculada na hora, e a conta inteira
 aparece embaixo do calendário — a mesma fonte alimenta os dois, então não existe
 o estado inconsistente de a meta dizer 15 dias enquanto o calendário mostra 16.
 
