@@ -8,6 +8,18 @@
 <title>Escala 18h</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕕</text></svg>">
 <link rel="stylesheet" href="styles.css">
+<!-- Tema antes da primeira pintura: sem isto, quem usa o tema escuro veria um
+     flash branco ate o app.js carregar. A chave do armazenamento e a mesma de
+     STORAGE_THEME, no app.js. -->
+<script>
+(function () {
+  var escolha = 'auto';
+  try { escolha = localStorage.getItem('escalas.tema') || 'auto'; } catch (e) { /* modo privado */ }
+  var escuro = escolha === 'dark' || (escolha !== 'light'
+    && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.setAttribute('data-theme', escuro ? 'dark' : 'light');
+})();
+</script>
 </head>
 <body>
 
@@ -30,6 +42,10 @@
 
   <header class="topbar">
     <div class="topbar-title">Escala&nbsp;18h</div>
+    <!-- O icone e o rotulo dizem para onde o toque leva; quem escreve os dois
+         e renderTheme(), que sabe qual tema esta valendo. -->
+    <button id="themeBtn" class="themebtn" type="button"
+            aria-label="Mudar o tema do app"></button>
     <button id="helpBtn" class="helpbtn" type="button" title="Como usar o app"
             aria-label="Ver as dicas de como usar o app">?</button>
     <button id="whoami" class="whoami" type="button">
@@ -266,6 +282,20 @@
             <button type="submit" class="btn btn-primary">Salvar</button>
           </div>
         </form>
+      </section>
+
+      <section class="card" id="themeCard">
+        <h2 class="card-title">
+          Aparência
+          <span class="card-sub">vale só neste aparelho</span>
+        </h2>
+        <p class="hint hint-muted">No automático, o app segue o que o celular ou o
+          computador já usa &mdash; inclusive quando ele troca de tema sozinho à noite.</p>
+        <div class="themepick" role="group" aria-label="Tema do app">
+          <button class="btn btn-ghost" type="button" data-tema="light">Claro</button>
+          <button class="btn btn-ghost" type="button" data-tema="dark">Escuro</button>
+          <button class="btn btn-ghost" type="button" data-tema="auto">Automático</button>
+        </div>
       </section>
 
       <section class="card">

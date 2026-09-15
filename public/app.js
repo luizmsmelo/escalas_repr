@@ -2372,6 +2372,16 @@ function wireEvents() {
 
   $('#whoami').addEventListener('click', forgetMe);
 
+  // tema claro/escuro
+  $('#themeBtn').addEventListener('click', () =>
+    aplicarTema(temaAtivo() === 'dark' ? 'light' : 'dark'));
+  $$('[data-tema]').forEach((btn) =>
+    btn.addEventListener('click', () => aplicarTema(btn.dataset.tema)));
+  // No automático, acompanhar o sistema quando ele troca de tema sozinho.
+  sistemaEscuro?.addEventListener?.('change', () => {
+    if (temaEscolhido() === 'auto') aplicarTema();
+  });
+
   // tour guiado
   $('#helpBtn').addEventListener('click', startTour);
   $('#tour').addEventListener('click', (e) => {
@@ -2719,10 +2729,66 @@ function salvarDia(date, works, note) {
 
 const monthOf = (iso) => iso.slice(0, 7);
 
+/* ------------------------------------------------------------------ tema -- */
+/* Claro ou escuro, pelo botão da barra de cima ou pelo cartão Aparência. A
+   escolha fica só neste aparelho - não é do cadastro da pessoa, é de quem está
+   olhando a tela. Sem escolha nenhuma, o app segue a preferência do sistema.
+   A mesma chave é lida pelo script do <head> do index.html, que aplica o tema
+   antes da primeira pintura. */
+
+const STORAGE_THEME = 'escalas.tema';
+const sistemaEscuro = window.matchMedia?.('(prefers-color-scheme: dark)') ?? null;
+// A escolha vive aqui, e nao no armazenamento: sem isso, quem esta numa aba
+// anonima - onde gravar levanta erro - tocaria no botao e nada aconteceria.
+let escolhaTema = null;
+
+function temaEscolhido() {
+  if (escolhaTema === null) {
+    let salvo = null;
+    try { salvo = localStorage.getItem(STORAGE_THEME); } catch { /* modo privado */ }
+    escolhaTema = salvo === 'light' || salvo === 'dark' ? salvo : 'auto';
+  }
+  return escolhaTema;
+}
+
+/** O tema que está valendo agora, com o "automático" já resolvido. */
+function temaAtivo() {
+  const escolha = temaEscolhido();
+  if (escolha !== 'auto') return escolha;
+  return sistemaEscuro?.matches ? 'dark' : 'light';
+}
+
+/** Guarda a escolha, quando vem uma, e põe o tema na tela. */
+function aplicarTema(escolha) {
+  if (escolha) {
+    escolhaTema = escolha;
+    try {
+      if (escolha === 'auto') localStorage.removeItem(STORAGE_THEME);
+      else localStorage.setItem(STORAGE_THEME, escolha);
+    } catch { /* modo privado: a escolha vale enquanto a aba estiver aberta */ }
+  }
+  document.documentElement.dataset.theme = temaAtivo();
+  renderTheme();
+}
+
+function renderTheme() {
+  const escolha = temaEscolhido();
+  const ativo = temaAtivo();
+  const btn = $('#themeBtn');
+  // O ícone mostra para onde o toque leva, e não o tema de agora.
+  btn.textContent = ativo === 'dark' ? '☀' : '☾';
+  const rotulo = ativo === 'dark' ? 'Mudar para o tema claro' : 'Mudar para o tema escuro';
+  btn.title = rotulo;
+  btn.setAttribute('aria-label', rotulo);
+  $$('[data-tema]').forEach((b) =>
+    b.setAttribute('aria-pressed', String(b.dataset.tema === escolha)));
+}
+
 /* ----------------------------------------------------------------- start -- */
 
 async function start() {
   state.admin = loadAdmin();
+  aplicarTema();
   wireEvents();
   // O contador do prazo anda sozinho, sem depender de a tela ser redesenhada.
   setInterval(renderCountdown, 1000);

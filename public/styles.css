@@ -27,30 +27,34 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --surface-0: #121211;
-    --surface-1: #1a1a19;
-    --surface-2: #262624;
-    --border:    #34342f;
-    --border-strong: #4a4a43;
+/* Quem manda no tema e o atributo data-theme no <html>. Ele e escrito pelo
+   script curto no <head> do index.html, antes da primeira pintura, ja
+   resolvendo a escolha "automatico" para a preferencia do sistema - assim a
+   tela nao pisca clara antes de escurecer. Depois disso, quem mexe nele e o
+   botao da barra de cima (ver aplicarTema, em app.js).
+   Paleta escura num bloco so: duas copias sairiam do lugar uma da outra. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #121211;
+  --surface-1: #1a1a19;
+  --surface-2: #262624;
+  --border:    #34342f;
+  --border-strong: #4a4a43;
 
-    --text-primary:   #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted:     #8f8e85;
+  --text-primary:   #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted:     #8f8e85;
 
-    --accent:      #3987e5;
-    --accent-ink:  #06121f;
-    --accent-soft: #17293f;
+  --accent:      #3987e5;
+  --accent-ink:  #06121f;
+  --accent-soft: #17293f;
 
-    --series-1: #3987e5;
-    --good:     #199e70;
-    --warn:     #c98500;
-    --danger:   #e66767;
-    --prio:     #a584f5;
-    --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 6px 16px -10px rgb(0 0 0 / .6);
-  }
+  --series-1: #3987e5;
+  --good:     #199e70;
+  --warn:     #c98500;
+  --danger:   #e66767;
+  --prio:     #a584f5;
+  --shadow: 0 1px 2px rgb(0 0 0 / .4), 0 6px 16px -10px rgb(0 0 0 / .6);
 }
 
 * { box-sizing: border-box; }
@@ -161,6 +165,24 @@ button { font: inherit; color: inherit; }
 }
 .whoami span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .whoami .avatar { width: 26px; height: 26px; font-size: .68rem; }
+
+/* Os dois botoes redondos da barra: tema e dicas. Ficam colados um no outro e
+   encostados no nome, e o `margin-left: auto` do primeiro empurra a dupla para
+   a direita. */
+.themebtn, .helpbtn {
+  flex: none;
+  width: 34px; height: 34px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-size: 1rem; font-weight: 700;
+  cursor: pointer;
+}
+.themebtn { margin-left: auto; font-size: 1.05rem; line-height: 1; }
+.helpbtn { margin-right: 8px; }
+.themebtn:hover, .helpbtn:hover { border-color: var(--accent); color: var(--accent); }
 
 .main {
   flex: 1;
@@ -1074,20 +1096,6 @@ body.is-busy { cursor: progress; }
 /* Um botao de verdade por vez: faixas escuras em volta dele e o balao no maior
    espaco livre da tela (ver placeTour). Letra e
    botoes grandes - o publico sao os colegas com menos pratica com celular. */
-.helpbtn {
-  flex: none;
-  width: 34px; height: 34px;
-  margin-left: auto; margin-right: 8px;
-  display: grid; place-items: center;
-  border-radius: 50%;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-1);
-  color: var(--text-primary);
-  font-size: 1rem; font-weight: 700;
-  cursor: pointer;
-}
-.helpbtn:hover { border-color: var(--accent); color: var(--accent); }
-
 .tour { position: fixed; inset: 0; z-index: 1000; }
 /* Quatro faixas escuras em volta do botao, posicionadas por placeTour. */
 .tour-shade { position: fixed; background: rgb(0 0 0 / .6); }
@@ -1136,6 +1144,20 @@ body.is-busy { cursor: progress; }
 .adminlink { color: var(--text-muted); font-size: .78rem; padding: 4px 10px; }
 .adminbox .row-form, .adminon { width: 100%; }
 .adminon { display: grid; gap: 8px; justify-items: center; text-align: center; }
+
+/* ------------------------------------------------------------- aparencia -- */
+/* Tres opcoes lado a lado; a marcada e a que esta valendo. Em telas estreitas
+   os botoes dividem a largura por igual. */
+.themepick {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px; margin-top: 10px;
+}
+.themepick .btn { padding: 10px 8px; font-size: .9rem; }
+.themepick .btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 .fixedday-select {
   width: 100%;

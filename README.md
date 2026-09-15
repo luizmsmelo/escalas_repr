@@ -311,6 +311,22 @@ escala.
 
 ---
 
+## Tema claro e escuro
+
+O app abre no tema que o aparelho já usa, e acompanha o sistema quando ele troca
+de tema sozinho à noite. Para escolher à mão há o **botão ☾/☀ no topo da tela**,
+que alterna claro e escuro num toque, e o cartão **Aparência**, na aba Ajustes,
+com as três opções: Claro, Escuro e Automático.
+
+- A escolha é **do aparelho**, não da pessoa: fica no `localStorage`, não vai
+  para o banco e não muda nada para os colegas.
+- Ela é aplicada por um script curto no `<head>` do `index.html`, antes da
+  primeira pintura — sem isso a tela piscaria branca antes de escurecer.
+- Sem acesso ao armazenamento (aba anônima, por exemplo) a escolha ainda vale na
+  hora; só não sobrevive ao recarregamento.
+
+---
+
 ## "Como essa escala foi montada?"
 
 Embaixo de toda escala há uma caixa recolhida com esse título. Aberta, ela
