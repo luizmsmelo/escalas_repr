@@ -427,3 +427,32 @@ os avisos e caixas do app (`public/app.js`) e o `README.md`. Revisado em
   - README: lista de motivos atualizada.
 - **Testes:** os quatro arquivos passam; cenário com os números da semana de
   21/09 (nomes trocados) confere o texto novo.
+
+---
+
+# Revisão 4: semanas anteriores
+
+| #  | Assunto                                                      | Onde   | Situação  |
+|----|--------------------------------------------------------------|--------|-----------|
+| 28 | Conferência das semanas já gravadas e empate explicado com fatos | Seção | Feito   |
+
+### 28. Semanas anteriores e o "por que fulano e não eu"
+
+- **Como a seção funciona:** o texto não fica gravado; a tela o monta na hora a
+  partir dos números gravados na geração. Toda mudança no texto já vale para as
+  semanas anteriores.
+- **Conferência (14/09/2026), com os dados reais lidos só localmente:**
+  - 31/08 e 07/09: publicadas **sem explicação gravada** (anteriores à seção). A
+    seção não aparece. Criar uma exigiria gerar de novo semanas publicadas, o
+    que apagaria o registro do que aconteceu — não foi feito.
+  - 14/09: registro sem os campos de prioridade e férias (anterior a eles); a
+    seção monta sem texto quebrado; a regra atual dá exatamente a escala
+    gravada; o ajuste à mão aparece avisado.
+  - 21/09: registro completo; sem texto quebrado; a regra atual dá exatamente a
+    escala gravada.
+- **Melhoria feita:** o empate dizia só "decidiram a fila da sexta e a
+  preferência". Agora a seção diz quem entrou com o mesmo número de escalas e em
+  que dia (`vagasDoEmpate`), e, para quem ficou de fora, o que a pessoa tinha
+  pedido para esses dias (`whyEmpateDetalhe`). Quando ela pediu o dia na mesma
+  opção de quem entrou, a seção diz que decidiu a ordem fixa de desempate —
+  trocar as duas dá exatamente o mesmo total para o grupo.

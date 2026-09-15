@@ -997,6 +997,51 @@ function whyOutReason(p, explain) {
   return 'restricao';
 }
 
+/**
+ * Quem entrou disputando com exatamente n escalas, e em que dia - as vagas que
+ * o empate daquele numero decidiu. E o que responde "por que fulano e nao eu".
+ */
+function vagasDoEmpate(explain, n) {
+  return disputaram(explain)
+    .filter((q) => q.totalBefore === n)
+    .flatMap((q) => q.days.filter((d) => d.via !== 'fixo').map((d) => ({
+      q, d,
+      texto: d.day === FRIDAY
+        ? `${nomePrio(q.personId, q.name)} na sexta, ${d.via === 'prioridade'
+          ? 'por prioridade' : `pela fila (${sextasDe(q.fridayBefore)})`}`
+        : `${nomePrio(q.personId, q.name)} na ${nomeDia(d.day)} (${d.via === 'prioridade'
+          ? 'por prioridade' : d.rank ? `${ORDINAL[d.rank]} opção` : 'fora do top 3'})`,
+    })));
+}
+
+/**
+ * Os fatos do empate para quem ficou de fora: quem entrou com o mesmo numero, em
+ * que dia, e o que esta pessoa tinha pedido para esses dias. Nao afirma o porque
+ * de cada troca - a montagem olha o grupo inteiro -, so o que da para conferir.
+ */
+function whyEmpateDetalhe(p, explain) {
+  const vagas = vagasDoEmpate(explain, p.totalBefore);
+  if (!vagas.length) return '';
+  const dias = [...new Set(vagas.map((v) => v.d.day))].sort((a, b) => a - b);
+  // Pediu o dia na mesma posicao de quem entrou: trocar as duas da exatamente o
+  // mesmo total para o grupo, entao quem decidiu foi a ordem fixa do app.
+  const mesmaOpcao = [];
+  const sobre = dias.map((d) => {
+    if (d === FRIDAY && p.noFriday) return 'tinha marcado que não podia na sexta';
+    const r = (p.choices ?? []).indexOf(d) + 1;
+    if (!r) return `não tinha pedido a ${nomeDia(d)}`;
+    const melhor = Math.min(...vagas.filter((v) => v.d.day === d && v.d.rank)
+      .map((v) => v.d.rank));
+    if (r === melhor) mesmaOpcao.push(`na ${nomeDia(d)}`);
+    return `pediu a ${nomeDia(d)} em ${ORDINAL[r]}`;
+  });
+  return ` Com o mesmo número, ${vagas.length === 1 ? 'entrou' : 'entraram'}
+    ${listaNomes(vagas.map((v) => v.texto))}; ela ${listaNomes(sobre)}.${mesmaOpcao.length
+    ? ` ${listaNomes(mesmaOpcao).replace(/^n/, 'N')}, ela pediu com a mesma opção de quem
+      entrou: aí decidiu a ordem fixa de desempate do app, sem sorteio.`
+    : ''}`;
+}
+
 /** Por que quem ficou de fora com menos escalas nao podia pegar as vagas que sobraram. */
 function whyNaoPodia(lista) {
   const semDia = lista.filter((p) => p.priority && p.priorityDay == null);
@@ -1072,7 +1117,11 @@ function whyCut(explain) {
       <b>${escalas(maisEscalasDentro(explain))}</b>.</p>` : ''}
     ${porEmpate.length ? `<p class="why-p">${nomes(porEmpate)} ${ficou(porEmpate)} de fora
       <b>no desempate</b>: havia mais gente com o mesmo número de escalas do que vagas
-      sobrando. Aí, e só aí, entram os desempates: primeiro a <b>sexta</b>, que sai da
+      sobrando.${[...new Set(porEmpate.map((p) => p.totalBefore))].map((n) => {
+        const vagas = vagasDoEmpate(explain, n);
+        return ` Com ${escalas(n)}, ${vagas.length === 1 ? 'entrou' : 'entraram'}
+          ${listaNomes(vagas.map((v) => v.texto))}.`;
+      }).join('')} Aí, e só aí, entram os desempates: primeiro a <b>sexta</b>, que sai da
       fila de sextas — e quem leva a sexta já está na semana —; depois a
       <b>preferência do grupo</b>, com a combinação que deixa todo mundo mais perto da 1ª
       opção. Se ainda empatar, o app desempata sempre do mesmo jeito, sem sorteio.</p>` : ''}
@@ -1302,7 +1351,8 @@ function whyOnePerson(p, explain, byDay) {
         mas as vagas que sobraram eram de dias que não podia pegar.${naProxima}`;
     }
     return `ficou <b>de fora</b> desta semana: ${chegou}, o mesmo que gente que entrou —
-      havia mais pessoas nesse número do que vagas. Nesse empate, e só nele, decidem a
+      havia mais pessoas nesse número do que vagas.${whyEmpateDetalhe(p, explain)} Nesse
+      empate, e só nele, decidem a
       fila da sexta — quem leva a sexta já está na semana — e depois a preferência do
       grupo: o app fica com a combinação que deixa todo mundo mais perto da 1ª
       opção.${naProxima}`;
