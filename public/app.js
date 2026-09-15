@@ -420,7 +420,7 @@ function renderVacationBox(ferias) {
       <span class="fixedbox-day">${fmtDay(periodo.start)} a ${fmtDay(periodo.end)}</span>
     </div>
     <p class="hint">Não há dia para escolher nesta semana, e você não entra na escala.
-      Quando ela for gerada, seu contador recebe a <b>média do grupo</b> nesta semana
+      Quando ela for publicada, seu contador recebe a <b>média do grupo</b> nesta semana
       &mdash; você volta das férias no mesmo ponto de todo mundo.</p>`;
 }
 
@@ -523,8 +523,11 @@ function renderFridayBox(fridayPicked, locked, fridayOpen = true, fridayVacation
   $('#fridayText').innerHTML = mine?.waiting
     // Acima do corte do contador geral: nao e a sexta que esta em jogo, e a
     // semana inteira - dizer "voce e o 12o da fila" esconderia o motivo.
-    ? `Você tem <b>${mine.total} escalas</b>, mais que o resto do grupo, então fica de fora `
-      + 'desta semana — inclusive da sexta — até os contadores se emparelharem.'
+    // buildFridayQueue (API) estima o corte com uma semana cheia; o corte real
+    // sai na geracao, com quem de fato esta na semana.
+    ? `Você tem <b>${mine.total} escalas</b>, mais que o resto do grupo, então deve ficar `
+      + 'de fora desta semana — inclusive da sexta — até os contadores se emparelharem. '
+      + 'A conta final sai na geração, com quem de fato estiver na semana.'
     : fridayPicked
       ? 'Você colocou sexta no seu top 3, então está <b>se voluntariando</b>: entre quem tem o '
         + 'mesmo número de sextas, você passa na frente. Não é o mesmo que ter sexta como dia fixo.'
@@ -663,8 +666,10 @@ function renderSchedule(generation) {
         f.reason === 'sem-expediente' ? 'sem expediente'
           : f.reason === 'ferias' ? 'de férias' : 'sem vaga livre'})`)
       .join(', ');
+    // Nao "entraram": quem volta a disputa pode ficar de fora pelo contador, e
+    // continua fora da fila da sexta a menos que a tenha pedido (pickFriday).
     messages.push(`Dia fixo sem vaga nesta semana: <b>${lista}</b>. `
-      + 'Essas pessoas entraram pela preferência, como todo mundo.');
+      + 'Essas pessoas disputaram os outros dias como todo mundo — a sexta, só quem a pediu.');
   }
   if (generation?.priorityUnplaced?.length) {
     const lista = generation.priorityUnplaced
@@ -711,7 +716,9 @@ function renderSchedule(generation) {
   if (generation?.missingPreferences?.length) {
     messages.push(
       `Sem preferência registrada: <b>${esc(generation.missingPreferences.join(', '))}</b>. ` +
-        'Essas pessoas entraram em qualquer dia disponível.',
+        // missingPreferences (API) inclui quem ficou de fora pelo contador.
+        'Elas disputaram a semana sem preferência: qualquer dia de segunda a quinta '
+        + 'serve, e a sexta é a 4ª opção automática.',
     );
   }
   if (generation?.closedDays?.length) {
@@ -730,9 +737,11 @@ function renderSchedule(generation) {
   if (abertas.length) {
     const days = [...new Set(abertas)].map((d) => DAY_NAMES[d]).join(', ');
     messages.push(`${abertas.length === 1 ? 'Uma vaga' : `${abertas.length} vagas`} `
-      + `em aberto: <b>${esc(days)}</b>. Não havia ninguém disponível para `
-      + `${abertas.length === 1 ? 'ela' : 'elas'} nesta semana — nem repetindo quem já `
-      + 'está na escala. Resolvam no grupo e use <b>Editar escala</b>.');
+      + `em aberto: <b>${esc(days)}</b>. ${abertas.some((d) => d !== FRIDAY)
+        ? 'De segunda a quinta, vaga só sobra quando não há ninguém para ela, nem '
+          + 'repetindo quem já está na escala. ' : ''}${abertas.includes(FRIDAY)
+        ? 'A sexta fica em aberto quando ninguém da fila pode ficar com ela — ninguém '
+          + 'dobra para cobri-la. ' : ''}Resolvam no grupo e use <b>Editar escala</b>.`);
   }
   // Quem dobrou tambem e estado da escala, e e a primeira coisa que alguem vai
   // perguntar ao ver o mesmo nome duas vezes.
@@ -741,7 +750,9 @@ function renderSchedule(generation) {
     vezes.set(a.personId, { ...a, n: (vezes.get(a.personId)?.n ?? 0) + 1 }));
   const dobraram = [...vezes.values()].filter((a) => a.n > 1);
   if (dobraram.length && !assignments.some((a) => a.via === 'manual')) {
-    messages.push(`Semana com menos gente do que vagas: <b>${listaPessoas(dobraram)}</b> `
+    // Nao e so "menos gente do que vagas": prioridade ou ferias tambem podem
+    // deixar uma vaga sem ninguem de fora que possa ficar com ela.
+    messages.push(`Faltou quem pudesse ficar com todas as vagas: <b>${listaPessoas(dobraram)}</b> `
       + `${dobraram.length === 1 ? 'ficou' : 'ficaram'} em mais de um dia para nenhuma `
       + 'vaga ficar em aberto. Dobra quem tem menos escalas acumuladas; quem já está na '
       + 'sexta é o último a dobrar.');
@@ -847,7 +858,7 @@ function renderWhy() {
     whyFriday(explain, byDay),
     whyWeekdays(explain, byDay),
     whyPeople(explain, byDay, assignments),
-    whyCheck(),
+    whyCheck(explain),
   ].join('');
 }
 
@@ -864,12 +875,17 @@ function whyEdits(explain, assignments) {
   };
 }
 
-function whyIntro(explain, edits) {
+/** "14/09/2026 às 10:32" - ou null numa semana gravada sem a hora da geracao. */
+function quandoGerada(explain) {
   const d = explain.generatedAt ? new Date(explain.generatedAt) : null;
-  const quando = d
+  return d
     ? `${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR',
       { hour: '2-digit', minute: '2-digit' })}`
     : null;
+}
+
+function whyIntro(explain, edits) {
+  const quando = quandoGerada(explain);
   const mexeu = edits.entraram.length || edits.sairam.length;
 
   return `
@@ -898,24 +914,31 @@ function whyRules() {
     <ol class="why-steps">
       <li><b>Dia fixo.</b> Quem tem dia fixo cadastrado fica sempre nele, e a vaga é
         reservada antes de qualquer disputa. É a <b>única</b> exceção ao contador.</li>
-      <li><b>Prioridade</b> não é exceção nenhuma: quem tem a flag escolhe um dia por
-        semana e disputa a vaga pelo mesmo contador de todo mundo. O que muda é que ela
-        não tem para onde ser remanejada — se o dia pedido encher, ela fica de fora da
-        semana em vez de cair em outro dia.</li>
       <li><b>Quem trabalha nesta semana.</b> Quando há mais gente do que vagas, alguém
         fica de fora — e quem fica de fora é decidido pelo <b>contador de escalas
-        acumuladas</b>, nunca pela preferência. Quem tem menos escalas entra primeiro.</li>
+        acumuladas</b>. Quem tem menos escalas entra primeiro; a fila da sexta e a
+        preferência só desempatam quem chegou com o mesmo número.</li>
       <li><b>Em qual dia.</b> Só aqui a preferência entra. A sexta sai de uma fila pelo
         contador de sextas; de segunda a quinta, o app procura a distribuição que deixa
         o grupo <b>inteiro</b> o mais perto possível da 1ª opção.</li>
     </ol>
-    <p class="why-note">Acima disso valem duas regras: <b>toda vaga é preenchida</b> e
-      <b>ninguém faz duas escalas na mesma semana</b>. Quando as duas não cabem juntas —
-      menos gente do que vagas —, a primeira vence: alguém dobra, o mínimo de gente
-      possível, e dobra quem tem menos escalas acumuladas. Quem já está na sexta é o
-      último a dobrar. E ninguém dobra enquanto houver alguém disponível fora da
-      semana — inclusive quem está à frente no contador: antes da segunda escala de
-      qualquer pessoa vem a primeira de todo mundo.</p>
+    <p class="why-note"><b>Prioridade</b> não é uma camada à parte nem exceção ao
+      contador: quem tem a estrela escolhe um dia por semana e disputa a vaga pelo
+      contador de escalas, como todo mundo. O que muda é que não tem para onde ser
+      remanejada: se o dia pedido encher, fica de fora da semana em vez de cair em outro
+      dia. Na sexta, se o contador já põe a pessoa na semana, ela vem antes da fila das
+      sextas — é o único dia dela.</p>
+    <p class="why-note">Acima disso valem duas regras: <b>ninguém faz duas escalas na
+      mesma semana</b> e, de segunda a quinta, <b>toda vaga é preenchida</b>. Quando as
+      duas não cabem juntas — menos gente do que vagas —, a vaga vence: alguém dobra, o
+      mínimo de gente possível, e dobra quem tem menos escalas acumuladas. Quem já está
+      na sexta é o último a dobrar. E ninguém dobra enquanto houver alguém disponível
+      fora da semana — inclusive quem está à frente no contador: antes da segunda escala
+      de qualquer pessoa vem a primeira de todo mundo.</p>
+    <p class="why-note">A sexta é diferente: <b>ninguém dobra para cobri-la</b>. Ela sai
+      só da fila, e fica fora da fila quem marcou “não posso esta sexta”, quem tem dia
+      fixo e não pediu sexta, quem tem prioridade em outro dia e quem está de férias na
+      sexta. Se ninguém da fila puder, a sexta fica <b>em aberto</b>.</p>
     <p class="why-note">A ordem importa: se a preferência decidisse quem entra, quem
       gosta do dia mais disputado perderia toda semana e quem gosta do dia mais vazio
       entraria toda semana — e a diferença entre os contadores só cresceria.</p>`;
@@ -934,9 +957,15 @@ function whyFixed(explain) {
       ? `tem ${nomeDia(p.fixedDay)} como dia fixo; a vaga foi reservada antes de tudo`
       : p.blockedDays?.includes(p.fixedDay)
         ? `tem ${nomeDia(p.fixedDay)} como dia fixo, mas estava de <b>férias</b> nesse dia,
-           então disputou os outros dias`
-        : `tem ${nomeDia(p.fixedDay)} como dia fixo, mas ela <b>não coube</b> nesta semana
-         (feriado, ou a vaga já estava ocupada), então disputou como todo mundo`}</li>`;
+           então disputou os outros dias de segunda a quinta como todo mundo — a sexta,
+           só se tivesse pedido`
+        // placeFixed: sem expediente, ou mais fixos no dia do que vagas (fica quem
+        // foi cadastrado antes). Fora da fila da sexta de qualquer jeito (pickFriday).
+        : `tem ${nomeDia(p.fixedDay)} como dia fixo, mas o dia fixo <b>não coube</b> nesta
+         semana (${explain.capacity?.[p.fixedDay]
+           ? 'a vaga já era de quem tem o mesmo dia fixo e foi cadastrado antes'
+           : 'o dia não teve expediente'}), então disputou de segunda a quinta como todo
+         mundo — a sexta, só se tivesse pedido`}</li>`;
   }).join('');
   return `<h3 class="why-h">Camada 1 — dia fixo</h3><ul class="why-list">${linhas}</ul>`;
 }
@@ -961,7 +990,8 @@ function whyCut(explain) {
   const fora = explain.people.filter((p) => !p.days.length);
   const dentro = explain.headcount - fora.length;
 
-  const emAberto = explain.unfilled?.length ?? 0;
+  // So segunda a quinta: a sexta vazia tem motivo proprio, explicado em whyFriday.
+  const emAberto = (explain.unfilled ?? []).filter((d) => d !== FRIDAY).length;
   const dobraram = explain.people.filter((p) => p.days.length > 1);
   if (!fora.length) {
     return `<h3 class="why-h">Camada 2 — quem trabalha nesta semana</h3>
@@ -982,12 +1012,17 @@ function whyCut(explain) {
   const contadores = explain.people.map((p) => p.totalBefore).sort((a, b) => a - b);
   // Quem tem prioridade ficou de fora por outro motivo - o dia pedido encheu -,
   // e contar isso como corte ou desempate seria mentira.
-  const porPrioridade = fora.filter((p) => p.priority);
+  // Acima do corte, prioridade nao muda nada: ficaria de fora mesmo podendo
+  // escolher qualquer dia, entao o motivo e o contador.
+  const porPrioridade = fora.filter((p) => p.priority && !p.aboveCut);
   const grupo = (motivo) => fora.filter(
-    (p) => !p.priority && whyOutReason(p, explain) === motivo);
+    (p) => !porPrioridade.includes(p) && whyOutReason(p, explain) === motivo);
   const nomes = (lista) => listaPessoas(lista);
   const ficou = (lista) => (lista.length === 1 ? 'ficou' : 'ficaram');
   const [porContador, porEmpate, porFrente] = ['corte', 'empate', 'frente'].map(grupo);
+  // Acima do corte so se entra quando nao sobra ninguem dentro dele para a vaga
+  // (pickFriday na sexta; solveWeekdays prefere isso a vaga vazia ou a dobrar).
+  const entrouAcima = explain.people.filter((q) => q.aboveCut && q.days.length);
 
   return `
     <h3 class="why-h">Camada 2 — quem trabalha nesta semana</h3>
@@ -999,21 +1034,52 @@ function whyCut(explain) {
     ${porContador.length ? `<p class="why-p">${nomes(porContador)}
       ${ficou(porContador)} de fora <b>pelo contador</b>: ${porContador.length === 1
         ? 'chegou' : 'chegaram'} acima do corte de <b>${escalas(explain.cut)}</b>, que é o
-      contador da última pessoa que cabia nas vagas. Acima do corte não se disputa vaga
-      nenhuma — nem a sexta.</p>` : ''}
+      contador da última pessoa que cabia nas vagas. Acima do corte só se entra se não
+      houver mais ninguém para a vaga — e isso vale também para a sexta.</p>` : ''}
     ${porEmpate.length ? `<p class="why-p">${nomes(porEmpate)} ${ficou(porEmpate)} de fora
       <b>no desempate</b>: havia mais gente com o mesmo número de escalas do que vagas
-      sobrando. Aí, e só aí, o critério passa a ser a preferência do grupo — o app fica
-      com a combinação que deixa todo mundo mais perto da 1ª opção.</p>` : ''}
+      sobrando. Aí, e só aí, entram os desempates: primeiro a <b>sexta</b>, que sai da
+      fila de sextas — e quem leva a sexta já está na semana —; depois a
+      <b>preferência do grupo</b>, com a combinação que deixa todo mundo mais perto da 1ª
+      opção. Se ainda empatar, o app desempata sempre do mesmo jeito, sem sorteio.</p>` : ''}
     ${porFrente.length ? `<p class="why-p">${nomes(porFrente)} ${ficou(porFrente)} de fora
       por estar <b>à frente no contador</b>: ${porFrente.length === 1 ? 'chegou' : 'chegaram'}
       com mais escalas do que qualquer pessoa que entrou.</p>` : ''}
-    ${porPrioridade.length ? `<p class="why-p">${nomes(porPrioridade)}
-      ${ficou(porPrioridade)} de fora <b>por prioridade</b>: ${porPrioridade.length === 1
-        ? 'pediu um dia só' : 'pediram um dia só'}, esse dia ficou com quem tinha menos
-      escalas acumuladas, e prioridade <b>não é remanejada</b> para outro dia.</p>` : ''}
+    ${entrouAcima.length ? `<p class="why-p">${nomes(entrouAcima)} ${entrouAcima.length === 1
+        ? 'chegou' : 'chegaram'} acima do corte e mesmo assim ${entrouAcima.length === 1
+        ? 'entrou' : 'entraram'}: não sobrou ninguém dentro do corte que pudesse ficar com
+      ${esc(listaNomes([...new Set(entrouAcima.flatMap((q) =>
+        q.days.map((d) => `a ${nomeDia(d.day)}`)))]))}.</p>` : ''}
+    ${whyCutPrioridade(porPrioridade, nomes, ficou)}
     <p class="why-p">Quem ficou de fora <b>não gastou escala</b>: o contador não andou, e
       por isso essas pessoas entram na frente na próxima semana.</p>`;
+}
+
+/**
+ * Quem tem prioridade e ficou de fora, pelo motivo de cada um. Em qualquer dia
+ * decide o contador de escalas; na sexta, o empate de escalas vai pela fila das
+ * sextas (priorityOnFriday e pickFriday no solver).
+ */
+function whyCutPrioridade(lista, nomes, ficou) {
+  const semDia = lista.filter((p) => p.priorityDay == null);
+  const naSexta = lista.filter((p) => p.priorityDay === FRIDAY);
+  const naSemana = lista.filter((p) => p.priorityDay != null && p.priorityDay !== FRIDAY);
+  const pediu = (l, um, muitos) => (l.length === 1 ? um : muitos);
+  return [
+    naSemana.length && `<p class="why-p">${nomes(naSemana)} ${ficou(naSemana)} de fora
+      <b>por prioridade</b>: ${pediu(naSemana, 'pediu', 'pediram')} um dia de segunda a
+      quinta, esse dia encheu com quem tinha dia fixo nele ou chegou com <b>menos escalas
+      acumuladas</b> (ou o mesmo número), e prioridade <b>não é remanejada</b> para outro
+      dia.</p>`,
+    naSexta.length && `<p class="why-p">${nomes(naSexta)} ${ficou(naSexta)} de fora
+      <b>por prioridade</b>: ${pediu(naSexta, 'pediu', 'pediram')} a sexta, e ela ficou com
+      quem chegou com <b>menos escalas acumuladas</b> ou, no empate, com quem estava à
+      frente na fila das sextas. Prioridade <b>não é remanejada</b> para outro dia.</p>`,
+    semDia.length && `<p class="why-p">${nomes(semDia)} ${ficou(semDia)} de fora
+      <b>por prioridade</b>: ${pediu(semDia, 'tem', 'têm')} prioridade e não
+      ${pediu(semDia, 'escolheu', 'escolheram')} dia nesta semana, e quem tem prioridade
+      só entra no dia que pede.</p>`,
+  ].filter(Boolean).join('');
 }
 
 function whyFriday(explain, byDay) {
@@ -1028,6 +1094,7 @@ function whyFriday(explain, byDay) {
     .sort((a, b) => a.fridayPos - b.fridayPos);
   const levaram = new Set((byDay.get(FRIDAY) ?? []).map((a) => a.personId));
   const vetaram = explain.people.filter((p) => p.noFriday);
+  const sextaVazia = (explain.unfilled ?? []).includes(FRIDAY);
 
   const linhas = fila.map((p) => {
     const levou = levaram.has(p.personId);
@@ -1039,6 +1106,7 @@ function whyFriday(explain, byDay) {
       <td class="num">${p.totalBefore}</td>
       <td>${levou
         ? (via === 'voluntario' ? 'levou — pediu sexta' : 'levou a sexta')
+          + (p.aboveCut ? ' (acima do corte: ninguém dentro dele podia)' : '')
         : p.aboveCut ? 'fora da semana (contador)' : ''}</td>
     </tr>`;
   }).join('');
@@ -1049,11 +1117,17 @@ function whyFriday(explain, byDay) {
       critério: leva <b>quem tem menos sextas acumuladas</b> entre quem está na semana.
       Quem pede sexta no próprio top 3 passa na frente <b>só no empate</b> — senão pedir
       sexta toda semana valeria como ter sexta de dia fixo, sem cadastrar dia fixo.</p>
+    <p class="why-p">Quem tem <b>prioridade</b> e escolheu a sexta vem <b>antes da fila</b>
+      quando o contador de escalas já põe a pessoa na semana: a sexta é o único dia
+      dela. Se mais de uma pessoa estiver nesse caso, entra quem tem menos escalas.</p>
     <div class="why-tablewrap"><table class="why-table">
       <thead><tr><th>#</th><th>Pessoa</th><th class="num">Sextas</th>
         <th class="num">Escalas</th><th></th></tr></thead>
       <tbody>${linhas}</tbody>
     </table></div>
+    ${sextaVazia ? `<p class="why-p">A sexta ficou <b>em aberto</b>: ninguém da fila podia
+      ficar com ela, e ninguém dobra para cobrir a sexta. Resolvam no grupo e use
+      <b>Editar escala</b>.</p>` : ''}
     ${vetaram.length ? `<p class="why-note">Fora da conta da sexta por terem marcado
       “não posso esta sexta”: ${listaPessoas(vetaram)}. É veto, não preferência.</p>` : ''}`;
 }
@@ -1066,9 +1140,12 @@ function whyWeekdays(explain, byDay) {
       <p class="why-p">Nenhum dia de segunda a quinta teve expediente nesta semana.</p>`;
   }
 
-  const conta = { 1: 0, 2: 0, 3: 0, fora: 0, fixo: 0 };
+  const conta = { 1: 0, 2: 0, 3: 0, fora: 0, fixo: 0, prioridade: 0 };
   for (const a of daSemana) {
     if (a.via === 'fixo') conta.fixo++;
+    // O dia de quem tem prioridade e a 1a escolha, mas na escala ele aparece
+    // como "dia pedido · prioridade" - aqui tambem.
+    else if (a.via === 'prioridade') conta.prioridade++;
     else if (conta[a.rank] != null) conta[a.rank]++;
     else conta.fora++;
   }
@@ -1077,12 +1154,14 @@ function whyWeekdays(explain, byDay) {
     conta[2] && `<b>${conta[2]}</b> na 2ª`,
     conta[3] && `<b>${conta[3]}</b> na 3ª`,
     conta.fixo && `<b>${conta.fixo}</b> em dia fixo`,
+    conta.prioridade && `<b>${conta.prioridade}</b> por prioridade`,
     conta.fora && `<b>${conta.fora}</b> fora do top 3 pedido`,
   ].filter(Boolean).join(', ');
 
   const linhas = uteis.map((d) => {
     const gente = (byDay.get(d) ?? []).map((a) => `${nomePrio(a.personId, a.name)} <span class="why-tag">${
       a.via === 'fixo' ? 'dia fixo'
+        : a.via === 'prioridade' ? 'dia pedido · prioridade'
         : a.rank ? `${ORDINAL[a.rank]} opção`
         : 'fora do top 3'}</span>`).join('<br>');
     return `<tr><td>${DAY_NAMES[d]}</td><td>${plural(explain.capacity[d], 'vaga', 'vagas')}</td>
@@ -1140,8 +1219,12 @@ function whyVacationNote(p) {
     ? `A ${nomeDia(dias[0])} caía nas <b>férias</b> e ficou fora de alcance.`
     : `Os dias ${esc(listaNomes(dias.map(nomeDia)))} caíam nas <b>férias</b> e ficaram fora
        de alcance.`;
-  return ` <span class="why-hand">${quais} Semana só em parte de férias não rende crédito:
-    ainda dava para pegar a escala da semana.</span>`;
+  // gerarSemana (API) tira os dias de ferias das escolhas antes do solver: as
+  // posicoes citadas na frase ja vem renumeradas sem eles.
+  return ` <span class="why-hand">${quais} Dia de férias não conta como opção: se
+    estava entre os pedidos, saiu da lista, e as opções citadas aqui já estão numeradas
+    sem ele. Semana só em parte de férias não rende crédito: ainda dava para pegar a
+    escala da semana.</span>`;
 }
 
 /** A frase de uma pessoa - sempre citando o numero que decidiu o caso dela. */
@@ -1155,7 +1238,7 @@ function whyOnePerson(p, explain, byDay) {
     const naProximaPrio = ' O contador não andou, então entra na frente na próxima.';
     // Prioridade tem motivo proprio: nao e o corte geral, e o dia pedido ter
     // enchido. Chamar um de outro seria mentira.
-    if (p.priority) {
+    if (p.priority && !p.aboveCut) {
       if (p.priorityDay == null) {
         return `tem <b>prioridade</b> e <b>não escolheu dia</b> nesta semana. Quem tem
           prioridade só entra no dia que pede, então não havia onde escalá-la.`;
@@ -1166,8 +1249,12 @@ function whyOnePerson(p, explain, byDay) {
         ? `${vagas === 1 ? 'a vaga do dia ficou' : `as ${vagas} vagas do dia ficaram`} com ${
             listaPessoas(donos)}`
         : 'o dia não teve vaga nenhuma nesta semana';
-      return `tem <b>prioridade</b> e pediu ${nomeDia(p.priorityDay)}: ${chegou}, e ${dia}.
-        Prioridade não é remanejada para outro dia — é o dia pedido ou nenhum.${naProximaPrio}`;
+      const pelaFila = p.priorityDay === FRIDAY
+        ? ` Na sexta, o empate de escalas vai pela fila das sextas, e chegou com
+          ${sextasDe(p.fridayBefore)}.`
+        : '';
+      return `tem <b>prioridade</b> e pediu ${nomeDia(p.priorityDay)}: ${chegou}, e ${dia}.${
+        pelaFila} Prioridade não é remanejada para outro dia — é o dia pedido ou nenhum.${naProximaPrio}`;
     }
     const motivo = whyOutReason(p, explain);
     const naProxima = naProximaPrio;
@@ -1181,25 +1268,37 @@ function whyOnePerson(p, explain, byDay) {
         que entrou.${naProxima}`;
     }
     return `ficou <b>de fora</b> desta semana: ${chegou}, o mesmo que gente que entrou —
-      havia mais pessoas nesse número do que vagas. Nesse empate, e só nele, o critério é
-      a preferência do grupo: o app fica com a combinação que deixa todo mundo mais perto
-      da 1ª opção.${naProxima}`;
+      havia mais pessoas nesse número do que vagas. Nesse empate, e só nele, decidem a
+      fila da sexta — quem leva a sexta já está na semana — e depois a preferência do
+      grupo: o app fica com a combinação que deixa todo mundo mais perto da 1ª
+      opção.${naProxima}`;
   }
 
   const partes = p.days.map((a) => {
     if (a.via === 'prioridade') {
       return `<b>${nomeDia(a.day)}</b>, o único dia que pediu — tem <b>prioridade</b>,
-        então ou ficava nesse dia ou ficava de fora da semana`;
+        então ou ficava nesse dia ou ficava de fora da semana${a.day === FRIDAY
+          ? '. Como o contador de escalas já a punha na semana, veio antes da fila das sextas'
+          : ''}`;
     }
     if (a.via === 'fixo') {
       return `<b>${nomeDia(a.day)}</b>, o <b>dia fixo</b> cadastrado — vaga reservada
         antes de qualquer disputa`;
     }
     if (a.day === FRIDAY) {
-      const nota = a.via === 'voluntario'
-        ? `pediu sexta no próprio top 3 e estava empatad${a.rank === 1 ? 'o(a)' : 'o(a)'}
-           em ${sextasDe(p.fridayBefore)} com a frente da fila, então passou na frente`
-        : `era o ${p.fridayPos}º da fila da sexta, com ${sextasDe(p.fridayBefore)}`;
+      // Pedir sexta so desempata (byQueue no solver): a frase de "passou na
+      // frente" so vale se alguem atras na fila tinha as mesmas sextas e nao
+      // pediu. Sem isso, quem pediu levou por ter menos sextas, como a fila.
+      const passou = a.via === 'voluntario' && explain.people.filter((q) =>
+        q.fridayPos > p.fridayPos && q.fridayBefore === p.fridayBefore
+        && !q.choices.includes(FRIDAY));
+      const nota = passou?.length
+        ? `pediu sexta no próprio top 3 e estava empatado(a) em ${sextasDe(p.fridayBefore)}
+           com ${listaPessoas(passou)}, que não
+           ${passou.length === 1 ? 'pediu' : 'pediram'}: no empate, quem pede sexta passa
+           na frente`
+        : `era o ${p.fridayPos}º da fila da sexta, com ${sextasDe(p.fridayBefore)}${
+          a.via === 'voluntario' ? ', e também tinha pedido sexta' : ''}`;
       return `<b>sexta</b> — ${nota}`;
     }
     if (a.rank === 1) return `<b>${nomeDia(a.day)}</b>, a 1ª opção que pediu`;
@@ -1229,8 +1328,12 @@ function whyOnePerson(p, explain, byDay) {
     ? ' Ficou em mais de um dia porque havia mais vagas do que gente disponível: dobra'
       + ' quem tem menos escalas acumuladas, e quem já está na sexta é o último.'
     : '';
+  const acimaDoCorte = p.aboveCut
+    ? ` Chegou acima do corte de ${escalas(explain.cut)}: só entrou porque não sobrou
+      ninguém dentro do corte que pudesse ficar com essa vaga.`
+    : '';
   return `${chegou}${pedidos ? `, pediu ${pedidos}` : ', não registrou preferência'}, e
-    ficou na ${partes.join('; e na ')}.${dobrou}`;
+    ficou na ${partes.join('; e na ')}.${dobrou}${acimaDoCorte}`;
 }
 
 /** O que a mao mudou no caso desta pessoa, depois da geracao. */
@@ -1249,10 +1352,20 @@ function whyHandNote(p, agora) {
     ${listaNomes(frases)}.</span>`;
 }
 
-function whyCheck() {
-  return `<p class="why-check">Todos os números desta seção saem da aba
-    <b>Contadores</b>, que mostra as escalas e as sextas de cada pessoa desde o início.
-    Se algum número aqui não bater com o de lá, é erro do app — não critério.</p>`;
+/**
+ * Os contadores daqui sao os da hora da geracao (allTimeCounts na API: so
+ * escala publicada, sem a propria semana). A aba Contadores mostra os de hoje,
+ * que ja incluem esta semana depois de publicada - por isso nao batem, e a
+ * frase nao pode mandar a pessoa tomar a diferenca por erro.
+ */
+function whyCheck(explain) {
+  const quando = quandoGerada(explain);
+  return `<p class="why-check">Os contadores desta seção são os de quando a escala foi
+    gerada${quando ? ` (${esc(quando)})` : ''}: escalas e sextas <b>publicadas</b> até ali,
+    sem contar esta semana, já com o ponto de partida e o crédito de férias de cada
+    pessoa. A aba <b>Contadores</b> mostra os números de <b>hoje</b> — depois que esta
+    escala é publicada, eles já incluem esta semana e as seguintes, então é normal
+    não baterem com os daqui.</p>`;
 }
 
 /** Linha de um dia sem expediente - igual na escala e no editor. */
@@ -1478,8 +1591,9 @@ function renderFridayQueue(queue) {
     const um = esperando.length === 1;
     $('#fridayQueueWaiting').innerHTML =
       `${um ? 'Apagado acima: já tem' : 'Apagados acima: já têm'} mais escalas que o resto `
-      + `do grupo, então ${um ? 'fica' : 'ficam'} de fora da semana — e, por isso, fora da `
-      + `sexta. ${um ? 'Volta' : 'Voltam'} assim que os contadores se emparelharem.`;
+      + `do grupo, então ${um ? 'deve ficar' : 'devem ficar'} de fora da semana — e, por `
+      + `isso, fora da sexta. ${um ? 'Volta' : 'Voltam'} assim que os contadores se `
+      + 'emparelharem. É uma estimativa com a semana cheia: a conta final sai na geração.';
   }
 }
 

@@ -18,6 +18,13 @@
 // ou fica de fora da semana. No grafo isso e uma aresta so, em vez de quatro,
 // e as duas metades da regra caem sozinhas dessa restricao.
 //
+// Na sexta, que e decidida antes do resto, a restricao precisa ser dita com
+// todas as letras: se o contador poe a pessoa na semana, a sexta que ela
+// escolheu e o unico dia dela, entao ela vem antes da fila das sextas
+// (priorityOnFriday). Senao a fila daria a sexta a quem podia ficar em outro
+// dia, e ela ficaria de fora com menos escalas do que quem entrou - ou, numa
+// semana com pouca gente, alguem dobraria com ela disponivel.
+//
 // E ACIMA DE TUDO ISSO, DUAS REGRAS: toda vaga e preenchida, e ninguem faz
 // duas escalas na mesma semana. Quando as duas nao cabem juntas - menos gente
 // do que vagas -, a primeira vence: alguem dobra, o MINIMO de gente possivel,
@@ -203,7 +210,8 @@ export function solveWeek(participants, capacity) {
 
   const disputantes = people.filter((p) => !fixed.taken.has(p.id));
   const vagasDaSemana = DAYS.reduce((sum, d) => sum + (left[d] || 0), 0);
-  const friday = pickFriday(disputantes, left[FRIDAY] ?? 0, vagasDaSemana);
+  const prioNaSexta = priorityOnFriday(people, capacity, left[FRIDAY] ?? 0);
+  const friday = pickFriday(disputantes, left[FRIDAY] ?? 0, vagasDaSemana, prioNaSexta);
 
   // Quem ja tem vaga - por dia fixo ou pela sexta - so volta a fase 2 se for o
   // unico jeito de preencher uma vaga. A fase precisa saber quem e quem: quem
@@ -309,7 +317,28 @@ function placeFixed(people, capacity) {
 
 /* ------------------------------------------------------------------ fase 1 */
 
-function pickFriday(people, slots, weekSlots) {
+/**
+ * Quem tem prioridade, escolheu a sexta e trabalha nesta semana pelo contador.
+ * "Quem trabalha" e perguntado a propria montagem, com a prioridade dessas
+ * pessoas desligada so para esta pergunta - como se aceitassem qualquer dia.
+ * Quem entra assim leva a sexta antes da fila, porque ela e o unico dia dessa
+ * pessoa; com mais gente assim do que vagas, entra quem tem menos escalas.
+ */
+function priorityOnFriday(people, capacity, slots) {
+  const pedem = people.filter((p) => p.priority && priorityDay(p) === FRIDAY
+    && allowsDay(p, FRIDAY));
+  if (!pedem.length || !slots) return [];
+  // Com a flag desligada nao ha recursao: ninguem mais pede sexta com prioridade.
+  const soltos = people.map((p) => (pedem.includes(p) ? { ...p, priority: false } : p));
+  const trabalham = new Set(solveWeek(soltos, capacity).assignments.map((a) => a.personId));
+  return pedem
+    .filter((p) => trabalham.has(p.id))
+    .sort((a, b) => (a.totalCount ?? 0) - (b.totalCount ?? 0)
+      || (a.fridayCount ?? 0) - (b.fridayCount ?? 0) || a.id - b.id)
+    .slice(0, slots);
+}
+
+function pickFriday(people, slots, weekSlots, primeiros = []) {
   // Quem tem dia fixo so entra na sexta se se voluntariar: a vaga dele ja esta
   // reservada em outro dia, e o contador de sextas dele nao anda - deixa-lo na
   // fila o poria em primeiro em toda semana em que o dia fixo cai em feriado.
@@ -325,8 +354,12 @@ function pickFriday(people, slots, weekSlots) {
   // corte so e chamado se nao sobrar mais ninguem - deixar a vaga vazia por
   // causa do contador seria pior do que escalar alguem.
   const cut = cutoff(people, weekSlots);
-  const queue = candidates.slice()
-    .sort((a, b) => outOfCut(a, cut) - outOfCut(b, cut) || byQueue(a, b));
+  const antes = new Set(primeiros.map((p) => p.id));
+  const queue = [
+    ...primeiros,
+    ...candidates.filter((p) => !antes.has(p.id))
+      .sort((a, b) => outOfCut(a, cut) - outOfCut(b, cut) || byQueue(a, b)),
+  ];
 
   const ordered = queue.map((person) => ({
     person,

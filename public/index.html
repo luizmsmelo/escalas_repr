@@ -197,8 +197,9 @@
           Fila da sexta
           <span class="card-sub">quem tem menos sextas leva a próxima</span>
         </h2>
-        <p class="hint hint-muted">Quem já tem mais escalas que o resto fica de fora da semana
-          — e, por isso, fora da sexta. Entre os demais, leva quem tem menos sextas; quem se
+        <p class="hint hint-muted">Quem já tem mais escalas que o resto deve ficar de fora da
+          semana — e, por isso, fora da sexta (é uma estimativa com a semana cheia; a conta
+          final sai na geração). Entre os demais, leva quem tem menos sextas; quem se
           voluntaria, colocando sexta no próprio top 3, passa na frente só em caso de empate.</p>
         <ol id="fridayQueue" class="queue"></ol>
         <p class="hint hint-muted" id="fridayQueueWaiting" hidden></p>
@@ -277,7 +278,8 @@
         <p class="hint">
           <strong>Quem trabalha na semana: quem tem menos escalas.</strong> Há mais gente do
           que vagas, então alguém fica de fora toda semana. Quem decide isso é o contador de
-          escalas já publicadas &mdash; nunca a preferência. Quem fica de fora não gasta
+          escalas já publicadas &mdash; a fila da sexta e a preferência só desempatam quem
+          chegou com o mesmo número. Quem fica de fora não gasta
           escala e entra na frente na semana seguinte, e assim todo mundo segue no mesmo
           ritmo.
         </p>
@@ -286,21 +288,25 @@
           &ldquo;Meu dia fixo&rdquo;, fica sempre nesse dia: a vaga é reservada antes de
           qualquer disputa, e não é preciso responder toda semana. Cada dia comporta poucas
           pessoas fixas &mdash; quem pede primeiro fica com a vaga. É a única coisa que passa
-          na frente do contador. Se o dia fixo cair num feriado, a pessoa escolhe como todo
-          mundo naquela semana.
+          na frente do contador. Se o dia fixo cair num feriado ou nas férias da pessoa, ela
+          escolhe como todo mundo naquela semana &mdash; mas continua fora da fila da sexta:
+          só pega sexta se a colocar entre as opções.
         </p>
         <p class="hint">
           <strong>Prioridade: um dia só, e é nele ou em nenhum.</strong> Quem tem a estrela,
           dada pelo administrador, escolhe <strong>um</strong> dia a cada semana e disputa a
           vaga pelo mesmo contador de todo mundo. Se o dia pedido encher, entra quem tem menos
           escalas; a pessoa não é remanejada para outro dia e entra na frente na semana
-          seguinte.
+          seguinte. Se o dia escolhido é a sexta e o contador já põe a pessoa na semana,
+          ela vem antes da fila das sextas &mdash; é o único dia dela.
         </p>
         <p class="hint">
           <strong>A sexta tem fila própria.</strong> Entre quem trabalha na semana, leva a
           sexta quem tem <strong>menos sextas</strong> acumuladas. Colocar sexta entre as
           opções só passa alguém na frente em caso de empate, e &ldquo;Não posso esta
-          sexta&rdquo; tira a pessoa da conta daquela semana.
+          sexta&rdquo; tira a pessoa da conta daquela semana. Quem tem dia fixo só entra na
+          fila se pedir sexta. Ninguém dobra para cobrir a sexta: se ninguém da fila puder,
+          ela fica em aberto.
         </p>
         <p class="hint">
           <strong>De segunda a quinta, a preferência escolhe o dia.</strong> Definido quem

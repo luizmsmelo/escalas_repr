@@ -15,13 +15,15 @@ dia. Com mais gente do que vagas, ele decide também **quem** fica de fora naque
 semana — e aí quem entra é quem tem menos escalas acumuladas, não quem pediu o
 dia mais vazio.
 
-**Toda vaga é preenchida, e ninguém faz duas escalas na mesma semana.** Quando
-as duas não cabem juntas — menos gente do que vagas —, a primeira vence: alguém
-dobra, o mínimo de gente possível, e dobra quem tem **menos escalas acumuladas**.
-Quem já está na sexta é o último a dobrar. E ninguém dobra enquanto houver
-alguém disponível fora da semana — inclusive quem está à frente no contador:
-antes da segunda escala de qualquer pessoa vem a primeira de todo mundo. Vaga em
-aberto só existe se não houver ninguém para ela nem assim.
+**Ninguém faz duas escalas na mesma semana, e de segunda a quinta toda vaga é
+preenchida.** Quando as duas não cabem juntas — menos gente do que vagas —, a vaga
+vence: alguém dobra, o mínimo de gente possível, e dobra quem tem **menos escalas
+acumuladas**. Quem já está na sexta é o último a dobrar. E ninguém dobra enquanto
+houver alguém disponível fora da semana — inclusive quem está à frente no
+contador: antes da segunda escala de qualquer pessoa vem a primeira de todo mundo.
+Vaga de segunda a quinta só fica em aberto se não houver ninguém para ela nem
+assim. A sexta é diferente: ninguém dobra para cobri-la, e ela fica em aberto
+quando ninguém da fila pode ficar com ela.
 
 ---
 
@@ -96,14 +98,15 @@ quinta, no máximo duas pessoas por dia; com 1 vaga na sexta, uma pessoa. O app
 recusa o pedido que estouraria a conta, em vez de deixar o problema aparecer só na
 hora de gerar a escala — na prática, quem pede primeiro fica com a vaga.
 
-Duas situações devolvem a pessoa ao fluxo normal **naquela semana**:
+Três situações devolvem a pessoa ao fluxo normal **naquela semana**:
 
 | situação | o que acontece |
 | --- | --- |
 | o dia fixo cai num feriado | a pessoa escolhe 3 dias, como todo mundo |
+| o dia fixo cai nas férias da pessoa | ela escolhe entre os dias fora das férias |
 | há mais gente fixa no dia do que vagas | quem cadastrou depois volta a disputar |
 
-Nos dois casos ela **continua fora da fila da sexta**: só pega sexta se se
+Nos três casos ela **continua fora da fila da sexta**: só pega sexta se se
 voluntariar, colocando sexta no próprio top 3. Senão, ser fixo na segunda viraria
 uma garantia de pegar toda sexta em que a segunda fosse feriado.
 
@@ -117,8 +120,10 @@ ao lado do nome, que só o administrador dá ou tira, em Ajustes). Quem tem a fl
 - **só pode ser escalado nesse dia.** Não é remanejado para outro: ou fica no
   dia que pediu, ou fica de fora daquela semana;
 - **fica fora da fila da sexta.** A sexta só é dela se for o dia que ela
-  escolheu — nesse caso ela entra como quem pediu, não como quem a fila
-  alcançou.
+  escolheu. Nesse caso, se o contador de escalas a põe na semana, ela vem
+  **antes da fila das sextas**: a sexta é o único dia dela, e a fila daria a vaga
+  a quem pode ficar em outro dia. Com mais de uma pessoa assim, entra quem tem
+  menos escalas.
 
 **Prioridade não é exceção ao contador** — essa continua sendo só o dia fixo. A
 pessoa disputa a vaga como todo mundo, e quando o dia pedido não comporta todo
@@ -158,6 +163,14 @@ fila que qualquer pessoa confere de cabeça. Duas observações:
   alguém que disse que não podia.
 
 Para quem não pediu nem vetou, sexta é a **4ª opção automática**.
+
+**Quem tem prioridade e escolheu a sexta vem antes da fila** — desde que o
+contador de escalas já ponha a pessoa na semana. A pergunta "quem trabalha" é
+feita à própria montagem, como se ela aceitasse qualquer dia; se a resposta é
+sim, a sexta é o único dia em que ela pode ficar. Sem isso, a fila entregaria a
+sexta a quem tem menos sextas e poderia ficar em outro dia, e a pessoa com
+prioridade ficaria de fora com menos escalas do que quem entrou — ou, numa
+semana com pouca gente, alguém dobraria com ela disponível.
 
 Empates na fila são desfeitos por: menos sextas → voluntário → menos escalas no
 total → ordem de cadastro. O último critério garante que a mesma entrada sempre
@@ -300,9 +313,10 @@ explica **aquela** semana — não o método em abstrato:
 
 - as três camadas, na ordem, e por que a ordem é essa;
 - quem tinha dia fixo e se a vaga coube;
-- quantas vagas havia para quantas pessoas, quem ficou de fora e **por qual dos
-  três motivos** (acima do corte, empatado no corte, ou à frente de todo mundo
-  que entrou — são coisas diferentes e a caixa não troca uma pela outra);
+- quantas vagas havia para quantas pessoas, quem ficou de fora e **por qual
+  motivo** (acima do corte, empatado no corte, à frente de todo mundo que entrou,
+  ou prioridade num dia que encheu — são coisas diferentes e a caixa não troca uma
+  pela outra), e quem entrou mesmo acima do corte, por não haver mais ninguém;
 - a fila da sexta inteira, em ordem, com os dois contadores de cada pessoa;
 - quem ficou em cada dia de segunda a quinta e que opção aquele dia era;
 - **pessoa por pessoa**, uma frase com o número que decidiu o caso dela — quem
@@ -519,9 +533,12 @@ administrador abre ou fecha um dia.
 ## Meta do mês
 
 ```
-vagas do mês    = dias com expediente (seg–qui) × 2  +  sextas com expediente × 1
+vagas do mês    = dias com expediente (seg–qui) × vagas de seg–qui  +  sextas com expediente × vagas de sexta
 meta por pessoa = vagas do mês ÷ nº de pessoas ativas
 ```
+
+As vagas por dia são as cadastradas na primeira semana do mês — 2 de segunda a
+quinta e 1 na sexta, se ninguém mudou.
 
 Os dias com expediente não são um número digitado: saem do calendário da aba
 Ajustes. Quando o administrador fecha ou abre um dia lá, a meta é recalculada na hora, e a conta inteira
