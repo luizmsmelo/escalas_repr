@@ -157,12 +157,13 @@
         <button class="weeknav-arrow" data-week-step="1" type="button" aria-label="Próxima semana">›</button>
       </nav>
 
+      <div id="schedPreview" class="preview" hidden></div>
       <div id="schedNotice" class="notice" hidden></div>
       <div id="schedule" class="schedule"></div>
       <div id="schedSummary" class="summary" hidden></div>
 
       <details id="whyBox" class="why" hidden>
-        <summary class="why-summary">Como essa escala foi gerada?</summary>
+        <summary class="why-summary">Como essa escala foi montada?</summary>
         <div id="whyBody" class="why-body"></div>
       </details>
 
@@ -176,9 +177,9 @@
       </details>
 
       <div id="schedActions" class="actions">
-        <button id="generateBtn" class="btn btn-primary btn-block" type="button">Gerar escala</button>
-        <button id="editBtn" class="btn btn-ghost btn-block" type="button">Editar escala</button>
+        <button id="editBtn" class="btn btn-primary btn-block" type="button">Editar escala</button>
         <button id="publishBtn" class="btn btn-ghost btn-block" type="button">Publicar escala</button>
+        <button id="discardBtn" class="btn btn-ghost btn-block" type="button">Descartar ajustes</button>
       </div>
 
       <div id="editActions" class="actions" hidden>
@@ -273,8 +274,13 @@
           <strong>O prazo é domingo, 23h59.</strong> Até lá, cada pessoa escolhe seus dias na
           aba Escolher &mdash; e pode mudar quantas vezes quiser. Na segunda-feira a escala da
           semana é montada com as respostas salvas e <strong>publicada automaticamente</strong>;
-          a partir daí as escolhas travam. O que aparece antes disso na aba Escala é só uma
-          prévia (rascunho), que não conta nos contadores.
+          a partir daí as escolhas travam. Ninguém precisa apertar botão nenhum.
+        </p>
+        <p class="hint">
+          <strong>Antes do prazo, a aba Escala mostra uma prévia.</strong> Ela é calculada no
+          instante em que você abre a tela, com as respostas que existirem naquele momento
+          &mdash; e por isso muda a cada nova resposta, até o prazo fechar. Prévia não conta
+          nos contadores: só a escala publicada conta.
         </p>
         <p class="hint">
           <strong>Quem trabalha na semana: quem tem menos escalas.</strong> Há mais gente do

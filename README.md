@@ -8,6 +8,11 @@ dia escolhe um **dia fixo** e sai da escolha semanal. O que mexe no sistema
 inteiro — pessoas, vagas, calendário, editar e publicar escala — fica com o
 **administrador**, que tem senha.
 
+**Ninguém aperta botão para a escala existir.** Antes do prazo, a aba Escala
+mostra uma **prévia**, calculada no instante em que a tela é aberta, com as
+respostas daquele momento — e por isso ela nunca está desatualizada. Na
+segunda-feira 00h essa mesma conta é congelada e publicada.
+
 **Vagas por semana:** 2 pessoas de segunda a quinta, 1 pessoa na sexta — 9 vagas.
 Hoje são 19 pessoas para essas 9 vagas.
 Com 9 pessoas, cada um fica exatamente um dia por semana e o app só decide *qual*
@@ -96,7 +101,7 @@ Quem tem dia fixo:
 Só cabe fixar tanta gente num dia quanto há vaga nele: com 2 vagas de segunda a
 quinta, no máximo duas pessoas por dia; com 1 vaga na sexta, uma pessoa. O app
 recusa o pedido que estouraria a conta, em vez de deixar o problema aparecer só na
-hora de gerar a escala — na prática, quem pede primeiro fica com a vaga.
+hora de montar a escala — na prática, quem pede primeiro fica com a vaga.
 
 Três situações devolvem a pessoa ao fluxo normal **naquela semana**:
 
@@ -269,7 +274,7 @@ que, nas mãos erradas, quebrariam o sistema pedem a **senha de administrador**:
 | --- | --- |
 | escolher dias, marcar ausência, cadastrar férias | cadastrar, renomear, desativar e remover pessoas |
 | escolher o **próprio dia fixo** (aba Escolher) | dar ou tirar prioridade (estrela) |
-| gerar escala (rascunho) — a publicação é automática, na segunda | editar, publicar e reabrir escala |
+| ver a prévia da semana (montada sozinha) | editar, publicar e reabrir escala |
 | ver escalas, contadores e calendário | vagas da semana, calendário e zerar contadores |
 
 - A senha fica **só no servidor**, como *Secret* `ADMIN_PASSWORD` no Cloudflare
@@ -306,9 +311,9 @@ escala.
 
 ---
 
-## "Como essa escala foi gerada?"
+## "Como essa escala foi montada?"
 
-Embaixo de toda escala gerada há uma caixa recolhida com esse título. Aberta, ela
+Embaixo de toda escala há uma caixa recolhida com esse título. Aberta, ela
 explica **aquela** semana — não o método em abstrato:
 
 - as três camadas, na ordem, e por que a ordem é essa;
@@ -325,12 +330,15 @@ explica **aquela** semana — não o método em abstrato:
 - **pessoa por pessoa**, uma frase com o número que decidiu o caso dela — quem
   ficou na 2ª opção vê quem levou a 1ª e com que contador.
 
-Os números vêm de um registro gravado **junto com a semana**, no momento da
-geração. Não é a conta refeita na hora de exibir: refazê-la daria outro resultado
-assim que qualquer outra semana fosse gerada, e a tela passaria a explicar a
-escala de março com os contadores de junho.
+Enquanto a semana é **prévia**, a explicação é refeita junto com ela: as duas
+contam o mesmo instante, e a caixa diz *"Calculada agora, às 14h32"*. Quando a
+semana vira fato — publicada, ou ajustada à mão —, a explicação é **gravada junto
+com a semana** e para de mudar. Ela passa a ser o registro de como *aquela* escala
+ficou assim, com os contadores como estavam na hora; refeita depois, daria outro
+resultado assim que qualquer outra semana fosse publicada, e a tela passaria a
+explicar a escala de março com os contadores de junho.
 
-Se a escala foi **editada à mão** depois de gerada, a caixa diz isso no topo,
+Se a escala foi **editada à mão**, a caixa diz isso no topo,
 lista o que mudou e continua explicando o que o *app* montou — o ajuste aparece
 marcado na pessoa afetada. Misturar as duas coisas faria o app dizer que o
 contador tirou alguém que, na verdade, uma pessoa tirou.
@@ -358,15 +366,23 @@ O que a edição faz e o que ela não faz:
   exatamente o que se quer —, mas nenhum dos dois passa despercebido.
 
 O que ela recusa: dia sem expediente, pessoa inativa e a mesma pessoa duas vezes
-no mesmo dia. Semana publicada fica travada, como fica para preferência e geração:
-o administrador reabre antes de editar, e a semana reaberta **não volta a ser
-publicada sozinha** até ele publicar de novo. Semana sem escala gerada não se
-monta do zero à mão — o caminho é gerar.
+no mesmo dia. Semana sem escala não se monta do zero à mão — a edição ajusta o
+que o app montou.
 
-**Gerar escala de novo descarta os ajustes**, porque remonta a semana inteira
-pelas preferências. O app pergunta antes de fazer isso. Já a publicação automática
-de segunda **respeita** o ajuste feito depois da última geração: a escala é
-publicada como está.
+**Semana publicada também se edita, sem reabrir.** É justamente quando o ajuste
+faz falta: na terça o escalado não vem, troca com um colega, e a escala da semana
+em curso precisa passar a dizer quem de fato ficou. Reabrir para isso tiraria do
+ar a escala que todo mundo está seguindo e a faria sumir dos contadores no meio do
+caminho, para devolvê-la minutos depois. Reabrir continua existindo para o outro
+caso: a semana que não deveria valer. Semana reaberta **não volta a ser publicada
+sozinha** até o administrador publicar de novo.
+
+**Ajustar congela a semana.** A escala ajustada é guardada como está e deixa de
+acompanhar as respostas que continuarem chegando — na segunda-feira ela é
+publicada assim. É o que se quer quando o ajuste veio de um acordo do grupo, e o
+caminho de volta é **Descartar ajustes**: a semana volta a ser prévia, montada de
+novo a cada leitura. Semana já publicada não volta a ser prévia — ela aconteceu, e
+os contadores de todo mundo já contam com ela.
 
 ---
 
@@ -415,43 +431,65 @@ onde todos deveriam estar.
 
 ### Só conta escala publicada
 
-Gerar uma escala cria um **rascunho**: ele pode ser gerado de novo e editado à
-vontade, e **não mexe em contador nenhum**. A escala só passa a contar — nos
-gráficos, na fila da sexta, nas médias e na geração das semanas seguintes — depois
-de **publicada**. Semana que aconteceu e ficou sem publicar pode ser publicada
-depois, para entrar na conta.
+A **prévia** não conta em lugar nenhum: ela é calculada para ser mostrada e
+jogada fora em seguida, e não mexe em contador de ninguém. A escala só passa a
+contar — nos gráficos, na fila da sexta, nas médias e na montagem das semanas
+seguintes — depois de **publicada**.
 
-Para o rascunho não virar bagunça, há uma janela:
+Uma semana está sempre em um de dois estados, e o que os separa é uma coisa só:
+ter ou não escala **gravada**.
+
+| estado | o que é | o que acontece a cada leitura |
+| --- | --- | --- |
+| **prévia** | nada gravado | é montada de novo, com as respostas e os contadores daquele instante |
+| **fato** | escala gravada | é lida como está — foi publicada, ou o administrador a ajustou à mão |
+
+Montar a mesma semana duas vezes com a mesma entrada dá o mesmo resultado: é isso
+que torna a prévia barata e segura. O que muda de uma leitura para a outra nunca é
+a conta — são as respostas que chegaram nesse meio-tempo.
+
+A janela em que cada coisa vale:
 
 | ação | vale para |
 | --- | --- |
-| gerar escala | só a semana **atual** e a **próxima** |
+| prévia | só a semana **atual** e a **próxima** |
 | publicar | automática na segunda-feira; o administrador publica qualquer semana até a **próxima** |
-| editar à mão | só o administrador, em semana não publicada que já tenha escala gerada — não há como montar uma escala do zero à mão |
+| editar à mão | só o administrador, em semana que já tenha escala na tela — publicada ou não |
+| descartar ajustes | só o administrador, em semana **não publicada** dentro da janela da prévia |
 
-Semana adiantada ainda não tem preferências, e gerar é livre para qualquer pessoa:
-sem a janela, um clique à toa em "Gerar escala" enchia o histórico de escalas que
-ninguém ia cumprir. Semana que já passou não é gerada de novo, porque ela é o registro do que
-aconteceu — para corrigir, existe a edição à mão.
+Semana adiantada ainda não tem preferência nenhuma: a prévia sairia só da fila e
+não diria nada a ninguém. Semana que já passou é o registro do que aconteceu — se
+ficou sem escala, é porque não houve escala, e montar uma agora, com os contadores
+de hoje, seria inventar passado. Nos dois casos a aba Escala simplesmente mostra a
+semana vazia; não há erro a resolver.
 
-**Publicação automática.** A escala da semana é publicada sozinha a partir de
-**segunda-feira 00h00** (horário de Brasília), no primeiro acesso ao app — não há
-agendador, e não precisa: basta alguém abrir o app.
+**Publicação automática.** A escala da semana é publicada pelo próprio app a
+partir de **segunda-feira 00h00** (horário de Brasília), no primeiro acesso — não
+há agendador, e não precisa: só importa que ela esteja publicada para quem abre o
+app.
 
 - O **prazo** das preferências é **domingo 23h59**. Na segunda a semana é
-  publicada e as preferências travam; a aba Escolher avisa o prazo.
-- Na hora de publicar, a semana é **montada de novo**, com as respostas como ficaram
-  no prazo e os contadores como estão. Rascunho é só prévia — um rascunho gerado
-  dias antes, com outros contadores, não vira a escala oficial.
-- **Exceção:** rascunho ajustado à mão pelo administrador é publicado como está.
-- Semana **reaberta pelo administrador** fica fora da publicação automática até ele
-  publicar de novo.
-- No registro, aparece como "Gerada automaticamente" e "Publicada automaticamente".
+  publicada e as preferências travam. As duas telas mostram um **contador
+  regressivo** até lá, para ninguém ler a prévia como se já fosse a escala.
+- Semana **sem escala gravada**: a prévia é montada na hora — com as respostas
+  como ficaram no prazo e os contadores como estão — e gravada. É a mesma conta
+  que a tela vinha mostrando a semana inteira; ali ela deixa de ser prévia e vira
+  fato.
+- Semana **com escala gravada**: veio de um ajuste do administrador, e é publicada
+  exatamente como está.
+- Semana **reaberta pelo administrador** fica de fora até ele publicar de novo.
+- **A semana anterior também é fechada**, se tiver ficado sem publicar. Numa
+  semana de recesso, feriadão ou férias coletivas pode não haver ninguém para
+  abrir o app — e escala que ficou sem publicar não conta para ninguém, o que
+  desloca os contadores de todo mundo dali para a frente. A anterior é fechada
+  primeiro: publicada, ela entra nos contadores que decidem a semana atual.
 
-**Quem mexeu.** Cada escala guarda quem a gerou, editou, publicou ou reabriu, com
-data, hora e o tipo de aparelho — visível só no modo admin, na aba Escala, em "Quem mexeu nesta
-escala?". Como não há senha, o nome é o que a pessoa escolheu no app; o aparelho
-ajuda a tirar a dúvida.
+**Quem mexeu.** O registro guarda **só o que alguém fez**: editar, publicar à mão,
+reabrir e descartar ajustes, com data, hora e o tipo de aparelho — visível só no
+modo admin, na aba Escala, em "Quem mexeu nesta escala?". Montar a escala e
+publicar na segunda-feira são tarefas do app, acontecem toda semana e não entram
+na lista: anotadas, afogariam a exceção, que é o que se quer ver ali. Como não há
+senha, o nome é o que a pessoa escolheu no app; o aparelho ajuda a tirar a dúvida.
 
 ### Quem entra depois
 
@@ -462,7 +500,7 @@ pessoa toda semana — e a fila da sexta lhe daria as sextas seguidas — até e
 alcançar o grupo, e ela não tem culpa de ter entrado depois.
 
 - O ponto de partida **fica gravado** e não muda depois. Recalcular a média a cada
-  consulta faria ele andar sozinho a cada semana gerada.
+  consulta faria ele andar sozinho a cada semana publicada.
 - Ele entra nos contadores como qualquer escala: no corte da semana, na fila da
   sexta, nas médias e nos gráficos. A aba Contadores mostra "começou com N".
 - **Zerar os contadores** descarta o ponto de partida de quem foi cadastrado antes
@@ -496,7 +534,7 @@ crédito de escalas += escalas da semana ÷ pessoas disponíveis na semana
 crédito de sextas  += sextas da semana  ÷ pessoas disponíveis na semana
 ```
 
-"Pessoas disponíveis" é o número gravado na geração — quem de fato disputou, sem
+"Pessoas disponíveis" é o número gravado com a escala — quem de fato disputou, sem
 contar quem estava de férias ou ausente. Somando essa média, o contador da pessoa
 anda o mesmo que o do grupo andou em média, e ela volta no mesmo ponto.
 
@@ -510,8 +548,7 @@ anda o mesmo que o do grupo andou em média, e ela volta no mesmo ponto.
   põe na frente na semana seguinte — o mesmo rodízio de sempre.
 - O crédito **não fica gravado**: sai das escalas como estão agora. Editar uma
   semana, apagar as férias ou zerar os contadores muda o crédito junto.
-- Semana publicada trava as férias que caem nela, como trava preferência e
-  geração.
+- Semana publicada trava as férias que caem nela, como trava a preferência.
 
 **Ausência avulsa não recebe crédito.** "Não vou participar desta semana" continua
 só tirando a pessoa da semana. Se rendesse a média, faltar sairia de graça.

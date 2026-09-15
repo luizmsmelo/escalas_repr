@@ -34,9 +34,16 @@ const call = async (method, path, body, hoje = body?.monday, { admin = true } = 
 };
 passeAdmin = (await call('POST', 'admin/login', { password: SENHA_ADMIN })).json.token;
 
-// So escala publicada conta nos contadores.
+// Nao ha rota de gerar: a previa da semana sai pronta na leitura do estado,
+// montada na hora com o que houver de resposta naquele instante.
+const previa = (monday, hoje = monday, opts = {}) =>
+  call('GET', `state?week=${monday}`, undefined, hoje, opts);
+
+// So escala publicada conta nos contadores. Semana que ja tem escala gravada
+// volta antes a ser previa: e o equivalente do antigo "gerar de novo".
 const gerarEPublicar = async (monday) => {
-  const g = await call('POST', 'generate', { monday });
+  await call('DELETE', `assignments?monday=${monday}`, undefined, monday);
+  const g = await previa(monday);
   await call('POST', 'publish', { monday, published: true });
   return g;
 };
@@ -80,7 +87,7 @@ st = (await call('GET', `state?week=${WEEK}`)).json;
 ok(st.stats.fridayQueue.length === 9, 'fila com as 9 pessoas');
 ok(st.stats.fridayQueue.every((q) => q.fridays === 0), 'todos comecam em 0');
 
-let gen = (await call('POST', 'generate', { monday: WEEK })).json;
+let gen = (await previa(WEEK)).json;
 ok(gen.assignments.length === 9, `9 vagas (${gen.assignments.length})`);
 ok(sexta(gen).personId !== ids['Luiz Melo'], 'quem vetou nao pegou a sexta');
 ok(gen.generation.friday.vetoed.includes('Luiz Melo'), 'veto reportado');
@@ -95,7 +102,7 @@ for (const [i, n] of NOMES.entries()) {
 // Hugo se voluntaria colocando sexta como 1a opcao.
 await call('POST', 'preferences',
   { monday: SEM_VOL, personId: ids['Hugo Dias'], choices: [5,1,2] });
-const gv = (await call('POST', 'generate', { monday: SEM_VOL })).json;
+const gv = (await previa(SEM_VOL)).json;
 ok(sexta(gv).personId === ids['Hugo Dias'], `voluntario levou (${sexta(gv).name})`);
 ok(sexta(gv).via === 'voluntario', 'marcado como voluntario');
 ok(sexta(gv).rank === 1, 'mantem a 1a opcao que ele pediu');
@@ -106,7 +113,7 @@ for (const [i, n] of NOMES.entries()) {
   await call('POST', 'preferences',
     { monday: SEM_VETO, personId: ids[n], choices: TOP3[i], noFriday: true });
 }
-const gvet = (await call('POST', 'generate', { monday: SEM_VETO })).json;
+const gvet = (await previa(SEM_VETO)).json;
 ok(sexta(gvet) === undefined, 'ninguem escalado na sexta');
 ok(gvet.generation.friday.allVetoed === true, 'app sinaliza que todos recusaram');
 ok(gvet.generation.unfilledSlots.includes(5), 'sexta listada como vaga aberta');
@@ -184,8 +191,8 @@ ok((await call('POST', 'counter', { id: 1, fridayOffset: 5 })).status === 404,
    'edicao manual do contador por pessoa foi removida');
 
 console.log('\n=== edicao manual da escala ===');
-const stM = (await call('GET', `state?week=${WEEK}`)).json;
-ok(stM.assignments.length > 0, 'semana de 02/03 tem escala gerada');
+const stM = (await previa(WEEK)).json;
+ok(stM.assignments.length > 0, 'semana de 02/03 vem com a previa montada');
 
 // Tira uma pessoa do dia dela e coloca na quarta, deixando o resto como esta.
 const alvo = stM.assignments.find((a) => a.day !== 3);
@@ -245,13 +252,18 @@ ok(limpa.status === 200 && limpa.json.assignments.length === 0, 'lista vazia lim
 const marLimpo = (await call('GET', 'stats?month=2026-03')).json.stats.totals.assigned;
 ok(marLimpo < marCheio, `os totais do mes acompanham (${marCheio} -> ${marLimpo})`);
 ok((await call('POST', 'publish', { monday: WEEK, published: true })).status === 400,
-   'semana sem escala nao pode ser publicada');
+   'semana esvaziada de proposito nao tem o que publicar');
+// E ela continua vazia: escala gravada e fato, e fato nao se remonta sozinho.
+ok((await previa(WEEK)).json.assignments.length === 0,
+   'semana esvaziada nao volta a se montar na leitura seguinte');
 
-// Gerar de novo remonta tudo pelas preferencias e descarta os ajustes.
-const regerada = await call('POST', 'generate', { monday: WEEK });
-ok(regerada.status === 200, 'gerar de novo remonta a semana');
-ok(regerada.json.assignments.every((a) => a.via !== 'manual'),
-   'gerar de novo descarta os ajustes manuais');
+// Descartar os ajustes devolve a semana a previa, montada de novo a cada leitura.
+const voltou = await call('DELETE', `assignments?monday=${WEEK}`, undefined, WEEK);
+ok(voltou.status === 200 && voltou.json.assignments.length === 9,
+   `descartar os ajustes devolve a previa (${voltou.json.assignments.length} vagas)`);
+ok(voltou.json.assignments.every((a) => a.via !== 'manual'),
+   'sem nenhum resto do ajuste manual');
+ok(voltou.json.preview != null, 'e a semana volta a ser previa');
 
 console.log('\n=== publicacao e cascata ===');
 
@@ -259,9 +271,19 @@ await call('POST', 'publish', { monday: WEEK, published: true });
 ok((await call('POST', 'preferences',
    { monday: WEEK, personId: ids['Ana Souza'], choices: [5,4,3] })).status === 409,
    'semana publicada trava preferencias');
-ok((await call('POST', 'generate', { monday: WEEK })).status === 409, 'e trava a geracao');
-ok((await call('POST', 'assignments', { monday: WEEK, slots: [] })).status === 409,
-   'e trava a edicao manual');
+ok((await previa(WEEK)).json.preview === null, 'e nao e mais previa');
+
+// Semana publicada se edita SEM reabrir: na terca o escalado nao vem, troca
+// com um colega, e a escala precisa passar a dizer quem de fato ficou.
+const publicada = (await previa(WEEK)).json;
+const slotsPub = publicada.assignments.map((a) => ({ day: a.day, personId: a.personId }));
+const faltou = await call('POST', 'assignments', { monday: WEEK, slots: slotsPub.slice(1) });
+ok(faltou.status === 200 && faltou.json.assignments.length === slotsPub.length - 1,
+   `semana publicada aceita ajuste (${faltou.json.assignments.length} vagas)`);
+ok(faltou.json.week.published === true, 'e continua publicada, sem sair do ar');
+ok(faltou.json.log[0].action === 'editar', 'com o ajuste registrado');
+// Devolve a escala inteira, para as contas de baixo nao mudarem de base.
+await call('POST', 'assignments', { monday: WEEK, slots: slotsPub });
 await call('POST', 'publish', { monday: WEEK, published: false });
 
 // Quem tem historico nao e removido - remover apagaria o historico junto. Desativa.
@@ -293,7 +315,7 @@ ok(sexP.holiday?.name === 'Paixão de Cristo', `feriado identificado: ${sexP.hol
 const quiP = stP.week.dates.find((d) => d.day === 4);
 ok(quiP.works === false, 'quinta 02/04 é ponto facultativo (véspera)');
 
-const gP = (await call('POST', 'generate', { monday: PASCOA })).json;
+const gP = (await previa(PASCOA)).json;
 ok(!gP.assignments.some((a) => a.day === 5), 'ninguém escalado na sexta feriado');
 ok(!gP.assignments.some((a) => a.day === 4), 'ninguém escalado na quinta facultativa');
 ok(gP.assignments.length === 6, `só as 6 vagas de seg/ter/qua (${gP.assignments.length})`);
@@ -303,15 +325,16 @@ console.log(`  semana de 30/03: ${gP.assignments.length} vagas; fechados: ` +
 
 // A fila da sexta não anda numa semana sem sexta.
 const filaAntes = JSON.stringify((await call('GET', 'stats?month=2026-03')).json.stats.fridayQueue);
-await call('POST', 'generate', { monday: PASCOA });
+await previa(PASCOA);
 const filaDepois = JSON.stringify((await call('GET', 'stats?month=2026-03')).json.stats.fridayQueue);
 ok(filaAntes === filaDepois, 'fila da sexta não anda quando a sexta é feriado');
 
 // Semana inteira sem expediente: recesso de 21 a 25 de dezembro.
 const RECESSO = '2026-12-21';
-const gR = await call('POST', 'generate', { monday: RECESSO });
-ok(gR.status === 400, `semana toda fechada é recusada com aviso (status ${gR.status})`);
-console.log(`  semana de 21/12: ${gR.json.error}`);
+const gR = await previa(RECESSO);
+ok(gR.status === 200 && gR.json.assignments.length === 0 && gR.json.generation === null,
+   `semana toda fechada nao tem escala nenhuma (${gR.json.assignments.length} vagas)`);
+ok(gR.json.week.dates.every((d) => !d.works), 'e todos os dias vem marcados sem expediente');
 
 // Meta do mês já nasce descontando feriados.
 const dez = (await call('GET', 'stats?month=2026-12')).json.stats;
@@ -371,7 +394,7 @@ for (const [i, n] of NOMES.entries()) {
   if (!ids[n]) continue;
   await call('POST', 'preferences', { monday: '2026-03-09', personId: ids[n], choices: TOP3[i] });
 }
-const gC = (await call('POST', 'generate', { monday: '2026-03-09' })).json;
+const gC = (await previa('2026-03-09')).json;
 ok(!gC.assignments.some((a) => a.day === 2), 'ninguém escalado na terça 10/03');
 ok(gC.generation.closedDays.some((d) => d.date === '2026-03-10'), 'dia reportado como fechado');
 
@@ -427,7 +450,7 @@ for (const [i, n] of NOMES.entries()) {
   await call('POST', 'preferences', { monday: FIXA, personId: ids[n], choices: TOP3[i] });
 }
 
-const gF = (await call('POST', 'generate', { monday: FIXA })).json;
+const gF = (await previa(FIXA)).json;
 const dele = gF.assignments.filter((a) => a.personId === ids['Luiz Melo']);
 ok(dele.length === 1 && dele[0].day === 3, `Luiz so na quarta (dias: ${dele.map((a) => a.day)})`);
 ok(dele[0].via === 'fixo', `marcado como dia fixo (via=${dele[0].via})`);
@@ -454,7 +477,7 @@ for (const n of NOMES) {
   await call('POST', 'preferences', { monday: FECHADA, personId: ids[n], choices: [1, 2, 4] });
 }
 
-const gFe = (await call('POST', 'generate', { monday: FECHADA })).json;
+const gFe = (await previa(FECHADA)).json;
 ok(gFe.generation.fixed.placed.length === 0, 'ninguem fixado num dia sem expediente');
 ok(gFe.generation.fixed.spill.some(
      (f) => f.personId === ids['Luiz Melo'] && f.reason === 'sem-expediente'),
@@ -474,32 +497,38 @@ const volta = (await call('GET', `state?week=${FIXA}`)).json;
 ok(volta.people.find((p) => p.id === ids['Luiz Melo']).fixedDay === null, 'sem dia fixo de novo');
 ok(volta.stats.fridayQueue.length === 8, `fila volta a ter 8 (${volta.stats.fridayQueue.length})`);
 
-console.log('\n=== a explicacao da escala fica gravada ===');
+console.log('\n=== a explicacao acompanha a escala ===');
 {
-  // A explicacao e o registro de UMA geracao, com os contadores como estavam na
-  // hora. Se fosse recalculada na hora de exibir, mudaria sozinha assim que
-  // qualquer outra semana fosse gerada - e a tela passaria a explicar a escala
-  // de marco com os contadores de junho.
-  const SEM = '2026-10-05';   // semana que nenhum outro teste gera
-  const zerada = (await call('GET', `state?week=${SEM}`)).json;
-  ok(zerada.week.explain == null,
-     `semana ainda nao gerada nao tem explicacao (${JSON.stringify(zerada.week.explain)})`);
+  // Enquanto a semana e previa, a explicacao e refeita junto com ela: as duas
+  // contam o mesmo instante. Virando fato - publicada, ou ajustada a mao -, a
+  // explicacao congela: ela passa a ser o registro de como AQUELA escala ficou
+  // assim, com os contadores como estavam na hora. Recalculada depois, daria
+  // outro resultado assim que qualquer outra semana fosse publicada, e a tela
+  // passaria a explicar a escala de marco com os contadores de junho.
+  const SEM = '2026-10-05';   // semana que nenhum outro teste usa
+  const inicial = (await previa(SEM)).json;
+  ok(inicial.preview != null, 'semana sem escala gravada vem como previa');
 
   // Quem esta ativo AGORA - o cadastro mudou ao longo do arquivo de testes.
-  const ativos = zerada.people.filter((p) => p.active);
+  const ativos = inicial.people.filter((p) => p.active);
   for (const [i, p] of ativos.entries()) {
     await call('POST', 'preferences',
       { monday: SEM, personId: p.id, choices: TOP3[i % TOP3.length] });
   }
-  const g = (await call('POST', 'generate', { monday: SEM })).json;
+  const g = (await previa(SEM)).json;
   ok(g.generation.explain?.people?.length === ativos.length,
-     `a geracao devolve a explicacao na hora (${g.generation.explain?.people?.length})`);
+     `a previa vem com a explicacao (${g.generation.explain?.people?.length})`);
+  ok(g.preview.at === g.week.explain.generatedAt,
+     'e diz a hora em que foi calculada');
 
-  const lido = (await call('GET', `state?week=${SEM}`)).json;
+  await new Promise((r) => setTimeout(r, 15));
+  const lido = (await previa(SEM)).json;
   const e = lido.week.explain;
   ok(e?.people?.length === ativos.length,
-     `e ela volta do banco depois (${e?.people?.length} de ${ativos.length} pessoas)`);
+     `cada leitura traz a sua (${e?.people?.length} de ${ativos.length} pessoas)`);
   ok(e.totalSlots === 9 && typeof e.generatedAt === 'string', 'com as vagas e a hora');
+  ok(e.generatedAt !== g.week.explain.generatedAt,
+     'refeita a cada leitura - previa nao tem como envelhecer');
 
   // O que a tela promete: para cada linha da escala ha a pessoa, o dia e como
   // ela chegou ali.
@@ -509,22 +538,34 @@ console.log('\n=== a explicacao da escala fica gravada ===');
        `${a.name} na ${a.day}: a explicacao bate com a escala`);
   }
 
-  // Gerar de novo reescreve a explicacao - nunca deixa a antiga para tras.
-  const antes = e.generatedAt;
+  // Ajustada a mao, a semana vira fato: escala e explicacao param de ser
+  // refeitas. (Sem publicar: publicada, ela mexeria nos contadores usados
+  // pelas secoes seguintes.)
+  const slots = lido.assignments.map((a) => ({ day: a.day, personId: a.personId }));
+  const fixada = await call('POST', 'assignments', { monday: SEM, slots });
+  ok(fixada.json.preview === null, 'ajustada a mao, a semana deixa de ser previa');
+  const congelada = fixada.json.week.explain.generatedAt;
   await new Promise((r) => setTimeout(r, 15));
-  await call('POST', 'generate', { monday: SEM });
-  const depois = (await call('GET', `state?week=${SEM}`)).json.week.explain;
-  ok(depois.generatedAt !== antes, 'gerar de novo reescreve a explicacao');
+  ok((await previa(SEM)).json.week.explain.generatedAt === congelada,
+     'e a explicacao para de mudar');
 
-  console.log(`  explicacao de ${SEM}: corte em ${depois.cut}, ` +
-              `${depois.people.filter((p) => !p.days.length).length} fora da semana`);
+  // Descartado o ajuste, ela volta a ser montada na leitura.
+  await new Promise((r) => setTimeout(r, 15));
+  const solta = await call('DELETE', `assignments?monday=${SEM}`, undefined, SEM);
+  ok(solta.json.preview != null && solta.json.week.explain.generatedAt !== congelada,
+     'descartado o ajuste, a semana volta a ser previa');
+
+  console.log(`  explicacao de ${SEM}: corte em ${e.cut}, ` +
+              `${e.people.filter((p) => !p.days.length).length} fora da semana`);
 }
 
 console.log('\n=== prioridade ===');
 // Junho/2026: 08, 15 e 22 sao segundas cheias.
 const PRIO = '2026-06-08';
-// Publicada no teste do rodizio; reaberta, volta a aceitar preferencia e geracao.
+// Publicada no teste do rodizio. Reaberta e com a escala descartada, ela volta
+// a ser previa - e a aceitar preferencia.
 await call('POST', 'publish', { monday: PRIO, published: false });
+await call('DELETE', `assignments?monday=${PRIO}`, undefined, PRIO);
 const COM_FLAG = ['Luiz Melo', 'Ana Souza', 'Bruno Lima'];
 
 for (const n of COM_FLAG) {
@@ -569,7 +610,7 @@ for (const [i, n] of NOMES.entries()) {
   if (COM_FLAG.includes(n) || !ids[n]) continue;
   await call('POST', 'preferences', { monday: PRIO, personId: ids[n], choices: TOP3[i] });
 }
-const gPrio = (await call('POST', 'generate', { monday: PRIO })).json;
+const gPrio = (await previa(PRIO)).json;
 const naTerca = gPrio.assignments.filter((a) => a.day === 2);
 const deFlag = naTerca.filter((a) => COM_FLAG.includes(a.name));
 ok(deFlag.length === 2, `a terca ficou com 2 dos 3 com prioridade (${deFlag.length})`);
@@ -594,7 +635,7 @@ ok(quemFicouFora.days.length === 0, 'e registra que ele nao ficou em dia nenhum'
 
 // A sexta escolhida por quem tem prioridade e o dia dela, nao a fila.
 await call('POST', 'preferences', { monday: PRIO, personId: ids['Ana Souza'], choices: [5] });
-const gSex = (await call('POST', 'generate', { monday: PRIO })).json;
+const gSex = (await previa(PRIO)).json;
 const sexPrio = gSex.assignments.find((a) => a.day === 5);
 ok(sexPrio?.name === 'Ana Souza', `quem pediu a sexta com prioridade levou (${sexPrio?.name})`);
 ok(sexPrio?.via === 'prioridade', `via=${sexPrio?.via}`);
@@ -814,42 +855,45 @@ console.log('\n=== pessoa nova comeca na media ===');
      'e quem entrou depois do zeramento continua com o dele');
 }
 
-console.log('\n=== rascunho nao conta, janela e registro ===');
+console.log('\n=== previa nao conta, janela e registro ===');
 {
   const SEM = '2026-12-07';   // semana cheia que nenhum teste acima usa
-  const ativos = (await call('GET', `state?week=${SEM}`)).json.people.filter((p) => p.active);
+  const ativos = (await previa(SEM)).json.people.filter((p) => p.active);
   const autor = ativos[0];
   const totalDoGrupo = async () =>
     (await call('GET', 'stats?month=2026-12')).json.stats.counters.grandTotal;
 
-  // Janela: gerar, so esta semana ou a proxima.
-  const cedo = await call('POST', 'generate', { monday: SEM }, '2026-11-23');
-  ok(cedo.status === 400 && /liberada a partir de 30\/11/.test(cedo.json.error),
-     `recusa gerar semana adiantada: ${cedo.json.error}`);
-  console.log(`  ${cedo.json.error}`);
-  ok((await call('POST', 'generate', { monday: SEM }, '2026-12-14')).status === 400,
-     'recusa gerar de novo semana que ja passou');
+  // Janela da previa: esta semana e a proxima. Fora dela nao ha escala nenhuma
+  // para mostrar - e nao ha erro, tambem: a semana so aparece vazia.
+  const cedo = await previa(SEM, '2026-11-23');
+  ok(cedo.status === 200 && cedo.json.preview === null && cedo.json.assignments.length === 0,
+     'semana adiantada ainda nao tem previa');
+  const tarde = await previa(SEM, '2026-12-14');
+  ok(tarde.json.preview === null && tarde.json.assignments.length === 0,
+     'e semana que passou sem escala nao ganha uma agora');
 
   const antes = await totalDoGrupo();
-  const gerada = await call('POST', 'generate', { monday: SEM, byPersonId: autor.id }, '2026-12-01');
-  ok(gerada.status === 200, `gera a proxima semana: ${JSON.stringify(gerada.json.error ?? '')}`);
-  ok(await totalDoGrupo() === antes, 'rascunho nao mexe em contador nenhum');
+  const vista = await previa(SEM, '2026-12-01');
+  ok(vista.status === 200 && vista.json.assignments.length > 0,
+     `a semana que vem ja aparece montada (${vista.json.assignments.length} vagas)`);
+  ok(await totalDoGrupo() === antes, 'e a previa nao mexe em contador nenhum');
 
-  // Publicar tambem tem janela, e e o que faz a escala contar.
+  // Publicar tem janela, e e o que faz a escala contar.
   ok((await call('POST', 'publish', { monday: SEM, published: true }, '2026-11-23')).status === 400,
      'recusa publicar semana adiantada');
   const pub = await call('POST', 'publish', { monday: SEM, published: true, byPersonId: autor.id },
     '2026-12-01');
-  ok(pub.status === 200, 'publica a proxima semana');
-  ok(await totalDoGrupo() === antes + gerada.json.assignments.length,
-     `publicada, a escala passa a contar (+${gerada.json.assignments.length})`);
+  ok(pub.status === 200, `publica a proxima semana: ${JSON.stringify(pub.json.error ?? '')}`);
+  ok(await totalDoGrupo() === antes + pub.json.assignments.length,
+     `publicada, a escala passa a contar (+${pub.json.assignments.length})`);
 
-  // Registro: quem gerou e quem publicou, do mais recente para o mais antigo.
+  // Registro: so o que alguem fez. Montar a escala e do app, acontece toda
+  // leitura e nao vai para a lista.
   let log = pub.json.log;
-  ok(log.length === 2 && log[0].action === 'publicar' && log[1].action === 'gerar',
-     `registro com gerar e publicar (${log.map((l) => l.action)})`);
-  ok(log.every((l) => l.personName === autor.name), `com o nome de quem fez (${autor.name})`);
-  ok(log.every((l) => !Number.isNaN(Date.parse(l.at))), 'e a hora');
+  ok(log.length === 1 && log[0].action === 'publicar',
+     `o registro guarda so o ato de alguem (${log.map((l) => l.action)})`);
+  ok(log[0].personName === autor.name, `com o nome de quem fez (${autor.name})`);
+  ok(!Number.isNaN(Date.parse(log[0].at)), 'e a hora');
 
   // Sem nome escolhido, a acao passa e o registro fica sem nome.
   const reaberta = await call('POST', 'publish', { monday: SEM, published: false }, '2026-12-01');
@@ -883,6 +927,7 @@ console.log('\n=== modo administrador ===');
     ['POST', 'capacity', { monday: '2026-12-07', capWeekday: 9, capFriday: 9 }],
     ['POST', 'day', { date: '2026-12-08', works: false }],
     ['POST', 'assignments', { monday: '2026-12-07', slots: [] }],
+    ['DELETE', 'assignments?monday=2026-12-07'],
     ['POST', 'publish', { monday: '2026-12-07', published: false }],
     ['GET', 'admin/backup'],
   ];
@@ -904,10 +949,9 @@ console.log('\n=== modo administrador ===');
     ok(res.status === 403, `passe ${nome} e recusado (${res.status})`);
   }
 
-  // Continua livre: gerar rascunho, cuidar das proprias escolhas e do dia fixo.
+  // Continua livre: ver a previa, cuidar das proprias escolhas e do dia fixo.
   const SEM = '2026-12-14';
-  ok((await call('POST', 'generate', { monday: SEM }, SEM, comum)).status === 200,
-     'gerar escala continua livre');
+  ok((await previa(SEM, SEM, comum)).status === 200, 'ver a escala continua livre');
   ok((await call('POST', 'preferences', { monday: SEM, personId: alguem.id, choices: [1, 2, 3] },
      SEM, comum)).status === 200, 'salvar preferencia continua livre');
   const fixo = await semAdmin('PATCH', 'people', { id: alguem.id, fixedDay: 5 });
@@ -961,46 +1005,66 @@ console.log('\n=== publicacao automatica ===');
     await call('POST', 'preferences',
       { monday: SEM, personId: p.id, choices: TOP3[i % TOP3.length] }, SEXTA, comum);
   }
-  const rascunho = await call('POST', 'generate', { monday: SEM, byPersonId: ativos[0].id },
-    SEXTA, comum);
-  ok(rascunho.status === 200 && rascunho.json.week.published === false,
-     'na sexta, gerar cria so o rascunho');
-  const geradoNaSexta = rascunho.json.week.explain.generatedAt;
+  const naSexta = await estado(SEXTA);
+  ok(naSexta.week.published === false && naSexta.preview != null,
+     'na sexta, a semana que vem e so previa');
+  const vistaNaSexta = naSexta.week.explain.generatedAt;
 
   ok((await estado(DOMINGO)).week.published === false, 'no domingo ainda nao publica');
 
   await new Promise((r) => setTimeout(r, 15));
   const segunda = await estado(SEGUNDA);
   ok(segunda.week.published === true, 'na segunda, o primeiro acesso publica a semana');
-  ok(segunda.log[0].action === 'auto-publicar' && segunda.log[1].action === 'auto-gerar',
-     `registro de gerar e publicar automaticos (${segunda.log.map((l) => l.action)})`);
-  ok(segunda.log[0].personName === null && segunda.log[0].device === null, 'sem nome nem aparelho');
-  ok(segunda.week.explain.generatedAt !== geradoNaSexta,
-     'a escala e montada de novo na hora de publicar, e nao a do rascunho');
+  ok(segunda.preview === null, 'e ela deixa de ser previa');
   ok(segunda.assignments.length > 0, 'com a escala preenchida');
+  ok(segunda.week.explain.generatedAt !== vistaNaSexta,
+     'montada na hora de publicar, com as respostas ate o prazo');
+  ok(segunda.log.length === 0,
+     `publicar de oficio nao vai para o registro (${segunda.log.map((l) => l.action)})`);
 
   ok((await call('POST', 'preferences', { monday: SEM, personId: ativos[1].id, choices: [1, 2, 3] },
      SEGUNDA, comum)).status === 409, 'preferencia depois do prazo e recusada');
-  ok((await estado(SEGUNDA)).log.filter((l) => l.action === 'auto-publicar').length === 1,
-     'publica uma vez so');
+
+  // Publicada, para de ser montada: o acesso seguinte le o que ficou gravado.
+  const congelada = segunda.week.explain.generatedAt;
+  await new Promise((r) => setTimeout(r, 15));
+  ok((await estado(SEGUNDA)).week.explain.generatedAt === congelada, 'publica uma vez so');
 
   // Reaberta pelo administrador, nao volta a ser publicada sozinha.
   const reaberta = await call('POST', 'publish', { monday: SEM, published: false }, SEGUNDA);
   ok(reaberta.json.week.autoHold === true, 'reaberta pelo admin fica marcada');
   ok((await estado(SEGUNDA)).week.published === false, 'e o acesso seguinte nao a republica');
+  ok((await estado(SEGUNDA)).assignments.length > 0,
+     'a escala reaberta continua a que era - nao vira previa');
   const republicada = await call('POST', 'publish', { monday: SEM, published: true }, SEGUNDA);
   ok(republicada.json.week.published === true && republicada.json.week.autoHold === false,
      'o admin publica de novo e a marca sai');
 
-  // Rascunho ajustado a mao pelo administrador e publicado como esta.
+  // Ajuste do administrador e publicado como esta, sem ser montado de novo.
   const SEM2 = '2027-01-25';
-  const g2 = await call('POST', 'generate', { monday: SEM2 }, '2027-01-22', comum);
-  const slots = g2.json.assignments.slice(1).map((a) => ({ day: a.day, personId: a.personId }));
+  const g2 = await estado('2027-01-22', SEM2);
+  const slots = g2.assignments.slice(1).map((a) => ({ day: a.day, personId: a.personId }));
   await call('POST', 'assignments', { monday: SEM2, slots }, '2027-01-22');
   const segunda2 = await estado('2027-01-25', SEM2);
   ok(segunda2.week.published === true && segunda2.assignments.length === slots.length,
      `ajuste a mao e publicado como esta (${segunda2.assignments.length} de ${slots.length})`);
-  ok(!segunda2.log.some((l) => l.action === 'auto-gerar'), 'sem ser montado de novo');
+  ok(segunda2.log.filter((l) => l.action === 'editar').length === 1,
+     'e o registro guarda so a edicao, que foi o que alguem fez');
+
+  // Semana em que ninguem abriu o app: a publicacao de segunda nao aconteceu,
+  // e escala que ficou sem publicar nao conta para ninguem. O primeiro acesso
+  // depois fecha a semana que ficou para tras.
+  const ESQUECIDA = '2027-02-01';
+  const ativos2 = (await estado('2027-01-29', ESQUECIDA)).people.filter((p) => p.active);
+  for (const [i, p] of ativos2.entries()) {
+    await call('POST', 'preferences',
+      { monday: ESQUECIDA, personId: p.id, choices: TOP3[i % TOP3.length] }, '2027-01-29', comum);
+  }
+  // ... e ninguem abre o app durante a semana inteira de 01/02 ...
+  const atrasada = await estado('2027-02-08', ESQUECIDA);
+  ok(atrasada.week.published === true,
+     'semana em que ninguem abriu o app e publicada no acesso seguinte');
+  ok(atrasada.assignments.length > 0, 'com a escala que ela teria tido');
 
   process.env.ESCALAS_SEM_PUBLICACAO_AUTOMATICA = '1';
 }

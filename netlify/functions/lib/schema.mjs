@@ -125,4 +125,47 @@ export const SCHEMA = [
      device text,
      at     timestamptz not null default now()
    )`,
+
+  // Quando a semana foi publicada. Antes isso vivia no registro de "quem
+  // mexeu"; como publicar virou tarefa do app, e um fato da semana, e nao um
+  // ato de alguem.
+  `alter table weeks add column if not exists published_at timestamptz`,
+
+  // --- previa viva: a escala deixou de ser gravada por um botao -------------
+  //
+  // Linha em `assignments` passou a significar FATO: semana publicada, ou
+  // ajustada a mao pelo administrador. Semana sem linha nenhuma e montada na
+  // hora da leitura, sempre com as respostas do momento.
+  //
+  // O banco antigo tem rascunhos gravados pelo botao "Gerar escala" que nao
+  // sao nem uma coisa nem outra - e que, lidos como fato, congelariam uma
+  // escala montada dias antes. Saem daqui; a semana volta a ser montada na
+  // leitura. Ficam de pe os que a mao ajustou e os de semana reaberta
+  // (`auto_hold`), que sao ajuste do administrador tanto quanto os outros.
+  `delete from assignments a
+     using weeks w
+     where w.monday = a.monday
+       and not w.published and not w.auto_hold
+       and not exists (select 1 from week_log l
+                        where l.monday = a.monday and l.action = 'editar')
+       and not exists (select 1 from settings where key = 'previa_viva')`,
+
+  // A mesma semana perde a marca de escala gravada - sem isso ela continuaria
+  // passando por fato, so que sem linha nenhuma.
+  `update weeks w set generated_at = null, explain = null
+     where not w.published and not w.auto_hold
+       and not exists (select 1 from week_log l
+                        where l.monday = w.monday and l.action = 'editar')
+       and not exists (select 1 from settings where key = 'previa_viva')`,
+
+  // O registro passou a guardar so o que alguem fez: editar, publicar e
+  // reabrir a mao. Gerar e publicar de oficio sao do app, acontecem toda
+  // semana e, anotados, so afogariam a excecao - que e o que se quer ver ali.
+  `delete from week_log where action in ('gerar', 'auto-gerar', 'auto-publicar')`,
+
+  // Marco da migracao acima: sem ele, o `delete` voltaria a rodar a cada
+  // instancia nova da funcao e apagaria ajuste manual legitimo de semana que
+  // ainda nao foi publicada.
+  `insert into settings (key, value) values ('previa_viva', now()::text)
+     on conflict (key) do nothing`,
 ];

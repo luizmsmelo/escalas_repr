@@ -371,10 +371,22 @@ button { font: inherit; color: inherit; }
   color: var(--text-secondary);
 }
 .notice-lock { border-color: color-mix(in srgb, var(--good) 45%, var(--border)); }
+
+/* Aviso da previa: a escala da tela foi montada agora, e ainda vai mudar. */
+.preview {
+  font-size: .85rem;
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-1));
+  color: var(--text-secondary);
+}
+.preview b { color: var(--text-primary); }
+.preview [data-deadline] { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .notice-warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
 .notice b { color: var(--text-primary); }
 
-/* ------------------------------------------- como a escala foi gerada --- */
+/* ------------------------------------------- como a escala foi montada --- */
 .why {
   border: 1px solid var(--border);
   border-radius: var(--radius);

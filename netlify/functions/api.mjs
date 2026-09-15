@@ -78,13 +78,12 @@ const bad = (msg) => new HttpError(400, msg);
 
 async function dispatch(route, method, params, body, request) {
   switch (`${method} ${route}`) {
-    // Livre para qualquer pessoa: ler, cuidar das proprias escolhas e gerar
-    // rascunho (a geracao e deterministica e rascunho nao conta).
+    // Livre para qualquer pessoa: ler e cuidar das proprias escolhas. Nao ha
+    // rota de gerar: a previa sai pronta em `state`, montada na leitura.
     case 'GET state':       return getState(params.get('week'));
     case 'GET stats':       return getStats(params.get('month'));
     case 'PATCH people':    return updatePerson(body, request);   // dia fixo e livre; o resto, admin
     case 'POST preferences':return savePreferences(body);
-    case 'POST generate':   return generate(body, request);
     case 'POST vacations':  return createVacation(body);
     case 'DELETE vacations':return deleteVacation(params);
     case 'POST admin/login':return adminLogin(body, request);
@@ -94,6 +93,7 @@ async function dispatch(route, method, params, body, request) {
     case 'POST people':     await requireAdmin(request); return createPerson(body);
     case 'DELETE people':   await requireAdmin(request); return deletePerson(params.get('id'));
     case 'POST assignments':await requireAdmin(request); return setAssignments(body, request);
+    case 'DELETE assignments':await requireAdmin(request); return discardAssignments(params, request);
     case 'POST publish':    await requireAdmin(request); return publish(body, request);
     case 'POST capacity':   await requireAdmin(request); return setCapacity(body);
     case 'POST reset':      await requireAdmin(request); return resetCounters(body);
@@ -111,7 +111,7 @@ async function getState(weekParam) {
     ? requireMonday(weekParam)
     : nextMonday();
 
-  const [people, week, prefs, overrides, assignments, vacations, log] = await Promise.all([
+  const [people, week, prefs, overrides, gravadas, vacations, log] = await Promise.all([
     loadPeople(),
     ensureWeek(monday),
     sql`select person_id, choice1, choice2, choice3, unavailable, no_friday
@@ -125,6 +125,25 @@ async function getState(weekParam) {
     loadVacations(),
     loadWeekLog(monday),
   ]);
+
+  // Escala gravada e FATO - a semana foi publicada, ou o administrador a
+  // ajustou a mao - e fato se le como esta. Nao havendo nenhuma, a semana e
+  // montada agora, so para esta resposta: e a PREVIA, que por nao ficar
+  // guardada em lugar nenhum nao tem como chegar velha na tela.
+  //
+  // Quem separa os dois e o `generated_at` - ver `congelada`. Por ele, semana
+  // que o administrador esvaziou de proposito - ninguem fica ate as 18h nesta
+  // semana - continua sendo fato, e nao volta a se montar sozinha.
+  const previa = !congelada(week, gravadas.length) && temPrevia(monday)
+    ? await montarSemanaSafe(monday, { cfg: week, overrides, vacations })
+    : null;
+
+  const assignments = previa
+    ? linhasMontadas(previa)
+    : gravadas.map((a) => ({
+        personId: a.person_id, name: a.name, day: a.day,
+        rank: a.rank, via: a.via, date: isoOf(a.work_date),
+      }));
 
   const today = todayISO();
   return {
@@ -140,9 +159,9 @@ async function getState(weekParam) {
       generatedAt: week.generated_at,
       // Reaberta pelo administrador: a publicacao automatica nao a republica.
       autoHold: !!week.auto_hold,
-      // Gravada na geracao: e o que explica a escala que esta na tela, mesmo
-      // depois de recarregar a pagina ou de trocar de semana e voltar.
-      explain: week.explain ?? null,
+      // O que explica a escala que esta na tela: calculada junto com a previa,
+      // ou gravada no instante em que a semana virou fato.
+      explain: previa ? previa.explain : (week.explain ?? null),
       prevMonday: addDays(monday, -7),
       nextMonday: addDays(monday, 7),
     },
@@ -153,10 +172,14 @@ async function getState(weekParam) {
       unavailable: p.unavailable,
       noFriday: p.no_friday,
     })),
-    assignments: assignments.map((a) => ({
-      personId: a.person_id, name: a.name, day: a.day,
-      rank: a.rank, via: a.via, date: isoOf(a.work_date),
-    })),
+    assignments,
+    // Presente so quando a escala acima foi montada nesta leitura. A tela diz
+    // isso em voz alta: previa calculada agora, com o que havia naquela hora.
+    preview: previa ? { at: previa.explain.generatedAt } : null,
+    // O resumo da montagem - fila da sexta, dias fixos, quem ficou de fora -
+    // so existe para a previa; na semana ja gravada, quem explica e o
+    // `explain`, que e o registro daquele momento.
+    generation: previa ? resumoDaMontagem(previa) : null,
     vacations,
     // Quem mexeu na escala desta semana, do mais recente para o mais antigo.
     log,
@@ -509,55 +532,69 @@ async function assertVacationOpen(start, end) {
 
 /* ------------------------------------------------ publicacao automatica -- */
 
-/** Quem publica sozinho: nao ha pessoa nem aparelho por tras. */
-const AUTOMATICO = { personId: null, name: null, device: null };
-
 /**
- * A escala da semana e publicada sozinha a partir de segunda-feira 00h00
- * (horario de Brasilia), no primeiro acesso ao app. Nao precisa de agendador:
- * basta alguem abrir o app - e so importa que ela esteja publicada para quem
- * abre o app.
+ * A escala da semana e publicada pelo proprio app a partir de segunda-feira
+ * 00h00 (horario de Brasilia), no primeiro acesso. Nao ha agendador, e nao
+ * precisa: so importa que ela esteja publicada para quem abre o app.
  *
- * Na hora de publicar, a semana e GERADA DE NOVO: rascunho e so previa, e a
- * escala oficial sai com as preferencias como ficaram no prazo (domingo 23h59)
- * e com o historico como esta agora - senao um rascunho gerado dias antes, com
- * outros contadores, viraria a escala oficial. A excecao e o rascunho ajustado
- * a mao pelo administrador: esse e publicado como esta.
+ * O que vai para o ar depende do estado da semana:
  *
- * Semana que o administrador reabriu (`auto_hold`) fica de fora ate ele
+ *   - sem escala gravada, a previa e montada agora - com as respostas como
+ *     ficaram no prazo (domingo 23h59) e os contadores como estao - e gravada.
+ *     E a mesma conta que a tela vinha mostrando a semana inteira; aqui ela
+ *     deixa de ser previa e vira fato;
+ *   - com escala gravada, ela veio do ajuste do administrador e e publicada
+ *     exatamente como esta.
+ *
+ * Semana reaberta pelo administrador (`auto_hold`) fica de fora ate ele
  * publicar de novo.
+ *
+ * Publicar assim nao entra no registro de "quem mexeu": nao ha ninguem por
+ * tras, e anotar o que acontece toda segunda-feira so afogaria o que alguem de
+ * fato fez.
  */
-async function autoPublish() {
-  const semana = mondayOf(todayISO());
-  const [atual] = await sql`select published, auto_hold from weeks where monday = ${semana}`;
-  if (atual?.published || atual?.auto_hold) return;
+async function fecharSemana(week) {
+  // Sem linha em `weeks`, esta semana nunca foi aberta no app: ninguem
+  // respondeu, ninguem olhou, e ela nao e publicada de surpresa.
+  const [atual] = await sql`
+    select w.published, w.auto_hold, w.generated_at,
+           (select count(*)::int from assignments a where a.monday = w.monday) as n
+      from weeks w where w.monday = ${week}`;
+  if (!atual || atual.published || atual.auto_hold) return;
 
-  // "Ajustado a mao" e o registro dizer que a ultima coisa feita na escala foi
-  // uma edicao, depois da ultima geracao. Olhar as linhas nao basta: tirar
-  // alguem da escala nao deixa nenhuma linha marcada como manual.
-  const [ultima] = await sql`
-    select action from week_log
-     where monday = ${semana} and action in ('gerar', 'auto-gerar', 'editar')
-     order by created_at desc, id desc limit 1`;
-  if (ultima?.action !== 'editar') {
-    try {
-      await gerarSemana(semana, AUTOMATICO, 'auto-gerar');
-    } catch (err) {
-      // Ninguem disponivel, ou semana inteira sem expediente: publica o que
-      // houver - e, nao havendo nada, nao publica.
-      if (!(err instanceof HttpError)) throw err;
-    }
+  // A condicao no proprio update impede publicar duas vezes quando dois
+  // acessos chegam juntos. As consultas sao preguicosas: montar aqui nao vai
+  // ao banco.
+  const publicar = sql`
+    update weeks set published = true, published_at = now()
+     where monday = ${week} and not published and not auto_hold`;
+
+  if (congelada(atual, atual.n)) {
+    // Ajuste do administrador: publica como esta. Semana esvaziada de
+    // proposito nao tem o que publicar.
+    if (atual.n) await publicar;
+    return;
   }
 
-  const [{ n }] = await sql`select count(*)::int as n from assignments where monday = ${semana}`;
-  if (!n) return;
-  // A condicao no proprio update impede publicar duas vezes quando dois
-  // acessos chegam juntos.
-  const publicadas = await sql`
-    update weeks set published = true
-     where monday = ${semana} and not published and not auto_hold
-    returning monday`;
-  if (publicadas.length) await logQuery(semana, 'auto-publicar', AUTOMATICO);
+  const montada = await montarSemanaSafe(week);
+  // Ninguem disponivel, ou semana inteira sem expediente: nao ha o que publicar.
+  if (!montada?.result.assignments.length) return;
+  await sql.transaction([...gravacaoDaSemana(week, montada), publicar]);
+}
+
+/**
+ * Fecha a semana atual e, antes dela, a anterior que tenha ficado sem publicar.
+ *
+ * A anterior existe porque a publicacao depende de alguem abrir o app: numa
+ * semana de recesso, feriadao ou ferias coletivas, pode nao haver esse alguem -
+ * e escala que ficou sem publicar nao conta para ninguem, o que desloca os
+ * contadores de todo mundo dali para a frente. Ela vem primeiro porque,
+ * publicada, entra nos contadores que decidem a semana atual.
+ */
+async function autoPublish() {
+  const atual = mondayOf(todayISO());
+  await fecharSemana(addDays(atual, -7));
+  await fecharSemana(atual);
 }
 
 /** A publicacao automatica nunca derruba o pedido de quem abriu o app. */
@@ -580,24 +617,6 @@ async function autoPublishSafe() {
  * historico de escalas que ninguem ia cumprir. Semana que ja passou tambem nao
  * e gerada de novo - ela e o registro do que aconteceu; para corrigir, existe a
  * edicao a mao.
- */
-function assertGenerable(monday) {
-  const atual = mondayOf(todayISO());
-  const proxima = nextMonday();
-  if (monday < atual) {
-    throw bad('Semana que ja passou nao e gerada de novo: ela e o registro do que '
-      + 'aconteceu. Para corrigir, use Editar escala.');
-  }
-  if (monday > proxima) {
-    throw bad(`So da para gerar a escala desta semana ou da proxima. A semana de `
-      + `${fmtBR(monday)} fica liberada a partir de ${fmtBR(addDays(monday, -7))}.`);
-  }
-}
-
-/**
- * Publicar e o que faz a escala contar nos contadores - por isso tambem nao vale
- * para semana adiantada. Semana passada pode ser publicada: e o jeito de registrar
- * uma escala que aconteceu e ficou sem publicar.
  */
 function assertPublishable(monday) {
   if (monday > nextMonday()) {
@@ -662,20 +681,56 @@ const loadWeekLog = (monday) =>
 
 /* ------------------------------------------------------------------- escala */
 
-async function generate({ monday, byPersonId }, request) {
-  const week = requireMonday(monday);
-  assertGenerable(week);
-  await assertOpen(week);
-  const quem = await actorOf(byPersonId, request);
-  return respostaDaGeracao(week, await gerarSemana(week, quem, 'gerar'));
+/*
+ * A escala de uma semana esta em um de dois estados, e o que os separa e uma
+ * coisa so: existir linha gravada em `assignments`.
+ *
+ *   - SEM linha gravada, a semana e uma PREVIA: montada na hora em que a tela
+ *     e lida, com as respostas e os contadores daquele instante, e jogada fora
+ *     em seguida. Por nao ficar guardada, ela nao tem como chegar velha a
+ *     tela - e nao ha botao de gerar, porque nao ha nada que o clique faria
+ *     que a leitura ja nao faca.
+ *   - COM linha gravada, a semana e um FATO: foi publicada, ou o administrador
+ *     a ajustou a mao. Fato nao se remonta - le-se como esta.
+ *
+ * Montar a mesma semana duas vezes com a mesma entrada da o mesmo resultado, e
+ * e isso que torna a previa barata e segura. O que muda de uma leitura para a
+ * seguinte nunca e a conta: sao as respostas que chegaram nesse meio-tempo.
+ */
+
+/**
+ * Previa vale para esta semana e para a proxima - a mesma janela de antes.
+ * Semana que ja passou e o registro do que aconteceu: se ficou sem escala, e
+ * porque nao houve escala, e montar uma agora, com os contadores de hoje,
+ * seria inventar passado. Semana adiantada ainda nao tem preferencia nenhuma:
+ * a previa sairia so da fila e nao diria nada a ninguem.
+ */
+function temPrevia(monday) {
+  return monday >= mondayOf(todayISO()) && monday <= nextMonday();
 }
 
 /**
- * Monta e grava a escala de uma semana. Serve ao botao "Gerar escala" e a
- * publicacao automatica; nao confere janela nem trava - quem chama confere.
+ * A semana ja tem escala gravada? `generated_at` e a marca - ele e escrito
+ * junto com as linhas e apagado quando o ajuste e descartado. As linhas
+ * entram na conta so por seguranca, para um banco antigo nao aparecer vazio na
+ * tela enquanto guarda escala.
  */
-async function gerarSemana(week, quem, acao) {
-  const cfg = await ensureWeek(week);
+function congelada(week, linhas) {
+  return week.generated_at != null || linhas > 0;
+}
+
+/**
+ * Monta a escala de uma semana e devolve o resultado SEM gravar nada. E a
+ * mesma conta para a previa da tela, para a publicacao de segunda e para o
+ * ponto de partida de uma edicao a mao; o que muda e o que o chamador faz com
+ * ela.
+ *
+ * `ja` carrega o que o chamador tiver em maos - a previa sai dentro de uma
+ * leitura que ja buscou a semana, o calendario e as ferias, e busca-los de
+ * novo seriam tres idas ao banco por tela aberta.
+ */
+async function montarSemana(week, ja = {}) {
+  const cfg = ja.cfg ?? await ensureWeek(week);
 
   const rows = await sql`
     select p.id, p.name, p.fixed_day, p.priority,
@@ -687,7 +742,9 @@ async function gerarSemana(week, quem, acao) {
      where p.active = true
      order by p.id`;
 
-  const [overrides, vacations] = await Promise.all([loadOverrides(), loadVacations()]);
+  const [overrides, vacations] = ja.overrides && ja.vacations
+    ? [ja.overrides, ja.vacations]
+    : await Promise.all([loadOverrides(), loadVacations()]);
   const situacao = weekDayStatus(week, overrides);
 
   // Ferias vem antes da ausencia. Quem esta de ferias a semana inteira nao
@@ -740,10 +797,10 @@ async function gerarSemana(week, quem, acao) {
   const result = solveWeek(input, capacity);
   const dates = Object.fromEntries(situacao.map((d) => [d.day, d.date]));
 
-  // O registro de POR QUE esta escala ficou assim, gravado junto com a semana.
-  // O solver so enxerga quem esta na semana, entao o que ele nao tem como saber
-  // entra aqui: quem marcou ausencia (senao a pessoa some da lista sem motivo
-  // aparente), os dias sem expediente e a hora da geracao.
+  // O registro de POR QUE esta escala ficou assim. O solver so enxerga quem
+  // esta na semana, entao o que ele nao tem como saber entra aqui: quem marcou
+  // ausencia (senao a pessoa some da lista sem motivo aparente), os dias sem
+  // expediente e a hora em que a conta foi feita.
   const explain = {
     ...result.explain,
     generatedAt: new Date().toISOString(),
@@ -757,7 +814,30 @@ async function gerarSemana(week, quem, acao) {
     })),
   };
 
-  await sql.transaction([
+  return { result, explain, fechados, rows, participants, deFerias, dates };
+}
+
+/**
+ * Monta a semana, devolvendo null quando nao ha escala possivel - ninguem
+ * disponivel, ou semana inteira sem expediente. Sao os dois casos em que a
+ * tela mostra a semana vazia em vez de um erro.
+ */
+async function montarSemanaSafe(week, ja = {}) {
+  try {
+    return await montarSemana(week, ja);
+  } catch (err) {
+    if (err instanceof HttpError) return null;
+    throw err;
+  }
+}
+
+/**
+ * As consultas que gravam uma semana montada. Devolve a lista para o chamador
+ * decidir com o que ela vai junto na mesma transacao - publicar, ou fixar o
+ * ponto de partida de uma edicao a mao.
+ */
+function gravacaoDaSemana(week, { result, explain, dates }) {
+  return [
     sql`delete from assignments where monday = ${week}`,
     ...result.assignments.map(
       (a) => sql`
@@ -766,37 +846,42 @@ async function gerarSemana(week, quem, acao) {
     ),
     sql`update weeks set generated_at = now(), explain = ${JSON.stringify(explain)}
          where monday = ${week}`,
-    logQuery(week, acao, quem),
-  ]);
-
-  return { result, explain, fechados, rows, participants, deFerias };
+  ];
 }
 
-async function respostaDaGeracao(week, { result, explain, fechados, rows, participants, deFerias }) {
-  const state = await getState(week);
+/** A escala montada no mesmo formato em que a tela recebe a escala gravada. */
+function linhasMontadas({ result, dates }) {
+  return result.assignments.map((a) => ({
+    personId: a.personId, name: a.name, day: a.day,
+    rank: a.rank, via: a.via, date: dates[a.day],
+  }));
+}
+
+/**
+ * O resumo da montagem: o que a tela precisa para contar como a semana ficou
+ * assim - fila da sexta, dias fixos, quem ficou de fora, vaga em aberto.
+ */
+function resumoDaMontagem({ result, explain, fechados, rows, participants, deFerias }) {
   return {
-    ...state,
-    generation: {
-      ...result.summary,
-      unfilledSlots: result.unfilledSlots,
-      priorityUnplaced: result.priorityUnplaced,
-      // Quem ja tem a vaga garantida pelo dia fixo nao esta "sem preferencia":
-      // nao ha nada que ele devesse ter respondido. Quem tem prioridade e nao
-      // escolheu aparece na lista de fora da semana, que diz mais.
-      missingPreferences: participants
-        .filter((r) => r.choice1 == null && !r.priority
-          && !result.fixed.placed.some((f) => f.personId === r.id))
-        .map((r) => r.name),
-      awayCount: rows.length - participants.length - deFerias.length,
-      vacationCount: deFerias.length,
-      explain,
-      friday: result.friday,
-      fixed: result.fixed,
-      closedDays: fechados.map((d) => ({
-        day: d.day, date: d.date, name: d.holiday?.name ?? 'Sem expediente',
-        label: d.holiday?.label ?? 'Sem expediente',
-      })),
-    },
+    ...result.summary,
+    unfilledSlots: result.unfilledSlots,
+    priorityUnplaced: result.priorityUnplaced,
+    // Quem ja tem a vaga garantida pelo dia fixo nao esta "sem preferencia":
+    // nao ha nada que ele devesse ter respondido. Quem tem prioridade e nao
+    // escolheu aparece na lista de fora da semana, que diz mais.
+    missingPreferences: participants
+      .filter((r) => r.choice1 == null && !r.priority
+        && !result.fixed.placed.some((f) => f.personId === r.id))
+      .map((r) => r.name),
+    awayCount: rows.length - participants.length - deFerias.length,
+    vacationCount: deFerias.length,
+    explain,
+    friday: result.friday,
+    fixed: result.fixed,
+    closedDays: fechados.map((d) => ({
+      day: d.day, date: d.date, name: d.holiday?.name ?? 'Sem expediente',
+      label: d.holiday?.label ?? 'Sem expediente',
+    })),
   };
 }
 
@@ -808,20 +893,40 @@ async function respostaDaGeracao(week, { result, explain, fechados, rows, partic
  * Linhas que ja existiam com a mesma dupla (dia, pessoa) mantem o `via` e o
  * `rank` originais: quem foi escalado pelo solver continua aparecendo como 1a
  * opcao ou como fila da sexta, e so o que a mao mexeu vira 'manual'.
+ *
+ * Semana PUBLICADA tambem se edita, sem reabrir. E o caso de sempre: na terca
+ * o escalado nao vem, troca com um colega, e a escala da semana precisa passar
+ * a dizer quem de fato ficou. Reabrir para isso tiraria do ar a escala que
+ * todo mundo esta seguindo e a faria sumir dos contadores no meio do caminho,
+ * para devolve-la minutos depois. O ajuste fica registrado em "quem mexeu".
  */
 async function setAssignments({ monday, slots, byPersonId }, request) {
   const week = requireMonday(monday);
-  await ensureWeek(week);
-  await assertOpen(week);
+  const cfg = await ensureWeek(week);
 
   if (!Array.isArray(slots)) throw bad('Envie a escala da semana como uma lista de vagas.');
 
-  const [people, atuais, prefs, overrides] = await Promise.all([
+  const [people, gravadas, prefs, overrides] = await Promise.all([
     sql`select id, name, active from people`,
     sql`select person_id, day, rank, via from assignments where monday = ${week}`,
     sql`select person_id, choice1, choice2, choice3 from preferences where monday = ${week}`,
     loadOverrides(),
   ]);
+
+  // Semana ainda em previa: o ponto de partida da edicao e a propria previa -
+  // senao cada linha que o administrador NAO tocou entraria como ajuste
+  // manual. Gravar e o que congela a semana: dali em diante ela e fato, e o
+  // app nao a monta de novo.
+  const jaGravada = congelada(cfg, gravadas.length);
+  const previa = jaGravada || !temPrevia(week) ? null : await montarSemanaSafe(week);
+  if (!jaGravada && !previa) {
+    throw bad('Esta semana nao tem escala para editar. Escala nao se monta do zero a mao: '
+      + 'o app monta, e a edicao ajusta o que ele montou.');
+  }
+  const atuais = jaGravada
+    ? gravadas
+    : previa.result.assignments.map(
+      (a) => ({ person_id: a.personId, day: a.day, rank: a.rank, via: a.via }));
 
   const pessoas = new Map(people.map((p) => [p.id, p]));
   const antes = new Map(atuais.map((a) => [`${a.day}:${a.person_id}`, a]));
@@ -862,6 +967,11 @@ async function setAssignments({ monday, slots, byPersonId }, request) {
 
   const quem = await actorOf(byPersonId, request);
   await sql.transaction([
+    // A explicacao vai junto quando a edicao parte da previa: e ela que conta,
+    // depois, o que o app tinha montado antes de a mao mexer.
+    ...(previa ? [sql`update weeks set generated_at = now(),
+                             explain = ${JSON.stringify(previa.explain)}
+                       where monday = ${week}`] : []),
     sql`delete from assignments where monday = ${week}`,
     ...linhas.map(
       (a) => sql`
@@ -874,6 +984,31 @@ async function setAssignments({ monday, slots, byPersonId }, request) {
   return getState(week);
 }
 
+/**
+ * Descarta o ajuste manual: a semana perde a escala gravada e volta a ser
+ * previa, montada de novo a cada leitura. E o caminho de volta de uma edicao
+ * que nao era para ter sido feita - sem ele, o unico jeito de desfazer seria
+ * editar de novo, na mao, linha por linha.
+ *
+ * Semana publicada nao volta a ser previa: ela ja aconteceu, e os contadores
+ * de todo mundo ja contam com ela.
+ */
+async function discardAssignments(params, request) {
+  const week = requireMonday(params.get('monday'));
+  await ensureWeek(week);
+  await assertOpen(week);
+  if (!temPrevia(week)) {
+    throw bad('So da para voltar a previa nesta semana ou na proxima.');
+  }
+  const quem = await actorOf(params.get('byPersonId'), request);
+  await sql.transaction([
+    sql`delete from assignments where monday = ${week}`,
+    sql`update weeks set generated_at = null, explain = null where monday = ${week}`,
+    logQuery(week, 'descartar', quem),
+  ]);
+  return getState(week);
+}
+
 /** Posicao do dia na lista da pessoa; sexta nao pedida e a 4a opcao de todo mundo. */
 function manualRank(choices, day) {
   const rank = rankOf({ choices }, day);
@@ -881,21 +1016,46 @@ function manualRank(choices, day) {
   return day === FRIDAY ? 4 : null;
 }
 
+/**
+ * Publicar e reabrir a mao. A publicacao de rotina e do app, na segunda-feira
+ * (ver `fecharSemana`); isto aqui e a excecao - antecipar a semana que ja esta
+ * decidida, ou tirar do ar uma semana que nao deveria valer. Por ser ato de
+ * alguem, e nao rotina, vai para o registro de "quem mexeu".
+ */
 async function publish({ monday, published, byPersonId }, request) {
   const week = requireMonday(monday);
   await ensureWeek(week);
-  const count = await sql`select count(*)::int as n from assignments where monday = ${week}`;
-  if (published && count[0].n === 0) {
-    throw bad('Gere a escala antes de publicar.');
-  }
-  if (published) assertPublishable(week);
   const quem = await actorOf(byPersonId, request);
+
+  if (!published) {
+    await sql.transaction([
+      // Reaberta pelo administrador, a semana fica fora da publicacao
+      // automatica ate ele publicar de novo - senao o proximo acesso a
+      // republicaria na hora.
+      sql`update weeks set published = false, auto_hold = true where monday = ${week}`,
+      logQuery(week, 'reabrir', quem),
+    ]);
+    return getState(week);
+  }
+
+  assertPublishable(week);
+  const [semana] = await sql`
+    select w.generated_at,
+           (select count(*)::int from assignments a where a.monday = w.monday) as n
+      from weeks w where w.monday = ${week}`;
+  // Sem escala gravada, publicar e congelar a previa que esta na tela.
+  const montada = congelada(semana, semana.n) || !temPrevia(week)
+    ? null
+    : await montarSemanaSafe(week);
+  if (!semana.n && !montada?.result.assignments.length) {
+    throw bad('Esta semana nao tem escala para publicar - ninguem disponivel, semana inteira '
+      + 'sem expediente, ou semana fora da previa.');
+  }
   await sql.transaction([
-    // Reaberta pelo administrador, a semana fica fora da publicacao automatica
-    // ate ele publicar de novo - senao o proximo acesso republicaria na hora.
-    sql`update weeks set published = ${!!published}, auto_hold = ${!published}
+    ...(montada ? gravacaoDaSemana(week, montada) : []),
+    sql`update weeks set published = true, auto_hold = false, published_at = now()
          where monday = ${week}`,
-    logQuery(week, published ? 'publicar' : 'reabrir', quem),
+    logQuery(week, 'publicar', quem),
   ]);
   return getState(week);
 }

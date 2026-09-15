@@ -267,8 +267,10 @@ function renderPicker() {
   $('#pickDeadline').hidden = !comPrazo;
   if (comPrazo) {
     $('#pickDeadline').innerHTML = 'Prazo para responder: <b>domingo, '
-      + `${fmtDay(addDays(week.monday, -1))}, até 23h59</b>. Na segunda-feira a escala é `
-      + 'montada com as respostas salvas e publicada automaticamente.';
+      + `${fmtDay(addDays(week.monday, -1))}, até 23h59</b> — `
+      + `<span data-deadline="${week.monday}"></span>. Na segunda-feira a escala é montada `
+      + 'com as respostas salvas e publicada automaticamente.';
+    renderCountdown();
   }
   // Semana inteira de ferias: nao ha o que responder, nem ausencia a marcar.
   $('#awaySwitch').hidden = ferias.fullWeek;
@@ -608,6 +610,58 @@ function renderRespondedList() {
     : '<li class="empty">Nenhuma pessoa ativa cadastrada.</li>';
 }
 
+/**
+ * Quantas pessoas ja responderam, de quantas precisam responder. Quem tem dia
+ * fixo valendo nesta semana e quem esta de ferias a semana inteira ficam fora
+ * da conta: nao ha nada que eles devessem responder.
+ */
+function contagemDeRespostas() {
+  const respondeu = new Set(state.data.preferences.map((p) => p.personId));
+  const aberto = new Set(state.data.week.dates.filter((d) => d.works).map((d) => d.day));
+  const devem = state.data.people.filter((p) => p.active
+    && !(p.fixedDay != null && aberto.has(p.fixedDay))
+    && !vacationWeek(p.id).fullWeek);
+  return { responderam: devem.filter((p) => respondeu.has(p.id)).length, de: devem.length };
+}
+
+/* --- quanto falta para a escala valer ------------------------------------- */
+
+/*
+ * O prazo de uma semana fecha na segunda-feira, 00h00 de Brasilia: e o mesmo
+ * instante em que as escolhas travam e em que o app publica a escala. O Brasil
+ * nao tem mais horario de verao, entao o deslocamento e sempre -03:00 - e
+ * escrito assim, e nao pelo relogio do aparelho, para quem estiver com o fuso
+ * trocado ver o mesmo prazo que todo mundo.
+ */
+const prazoDaSemana = (monday) => new Date(`${monday}T00:00:00-03:00`);
+
+/** "2 dias, 4h e 12min" - com os segundos quando falta menos de um dia. */
+function faltaPara(alvo) {
+  const total = Math.max(0, Math.floor((alvo - Date.now()) / 1000));
+  if (!total) return null;
+  const dias = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const min = Math.floor((total % 3600) / 60);
+  const seg = String(total % 60).padStart(2, '0');
+  if (dias) return min
+    ? `${plural(dias, 'dia', 'dias')}, ${h}h e ${min}min`
+    : `${plural(dias, 'dia', 'dias')} e ${h}h`;
+  if (h) return `${h}h ${String(min).padStart(2, '0')}min ${seg}s`;
+  return `${min}min ${seg}s`;
+}
+
+/**
+ * Preenche todo `[data-deadline]` da tela. Roda de segundo em segundo: e o
+ * contador andando que impede alguem de ler a previa como se ja fosse a
+ * escala - ele diz, o tempo todo, que aquilo ainda nao fechou.
+ */
+function renderCountdown() {
+  for (const el of $$('[data-deadline]')) {
+    const falta = faltaPara(prazoDaSemana(el.dataset.deadline));
+    el.textContent = falta ? `faltam ${falta}` : 'o prazo já fechou';
+  }
+}
+
 function applyWeekBadge(el, monday) {
   const current = state.data.currentMonday;
   const next = addDays(current, 7);
@@ -625,7 +679,13 @@ function applyWeekBadge(el, monday) {
 
 /* --- aba: escala ---------------------------------------------------------- */
 
-function renderSchedule(generation) {
+/*
+ * `generation` e o resumo da montagem - fila da sexta, dias fixos, quem ficou
+ * de fora. Ele vem no proprio estado enquanto a semana e previa, e por isso
+ * sobrevive a recarregar a pagina; na semana ja gravada nao existe, e quem
+ * explica e o `explain`.
+ */
+function renderSchedule(generation = state.data.generation) {
   const { week, assignments } = state.data;
   $('#schedWeekLabel').textContent = weekLabel(week.monday);
   applyWeekBadge($('#schedWeekBadge'), week.monday);
@@ -668,8 +728,12 @@ function renderSchedule(generation) {
           </div>`;
         })
         .join('')
-    : `<p class="empty">Escala ainda não gerada para esta semana.<br>
-        Toque em <strong>Gerar escala</strong> quando o pessoal tiver respondido.</p>`;
+    : `<p class="empty">Sem escala para esta semana.<br>${
+        week.monday > addDays(state.data.currentMonday, 7)
+          ? 'Ela aparece quando esta virar a próxima semana.'
+          : week.dates.every((d) => !d.works)
+            ? 'A semana inteira está sem expediente.'
+            : 'Ninguém disponível para esta semana.'}</p>`;
 
   const summary = $('#schedSummary');
   if (hasAny) {
@@ -688,9 +752,31 @@ function renderSchedule(generation) {
     summary.hidden = true;
   }
 
+  // A previa e montada no instante em que esta tela e lida. Dizer isso na
+  // propria tela e o que a separa de uma escala: quem le fica sabendo que ela
+  // ainda muda, por que muda e ate quando.
+  const box = $('#schedPreview');
+  box.hidden = !state.data.preview;
+  if (state.data.preview) {
+    const { responderam, de } = contagemDeRespostas();
+    const hora = new Date(state.data.preview.at)
+      .toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const futura = week.monday > state.data.currentMonday;
+    box.innerHTML = `<b>Prévia calculada agora, às ${hora}.</b> Ela foi montada neste
+      instante, com as respostas de <b>${responderam} de ${de}</b>
+      ${de === 1 ? 'pessoa' : 'pessoas'} — e muda a cada nova resposta.${futura
+        ? ` Vale a partir de <b>segunda, ${fmtDay(week.monday)}, 00h</b>, quando o app
+            publica a escala: <span data-deadline="${week.monday}"></span>.`
+        : ' Esta semana ainda não foi publicada.'}`;
+    renderCountdown();
+  }
+
   const notice = $('#schedNotice');
   const messages = [];
-  if (week.published) messages.push('Escala <b>publicada</b>. Reabra para poder alterar.');
+  if (week.published) {
+    messages.push('Escala <b>publicada</b>: é a que vale. '
+      + 'O administrador ainda pode ajustá-la, se alguém trocar de dia.');
+  }
   const fri = generation?.friday;
   if (fri?.allVetoed) {
     messages.push(
@@ -719,23 +805,26 @@ function renderSchedule(generation) {
       + 'Quem tem prioridade só entra no dia que pediu — quando ele enche, entra '
       + 'quem tem menos escalas acumuladas e o resto fica para a próxima semana.');
   }
-  // Rascunho nao conta nos contadores - e o que explica por que eles nao andaram.
+  // Escala que nao e previa e nao esta publicada ficou guardada por um ajuste:
+  // ela parou no tempo, e e isso que explica por que nao acompanha as
+  // respostas que continuam chegando.
   if (hasAny && !week.published) {
     if (week.autoHold) {
       messages.push('Esta escala foi <b>reaberta pelo administrador</b> e não é publicada '
         + 'automaticamente: ela só volta a contar quando ele publicar de novo.');
-    } else if (week.monday > state.data.currentMonday) {
-      messages.push('Esta escala ainda é um <b>rascunho</b>, só uma prévia. Na segunda-feira, '
-        + `${fmtDay(week.monday)}, ela é montada de novo com as respostas salvas até domingo `
-        + '23h59 e <b>publicada automaticamente</b>.');
-    } else {
-      messages.push('Esta escala ainda é um <b>rascunho</b>: ela só passa a contar nos '
+    } else if (!state.data.preview) {
+      messages.push('Esta escala foi <b>ajustada à mão</b> e ficou guardada como está: ela '
+        + 'não acompanha mais as respostas que chegarem. Na segunda-feira é publicada assim '
+        + '— para voltar à prévia automática, use <b>Descartar ajustes</b>.');
+    } else if (week.monday <= state.data.currentMonday) {
+      messages.push('Esta semana ainda não foi publicada: ela só passa a contar nos '
         + 'contadores depois de <b>publicada</b>.');
     }
   }
   if (!week.published && week.monday > addDays(state.data.currentMonday, 7)) {
-    messages.push('A escala desta semana só pode ser gerada e publicada a partir de '
-      + `<b>${fmtDay(addDays(week.monday, -7))}</b>, quando ela passar a ser a próxima semana.`);
+    messages.push('A escala desta semana ainda não é montada: ela aparece a partir de '
+      + `<b>${fmtDay(addDays(week.monday, -7))}</b>, quando passar a ser a próxima semana. `
+      + 'Até lá quase ninguém respondeu, e a prévia não diria nada.');
   }
   // Ferias sao estado da semana, como a vaga em aberto: o aviso vale ao
   // recarregar a pagina, e nao so no instante da geracao.
@@ -750,8 +839,8 @@ function renderSchedule(generation) {
     .map((a) => [a.personId, a])).values()];
   if (escaladosNasFerias.length) {
     messages.push(`Na escala em dia de férias: <b>${listaPessoas(escaladosNasFerias)}</b>. `
-      + 'As férias foram cadastradas depois de a escala ser montada — gere de novo ou use '
-      + '<b>Editar escala</b>.');
+      + 'As férias foram cadastradas depois de a escala ficar guardada — use '
+      + '<b>Descartar ajustes</b>, para a prévia ser montada de novo, ou <b>Editar escala</b>.');
   }
   if (generation?.missingPreferences?.length) {
     messages.push(
@@ -805,33 +894,37 @@ function renderSchedule(generation) {
   $('#editActions').hidden = true;
   renderWeekLog();
 
-  // A mesma janela da API: gerar, so esta semana ou a proxima; publicar, ate a
-  // proxima. O servidor recusa de qualquer jeito - aqui e para nem oferecer.
+  // A mesma janela da API: previa e publicacao vao ate a proxima semana. O
+  // servidor recusa de qualquer jeito - aqui e para nem oferecer.
   const proxima = addDays(state.data.currentMonday, 7);
   const adiantada = week.monday > proxima;
-  $('#generateBtn').textContent = hasAny ? 'Gerar escala de novo' : 'Gerar escala';
-  $('#generateBtn').disabled = week.published || adiantada
-    || week.monday < state.data.currentMonday;
-  // Editar e para ajustar uma escala que o app ja gerou. Semana sem escala nao
-  // oferece montar do zero a mao: o caminho e gerar, dentro da janela de
-  // geracao que vale para todo mundo.
+  // Editar ajusta a escala que esta na tela - inclusive a publicada, que e
+  // justamente quando o ajuste faz falta: alguem trocou de dia na semana em
+  // curso. Semana sem escala nao oferece montar do zero a mao.
   $('#editBtn').hidden = !hasAny || !isAdmin();
   // Sem nenhum dia com expediente nao ha o que editar.
-  $('#editBtn').disabled = week.published || !week.dates.some((d) => d.works);
+  $('#editBtn').disabled = !week.dates.some((d) => d.works);
   $('#publishBtn').textContent = week.published ? 'Reabrir escala' : 'Publicar escala';
   $('#publishBtn').disabled = (!hasAny && !week.published) || (!week.published && adiantada);
   // Publicar e reabrir sao do administrador.
   $('#publishBtn').hidden = !isAdmin();
+  // Descartar so aparece onde ha o que descartar: semana guardada por um
+  // ajuste, ainda nao publicada e dentro da janela da previa.
+  $('#discardBtn').hidden = !isAdmin() || week.published || !!state.data.preview
+    || adiantada || week.monday < state.data.currentMonday;
 }
 
 /* --- quem mexeu nesta escala ---------------------------------------------- */
 
+// So o que ALGUEM fez. Montar a escala e publicar na segunda sao do app,
+// acontecem toda semana e nao entram aqui: anotados, afogariam a excecao, que e
+// o que se quer ver nesta lista.
 const LOG_ACAO = {
-  gerar: 'Gerada', editar: 'Editada à mão', publicar: 'Publicada', reabrir: 'Reaberta',
-  'auto-gerar': 'Gerada automaticamente', 'auto-publicar': 'Publicada automaticamente',
+  editar: 'Editada à mão', descartar: 'Ajustes descartados',
+  publicar: 'Publicada à mão', reabrir: 'Reaberta',
 };
 
-/** Quem gerou, editou, publicou ou reabriu a escala da semana, e quando. */
+/** Quem editou, publicou, reabriu ou descartou o ajuste da semana, e quando. */
 function renderWeekLog() {
   const log = state.data.log ?? [];
   // So no modo admin: para os colegas e ruido - publicar e editar sao do
@@ -849,7 +942,7 @@ function renderWeekLog() {
   }).join('');
 }
 
-/* --- "Como essa escala foi gerada?" --------------------------------------- */
+/* --- "Como essa escala foi montada?" -------------------------------------- */
 /* Tudo aqui sai de `week.explain`, gravado na hora da geracao: o que cada
  * pessoa pediu, com que contadores chegou na semana e em que posicao ficou na
  * fila da sexta. Nenhuma frase e decorativa - cada uma cita o numero que a
@@ -915,13 +1008,17 @@ function whyEdits(explain, assignments) {
   };
 }
 
-/** "14/09/2026 às 10:32" - ou null numa semana gravada sem a hora da geracao. */
+/**
+ * Quando esta escala foi montada. Na previa e agora mesmo, e so a hora
+ * interessa; na escala guardada e a data em que ela parou no tempo.
+ */
 function quandoGerada(explain) {
   const d = explain.generatedAt ? new Date(explain.generatedAt) : null;
-  return d
-    ? `${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR',
-      { hour: '2-digit', minute: '2-digit' })}`
-    : null;
+  if (!d) return null;
+  const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return state.data.preview
+    ? `Calculada agora, às ${hora}`
+    : `Montada em ${d.toLocaleDateString('pt-BR')} às ${hora}`;
 }
 
 function whyIntro(explain, edits) {
@@ -933,7 +1030,7 @@ function whyIntro(explain, edits) {
       ordem, e cada uma responde uma pergunta diferente. Com as mesmas preferências e os
       mesmos contadores, o app produz <b>sempre a mesma escala</b> — a conta dá para
       refazer à mão.</p>
-    <p class="why-meta">${quando ? `Gerada em ${esc(quando)} · ` : ''}
+    <p class="why-meta">${quando ? `${esc(quando)} · ` : ''}
       ${explain.totalSlots} ${explain.totalSlots === 1 ? 'vaga' : 'vagas'} ·
       ${plural(explain.headcount, 'pessoa disponível', 'pessoas disponíveis')}
       ${explain.away?.length ? ` · ${plural(explain.away.length, 'ausente', 'ausentes')}` : ''}
@@ -2070,7 +2167,9 @@ function tourSteps() {
       texto: 'Preencha o primeiro e o último dia das férias e toque em Adicionar. '
         + 'Nesses dias você não entra na escala.' },
     { alvo: '.tabbtn[data-goto="escala"]', titulo: 'Veja a escala',
-      texto: 'Para ver quem fica em cada dia, toque em Escala, aqui embaixo.' },
+      texto: 'Para ver quem fica em cada dia, toque em Escala, aqui embaixo. Antes do '
+        + 'prazo o que aparece ali é uma prévia, calculada na hora: ela muda a cada '
+        + 'resposta nova, até domingo 23h59.' },
     { titulo: 'Pronto!',
       texto: 'Se quiser ver estas dicas de novo, toque no ? lá no topo da tela.' },
   ];
@@ -2394,27 +2493,19 @@ function wireEvents() {
         : isPriority() ? 'Dia salvo!' : 'Preferência salva!');
     }));
 
-  // escala
-  $('#generateBtn').addEventListener('click', () => {
-    // Gerar de novo reescreve a semana inteira: um ajuste feito a mao seria
-    // desfeito sem aviso.
-    if (state.data.assignments.some((a) => a.via === 'manual')
-        && !confirm('Esta escala tem ajustes manuais.\n\n'
-                    + 'Gerar de novo monta tudo outra vez pelas preferências e '
-                    + 'descarta esses ajustes. Continuar?')) return;
+  // escala: descartar o ajuste devolve a semana a previa
+  $('#discardBtn').addEventListener('click', () => {
+    if (!confirm('Descartar os ajustes desta semana?\n\n'
+                 + 'A escala volta a ser montada sozinha, com as respostas de agora, '
+                 + 'e segue mudando até o prazo fechar.')) return;
     run(async () => {
-      const result = await post('/generate', { monday: state.week, byPersonId: state.me?.id });
-      state.data = result;
-      state.stats = result.stats;
-      state.month = result.stats.month;
+      const busca = new URLSearchParams({ monday: state.week });
+      if (state.me?.id) busca.set('byPersonId', state.me.id);
+      state.data = await api(`/assignments?${busca}`, { method: 'DELETE' });
+      state.stats = state.data.stats;
       syncDraftFromServer();
-      renderPicker();
-      renderSchedule(result.generation);
-      renderCounters();
-      renderSettings();
-      goTab('escala');
-      const g = result.generation;
-      toast(`Escala pronta: ${g.firstChoice} de ${g.filled} na 1ª opção.`);
+      renderAll();
+      toast('Ajustes descartados: a escala voltou a ser prévia.');
     });
   });
 
@@ -2633,6 +2724,8 @@ const monthOf = (iso) => iso.slice(0, 7);
 async function start() {
   state.admin = loadAdmin();
   wireEvents();
+  // O contador do prazo anda sozinho, sem depender de a tela ser redesenhada.
+  setInterval(renderCountdown, 1000);
   try {
     await loadWeek(null);
   } catch (err) {
