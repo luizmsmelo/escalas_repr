@@ -396,3 +396,34 @@ os avisos e caixas do app (`public/app.js`) e o `README.md`. Revisado em
 - **Decisão (14/09/2026): descartado.** São todos colegas de trabalho, sem
   intenção de prejudicar ninguém; proteger isso exigiria login e senha para cada
   pessoa, o que o app não quer ter.
+
+---
+
+# Revisão 3: "acima do corte" para quem só empatou
+
+| #  | Assunto                                                      | Onde            | Situação  |
+|----|--------------------------------------------------------------|-----------------|-----------|
+| 27 | Seção usava o corte estimado, e não quem de fato entrou      | Seção, montador | Feito     |
+
+### 27. "Ficaram de fora pelo contador" e "entraram acima do corte" com o mesmo contador
+
+- **Achado por:** leitura real da escala da semana de 21/09 (rascunho gerado em
+  14/09, antes do prazo). Várias pessoas com 2 escalas apareciam como "de fora
+  pelo contador, acima do corte de 1 escala", e outras com as mesmas 2 escalas
+  como "entraram acima do corte".
+- **O que aconteceu de verdade:** seis pessoas com prioridade e 1 escala ainda
+  não tinham escolhido dia, então não podiam ser escaladas. Sobraram 3 vagas
+  para quem tinha 2 escalas, e entre elas decidiu o **desempate** (preferência).
+- **Causa:** a seção comparava com `explain.cut`, o corte que o montador estima
+  **antes** de montar a escala, e que contava essas seis pessoas.
+- **Feito:**
+  - seção: o motivo de quem ficou de fora passou a ser comparado com quem **de
+    fato entrou** disputando vaga (`disputaram`, `maisEscalasDentro`,
+    `whyOutReason`): mais escalas que todos que entraram, empate, ou dias que a
+    pessoa não podia pegar. Quem entrou com mais escalas do que alguém de fora
+    vem com o motivo (`whyNaoPodia`). Vale também para escalas já gravadas.
+  - montador: quem tem prioridade e não escolheu dia deixou de entrar na conta
+    do corte (`solveWeek`), com teste novo.
+  - README: lista de motivos atualizada.
+- **Testes:** os quatro arquivos passam; cenário com os números da semana de
+  21/09 (nomes trocados) confere o texto novo.

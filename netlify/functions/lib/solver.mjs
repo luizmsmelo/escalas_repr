@@ -208,7 +208,10 @@ export function solveWeek(participants, capacity) {
   const left = { ...capacity };
   for (const a of fixed.placed) left[a.day]--;
 
-  const disputantes = people.filter((p) => !fixed.taken.has(p.id));
+  // Quem tem prioridade e nao escolheu dia nao pode ser escalado em dia nenhum:
+  // conta-lo no corte baixaria o corte com vagas que ele nunca ocuparia.
+  const disputantes = people.filter((p) => !fixed.taken.has(p.id)
+    && !(p.priority && priorityDay(p) == null));
   const vagasDaSemana = DAYS.reduce((sum, d) => sum + (left[d] || 0), 0);
   const prioNaSexta = priorityOnFriday(people, capacity, left[FRIDAY] ?? 0);
   const friday = pickFriday(disputantes, left[FRIDAY] ?? 0, vagasDaSemana, prioNaSexta);

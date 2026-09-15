@@ -971,19 +971,48 @@ function whyFixed(explain) {
 }
 
 /**
- * Por que esta pessoa ficou de fora. Sao tres motivos diferentes, e chamar um
- * de outro seria mentira: 'corte' e estar acima do contador que cabia na
- * semana; 'empate' e ter o mesmo contador de gente que entrou, com mais gente
- * do que vaga; 'frente' e estar a frente de todo mundo que entrou - o app
- * estava a frente de todo mundo que entrou. Este ultimo nao deveria acontecer
- * com a regra de uma escala por semana, mas a frase existe para nunca chamar
- * um motivo pelo nome do outro se acontecer.
+ * Quem entrou disputando vaga. O dia fixo nao passa pelo contador, entao nao
+ * serve de referencia para dizer que alguem chegou com escalas demais.
+ */
+const disputaram = (explain) =>
+  explain.people.filter((q) => q.days.some((d) => d.via !== 'fixo'));
+
+/** Quantas escalas tinha quem entrou disputando com mais escalas: o corte de verdade. */
+const maisEscalasDentro = (explain) =>
+  Math.max(-Infinity, ...disputaram(explain).map((q) => q.totalBefore));
+
+/**
+ * Por que esta pessoa ficou de fora, comparando com quem DE FATO entrou - e nao
+ * com o corte que o solver estima antes da montagem, que ja contou gente que nem
+ * podia ser escalada e chamava de "acima do corte" quem so tinha empatado.
+ *   'contador'  - chegou com mais escalas do que todo mundo que entrou disputando;
+ *   'empate'    - entrou alguem com o mesmo numero: decidiram os desempates;
+ *   'restricao' - so entrou gente com MAIS escalas: as vagas que sobraram eram
+ *                 de dias que ela nao podia pegar (ferias, sexta vetada).
  */
 function whyOutReason(p, explain) {
-  if (p.aboveCut) return 'corte';
-  const iguaisDentro = explain.people.some((q) =>
-    q.personId !== p.personId && q.totalBefore === p.totalBefore && q.days.length);
-  return iguaisDentro ? 'empate' : 'frente';
+  const dentro = disputaram(explain);
+  if (!dentro.length || p.totalBefore > maisEscalasDentro(explain)) return 'contador';
+  if (dentro.some((q) => q.totalBefore === p.totalBefore)) return 'empate';
+  return 'restricao';
+}
+
+/** Por que quem ficou de fora com menos escalas nao podia pegar as vagas que sobraram. */
+function whyNaoPodia(lista) {
+  const semDia = lista.filter((p) => p.priority && p.priorityDay == null);
+  const outroDia = lista.filter((p) => p.priority && p.priorityDay != null);
+  const resto = lista.filter((p) => !p.priority);
+  const um = (l, sing, plur) => (l.length === 1 ? sing : plur);
+  return [
+    semDia.length && `${listaPessoas(semDia)} ${um(semDia, 'tem', 'têm')} prioridade e não
+      ${um(semDia, 'escolheu', 'escolheram')} dia nesta semana — quem tem prioridade só
+      entra no dia que escolhe`,
+    outroDia.length && `${listaPessoas(outroDia)} ${um(outroDia, 'tem', 'têm')} prioridade
+      e só ${um(outroDia, 'aceita', 'aceitam')} o dia que ${um(outroDia, 'escolheu',
+      'escolheram')}, que já estava cheio`,
+    resto.length && `${listaPessoas(resto)} não ${um(resto, 'podia', 'podiam')} pegar os
+      dias que sobraram (férias ou sexta vetada)`,
+  ].filter(Boolean).join('; ');
 }
 
 function whyCut(explain) {
@@ -1014,15 +1043,20 @@ function whyCut(explain) {
   // e contar isso como corte ou desempate seria mentira.
   // Acima do corte, prioridade nao muda nada: ficaria de fora mesmo podendo
   // escolher qualquer dia, entao o motivo e o contador.
-  const porPrioridade = fora.filter((p) => p.priority && !p.aboveCut);
+  const porPrioridade = fora.filter((p) => p.priority && whyOutReason(p, explain) !== 'contador');
   const grupo = (motivo) => fora.filter(
     (p) => !porPrioridade.includes(p) && whyOutReason(p, explain) === motivo);
   const nomes = (lista) => listaPessoas(lista);
   const ficou = (lista) => (lista.length === 1 ? 'ficou' : 'ficaram');
-  const [porContador, porEmpate, porFrente] = ['corte', 'empate', 'frente'].map(grupo);
-  // Acima do corte so se entra quando nao sobra ninguem dentro dele para a vaga
-  // (pickFriday na sexta; solveWeekdays prefere isso a vaga vazia ou a dobrar).
-  const entrouAcima = explain.people.filter((q) => q.aboveCut && q.days.length);
+  const [porContador, porEmpate, porRestricao] = ['contador', 'empate', 'restricao'].map(grupo);
+  // Quem entrou com mais escalas do que alguem que ficou de fora. So acontece
+  // quando quem tinha menos nao podia ficar com aquela vaga (prioridade, ferias,
+  // veto da sexta): pickFriday e solveWeekdays preferem isso a deixar a vaga
+  // vazia ou fazer alguem dobrar.
+  const menorFora = Math.min(Infinity, ...fora.map((p) => p.totalBefore));
+  const entrouComMais = disputaram(explain).filter((q) => q.totalBefore > menorFora);
+  const foraComMenos = fora.filter((p) =>
+    entrouComMais.some((q) => q.totalBefore > p.totalBefore));
 
   return `
     <h3 class="why-h">Camada 2 — quem trabalha nesta semana</h3>
@@ -1033,23 +1067,23 @@ function whyCut(explain) {
       ${contadores[0]} a ${contadores[contadores.length - 1]}.</p>
     ${porContador.length ? `<p class="why-p">${nomes(porContador)}
       ${ficou(porContador)} de fora <b>pelo contador</b>: ${porContador.length === 1
-        ? 'chegou' : 'chegaram'} acima do corte de <b>${escalas(explain.cut)}</b>, que é o
-      contador da última pessoa que cabia nas vagas. Acima do corte só se entra se não
-      houver mais ninguém para a vaga — e isso vale também para a sexta.</p>` : ''}
+        ? 'chegou' : 'chegaram'} com mais escalas do que qualquer pessoa que entrou
+      disputando vaga — quem entrou com mais escalas chegou com
+      <b>${escalas(maisEscalasDentro(explain))}</b>.</p>` : ''}
     ${porEmpate.length ? `<p class="why-p">${nomes(porEmpate)} ${ficou(porEmpate)} de fora
       <b>no desempate</b>: havia mais gente com o mesmo número de escalas do que vagas
       sobrando. Aí, e só aí, entram os desempates: primeiro a <b>sexta</b>, que sai da
       fila de sextas — e quem leva a sexta já está na semana —; depois a
       <b>preferência do grupo</b>, com a combinação que deixa todo mundo mais perto da 1ª
       opção. Se ainda empatar, o app desempata sempre do mesmo jeito, sem sorteio.</p>` : ''}
-    ${porFrente.length ? `<p class="why-p">${nomes(porFrente)} ${ficou(porFrente)} de fora
-      por estar <b>à frente no contador</b>: ${porFrente.length === 1 ? 'chegou' : 'chegaram'}
-      com mais escalas do que qualquer pessoa que entrou.</p>` : ''}
-    ${entrouAcima.length ? `<p class="why-p">${nomes(entrouAcima)} ${entrouAcima.length === 1
-        ? 'chegou' : 'chegaram'} acima do corte e mesmo assim ${entrouAcima.length === 1
-        ? 'entrou' : 'entraram'}: não sobrou ninguém dentro do corte que pudesse ficar com
-      ${esc(listaNomes([...new Set(entrouAcima.flatMap((q) =>
-        q.days.map((d) => `a ${nomeDia(d.day)}`)))]))}.</p>` : ''}
+    ${porRestricao.length ? `<p class="why-p">${nomes(porRestricao)} ${ficou(porRestricao)}
+      de fora mesmo com menos escalas do que gente que entrou: as vagas que sobraram eram
+      de dias que não ${porRestricao.length === 1 ? 'podia' : 'podiam'} pegar — dias de
+      férias ou a sexta vetada.</p>` : ''}
+    ${entrouComMais.length ? `<p class="why-p">${nomes(entrouComMais)}
+      ${entrouComMais.length === 1 ? 'entrou' : 'entraram'} com mais escalas do que gente
+      que ficou de fora, porque quem tinha menos <b>não podia ficar com essas vagas</b>:
+      ${whyNaoPodia(foraComMenos)}.</p>` : ''}
     ${whyCutPrioridade(porPrioridade, nomes, ficou)}
     <p class="why-p">Quem ficou de fora <b>não gastou escala</b>: o contador não andou, e
       por isso essas pessoas entram na frente na próxima semana.</p>`;
@@ -1106,8 +1140,8 @@ function whyFriday(explain, byDay) {
       <td class="num">${p.totalBefore}</td>
       <td>${levou
         ? (via === 'voluntario' ? 'levou — pediu sexta' : 'levou a sexta')
-          + (p.aboveCut ? ' (acima do corte: ninguém dentro dele podia)' : '')
-        : p.aboveCut ? 'fora da semana (contador)' : ''}</td>
+        : !p.days.length && whyOutReason(p, explain) === 'contador'
+          ? 'fora da semana (contador)' : ''}</td>
     </tr>`;
   }).join('');
 
@@ -1238,7 +1272,7 @@ function whyOnePerson(p, explain, byDay) {
     const naProximaPrio = ' O contador não andou, então entra na frente na próxima.';
     // Prioridade tem motivo proprio: nao e o corte geral, e o dia pedido ter
     // enchido. Chamar um de outro seria mentira.
-    if (p.priority && !p.aboveCut) {
+    if (p.priority && whyOutReason(p, explain) !== 'contador') {
       if (p.priorityDay == null) {
         return `tem <b>prioridade</b> e <b>não escolheu dia</b> nesta semana. Quem tem
           prioridade só entra no dia que pede, então não havia onde escalá-la.`;
@@ -1258,14 +1292,14 @@ function whyOnePerson(p, explain, byDay) {
     }
     const motivo = whyOutReason(p, explain);
     const naProxima = naProximaPrio;
-    if (motivo === 'corte') {
-      return `ficou <b>de fora</b> desta semana: ${chegou}, acima do corte de
-        ${escalas(explain.cut)} — o contador da última pessoa que cabia nas vagas.
-        Preferência não teve nada a ver.${naProxima}`;
+    if (motivo === 'contador') {
+      return `ficou <b>de fora</b> desta semana: ${chegou}, mais do que qualquer pessoa que
+        entrou disputando vaga — quem entrou com mais escalas chegou com
+        ${escalas(maisEscalasDentro(explain))}. Preferência não teve nada a ver.${naProxima}`;
     }
-    if (motivo === 'frente') {
-      return `ficou <b>de fora</b> desta semana: ${chegou}, mais do que qualquer pessoa
-        que entrou.${naProxima}`;
+    if (motivo === 'restricao') {
+      return `ficou <b>de fora</b> desta semana: ${chegou}, menos do que gente que entrou,
+        mas as vagas que sobraram eram de dias que não podia pegar.${naProxima}`;
     }
     return `ficou <b>de fora</b> desta semana: ${chegou}, o mesmo que gente que entrou —
       havia mais pessoas nesse número do que vagas. Nesse empate, e só nele, decidem a
@@ -1328,9 +1362,14 @@ function whyOnePerson(p, explain, byDay) {
     ? ' Ficou em mais de um dia porque havia mais vagas do que gente disponível: dobra'
       + ' quem tem menos escalas acumuladas, e quem já está na sexta é o último.'
     : '';
-  const acimaDoCorte = p.aboveCut
-    ? ` Chegou acima do corte de ${escalas(explain.cut)}: só entrou porque não sobrou
-      ninguém dentro do corte que pudesse ficar com essa vaga.`
+  // Entrou com mais escalas do que alguem que ficou de fora: quem tinha menos nao
+  // podia ficar com a vaga (ver whyNaoPodia).
+  const foraComMenos = p.days.some((d) => d.via !== 'fixo')
+    ? explain.people.filter((q) => !q.days.length && q.totalBefore < p.totalBefore)
+    : [];
+  const acimaDoCorte = foraComMenos.length
+    ? ` Entrou mesmo havendo gente de fora com menos escalas, que não podia ficar com
+      essa vaga — o motivo está em <b>quem trabalha nesta semana</b>.`
     : '';
   return `${chegou}${pedidos ? `, pediu ${pedidos}` : ', não registrou preferência'}, e
     ficou na ${partes.join('; e na ')}.${dobrou}${acimaDoCorte}`;

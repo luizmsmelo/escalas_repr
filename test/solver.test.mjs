@@ -596,6 +596,22 @@ console.log('\n--- prioridade: um dia so, ou nenhum ---');
      `explain carrega a flag e o dia (${JSON.stringify({ p: luiz.priority, d: luiz.priorityDay })})`);
 }
 
+{
+  // Prioridade sem dia escolhido nao entra na conta do corte: ela nao pode
+  // ocupar vaga nenhuma. Tres assim, com 1 escala a menos, nao podem baixar o
+  // corte e marcar como "acima do corte" quem entra com 2.
+  const gente = (id, extra) => ({ id, name: `P${id}`, choices: [1, 2, 3], totalCount: 0,
+    fridayCount: 0, noFriday: false, fixedDay: null, priority: false, blockedDays: [], ...extra });
+  const povo = [];
+  for (let i = 1; i <= 3; i++) povo.push(gente(i, { priority: true, choices: [] }));
+  for (let i = 4; i <= 9; i++) povo.push(gente(i, { totalCount: 1 }));
+  for (let i = 10; i <= 15; i++) povo.push(gente(i, { totalCount: 2 }));
+  const r = solveWeek(povo, CAP);   // 9 vagas
+  ok(r.explain.cut === 2, `o corte ignora quem nao pode ser escalado (${r.explain.cut})`);
+  ok(r.explain.people.filter((p) => p.days.length).every((p) => !p.aboveCut),
+     'ninguem que entrou fica marcado acima do corte');
+}
+
 console.log('\n--- prioridade na sexta: antes da fila, se o contador poe na semana ---');
 {
   // Semana normal, mais gente do que vagas. P1 tem prioridade na sexta, MENOS

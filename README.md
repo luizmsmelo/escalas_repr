@@ -314,9 +314,12 @@ explica **aquela** semana — não o método em abstrato:
 - as três camadas, na ordem, e por que a ordem é essa;
 - quem tinha dia fixo e se a vaga coube;
 - quantas vagas havia para quantas pessoas, quem ficou de fora e **por qual
-  motivo** (acima do corte, empatado no corte, à frente de todo mundo que entrou,
-  ou prioridade num dia que encheu — são coisas diferentes e a caixa não troca uma
-  pela outra), e quem entrou mesmo acima do corte, por não haver mais ninguém;
+  motivo** (mais escalas do que todo mundo que entrou, empate com quem entrou,
+  dias que a pessoa não podia pegar, ou prioridade — são coisas diferentes e a
+  caixa não troca uma pela outra), e quem entrou com mais escalas do que alguém
+  de fora, dizendo por que quem tinha menos não podia ficar com a vaga. A
+  comparação é sempre com quem **de fato entrou**, e não com o corte estimado
+  antes da montagem;
 - a fila da sexta inteira, em ordem, com os dois contadores de cada pessoa;
 - quem ficou em cada dia de segunda a quinta e que opção aquele dia era;
 - **pessoa por pessoa**, uma frase com o número que decidiu o caso dela — quem
