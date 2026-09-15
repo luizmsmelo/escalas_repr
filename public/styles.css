@@ -619,6 +619,19 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 }
 .btn-ghost:hover:not(:disabled) { background: var(--surface-2); }
 .btn-block { width: 100%; }
+/* Escolha ja salva: o botao vira confirmacao - verde e sem o apagado de
+   "desabilitado" - e so volta a ser o azul de salvar quando algo muda na tela. */
+.btn[data-saved="1"]:disabled {
+  opacity: 1; cursor: default;
+  background: color-mix(in srgb, var(--good) 12%, var(--surface-1));
+  color: color-mix(in srgb, var(--good) 70%, var(--text-primary));
+  border-color: color-mix(in srgb, var(--good) 55%, var(--border));
+}
+.save-status {
+  margin-top: 8px; text-align: center;
+  font-size: .82rem; color: var(--text-muted);
+}
+.save-status[data-tone="changed"] { color: var(--text-primary); font-weight: 600; }
 
 /* ---------------------------------------------------------------- tabbar -- */
 .tabbar {

@@ -164,17 +164,30 @@ async function loadMonth(ym) {
   renderCalendar();   // o calendário de Ajustes acompanha o mesmo mês
 }
 
-function syncDraftFromServer() {
+/**
+ * A escolha desta semana como esta gravada, ja no formato do rascunho - ou null
+ * se a pessoa ainda nao salvou nada. E a mesma conta que carrega o rascunho e que
+ * diz se o que esta na tela ja esta salvo.
+ */
+function escolhaSalva() {
   const mine = state.data.preferences.find((p) => p.personId === state.me?.id);
+  if (!mine) return null;
   // Com prioridade vale so a primeira escolha - o mesmo criterio do solver, se
   // a flag foi ligada depois de a pessoa ja ter marcado tres dias.
   // Escolha salva antes de as ferias serem cadastradas nao vale no dia de ferias.
   const bloqueados = vacationWeek().blocked;
-  state.draft = mine
-    ? mine.choices.filter((d) => !bloqueados.includes(d)).slice(0, isPriority() ? 1 : 3)
-    : [];
-  state.away = mine ? mine.unavailable : false;
-  state.noFriday = mine ? !!mine.noFriday : false;
+  return {
+    draft: mine.choices.filter((d) => !bloqueados.includes(d)).slice(0, isPriority() ? 1 : 3),
+    away: mine.unavailable,
+    noFriday: !!mine.noFriday,
+  };
+}
+
+function syncDraftFromServer() {
+  const salva = escolhaSalva();
+  state.draft = salva ? salva.draft : [];
+  state.away = salva ? salva.away : false;
+  state.noFriday = salva ? salva.noFriday : false;
   // Toda resposta do servidor descarta a edicao manual em andamento: a escala
   // que esta na tela passou a ser outra.
   state.edit = null;
@@ -347,13 +360,40 @@ function renderPicker() {
   // desfazer uma ausencia ja salva, e some quando nao ha nada a salvar.
   const soDesfazerAusencia = fixoVale && !state.away;
   save.hidden = (soDesfazerAusencia && !storedAway()) || ferias.fullWeek;
+
+  // O que esta na tela ja e o que esta gravado? Entao o botao vira confirmacao,
+  // e a frase de baixo lembra que ainda da para mudar ate o prazo. Qualquer
+  // mudanca na tela devolve o botao de salvar.
+  const salva = escolhaSalva();
+  const completa = state.away || state.draft.length === exigidos;
+  const igual = !!salva && completa && salva.away === state.away
+    && (state.away || (salva.draft.join() === state.draft.join()
+      && salva.noFriday === state.noFriday));
+  const jaSalva = igual && !locked && !soDesfazerAusencia;
+  save.dataset.saved = jaSalva ? '1' : '0';
+
   if (soDesfazerAusencia) {
     save.disabled = locked;
     save.textContent = 'Voltar a participar desta semana';
+  } else if (jaSalva) {
+    save.disabled = true;
+    save.textContent = state.away ? '✓ Ausência salva'
+      : prioridade ? '✓ Dia salvo' : '✓ Preferência salva';
   } else {
     save.disabled = locked || (!state.away && state.draft.length !== exigidos);
-    save.textContent = state.away ? 'Salvar ausência'
-      : prioridade ? 'Salvar meu dia' : 'Salvar preferência';
+    save.textContent = salva && !locked ? 'Salvar alterações'
+      : state.away ? 'Salvar ausência' : prioridade ? 'Salvar meu dia' : 'Salvar preferência';
+  }
+
+  const status = $('#saveStatus');
+  status.hidden = !salva || locked || soDesfazerAusencia || save.hidden;
+  if (!status.hidden) {
+    const ate = comPrazo ? `até domingo, ${fmtDay(addDays(week.monday, -1))}, às 23h59`
+      : 'enquanto a escala desta semana não for publicada';
+    status.dataset.tone = jaSalva ? 'saved' : 'changed';
+    status.textContent = jaSalva
+      ? `Sua escolha está salva. Se mudar de ideia, dá para alterar ${ate}: é só mexer e salvar de novo.`
+      : 'Você mudou a escolha, mas ainda não salvou. Até tocar em Salvar alterações, vale a que estava salva.';
   }
 
   renderRespondedList();
