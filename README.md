@@ -3,8 +3,8 @@
 Os colegas da equipe escolhem, semana a semana, em que dia ficam até as 18h.
 Cada um marca três dias em ordem de preferência — quem tem **prioridade** marca um
 só — até **domingo 23h59**. Na segunda-feira o app monta a escala, resolvendo os
-conflitos pelos contadores, e a **publica sozinho**. Quem preferir sempre o mesmo
-dia escolhe um **dia fixo** e sai da escolha semanal. O que mexe no sistema
+conflitos pelos contadores, e a **publica sozinho**. Quem o administrador libera
+para **escala fixa** escolhe um dia e sai da escolha semanal. O que mexe no sistema
 inteiro — pessoas, vagas, calendário, editar e publicar escala — fica com o
 **administrador**, que tem senha.
 
@@ -83,10 +83,22 @@ descrita logo abaixo da fase 0.
 
 ### Fase 0 — os dias fixos
 
-Uma pessoa pode ter um **dia fixo**: ela fica sempre naquele dia da semana. Ela
-mesma escolhe, no card "Meu dia fixo" da aba Escolher; o administrador também pode
-definir, em Ajustes. A vaga é reservada antes de qualquer disputa, e o que
-sobra de capacidade é que vai para as duas fases seguintes.
+Uma pessoa pode ter um **dia fixo**: ela fica sempre naquele dia da semana. São
+duas decisões, de duas pessoas diferentes:
+
+- **quem pode ter dia fixo** é o administrador quem diz, pela chave *escala
+  fixa* ao lado do nome, em Ajustes — do mesmo jeito que dá a estrela de
+  prioridade;
+- **qual dia** é a própria pessoa quem escolhe, no card "Meu dia fixo" da aba
+  Escolher. Sem a liberação esse card nem aparece.
+
+A separação existe porque a vaga fixa é reservada **antes de qualquer disputa**:
+quem se fixasse sozinho estaria saindo do rodízio por conta própria. O que sobra
+de capacidade é que vai para as duas fases seguintes.
+
+Tirar a liberação leva o dia junto — guardado, ele voltaria a valer sozinho no
+dia em que alguém religasse a chave. Enquanto a pessoa liberada não escolher um
+dia, ela participa da escolha semanal como todo mundo.
 
 Quem tem dia fixo:
 
@@ -137,9 +149,10 @@ de fora, não acumula escala, e por isso entra na frente na semana seguinte: o
 rodízio se fecha sozinho.
 
 Dia fixo e prioridade respondem à mesma pergunta — "em que dia essa pessoa
-fica?" — por caminhos diferentes, e não fazem sentido juntos. Ligar um desliga o
-outro. Por isso quem tem prioridade não escolhe dia fixo sozinho: ligar o dia fixo
-desligaria a estrela, que é do administrador.
+fica?" — por caminhos diferentes, e não fazem sentido juntos. As duas são chaves
+do administrador, lado a lado na lista de pessoas, e ligar uma desliga a outra:
+quem tem a estrela não tem escala fixa liberada, e por isso não vê o card "Meu
+dia fixo".
 
 **O limite da regra:** "toda vaga é preenchida" continua valendo acima de tudo.
 Numa semana com tanta vaga quanto gente, todo mundo trabalha, inclusive quem tem
@@ -273,7 +286,7 @@ que, nas mãos erradas, quebrariam o sistema pedem a **senha de administrador**:
 | qualquer pessoa | só o administrador |
 | --- | --- |
 | escolher dias, marcar ausência, cadastrar férias | cadastrar, renomear, desativar e remover pessoas |
-| escolher o **próprio dia fixo** (aba Escolher) | dar ou tirar prioridade (estrela) |
+| escolher o **próprio dia fixo**, se liberado | dar ou tirar prioridade (estrela) e **escala fixa** |
 | ver a prévia da semana (montada sozinha) | editar, publicar e reabrir escala |
 | ver escalas, contadores e calendário | vagas da semana, calendário e zerar contadores |
 
@@ -290,8 +303,9 @@ que, nas mãos erradas, quebrariam o sistema pedem a **senha de administrador**:
 - **Remover pessoa** só vale para quem ainda não tem histórico — cadastro feito por
   engano. Para os demais, desativar preserva tudo.
 - **Baixar cópia dos dados**, no modo admin, gera um JSON com todas as tabelas.
-- Quem tem **prioridade** não troca a estrela por dia fixo sozinho: ligar o dia fixo
-  desliga a estrela, que é do administrador.
+- **Escala fixa** é liberação, não escolha: sem a chave ligada o servidor recusa o
+  dia fixo — inclusive o que o administrador tentasse cadastrar direto. Ligar a
+  chave desliga a estrela da prioridade, e vice-versa.
 
 ---
 

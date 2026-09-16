@@ -421,6 +421,18 @@ ok((await call('POST', 'preferences',
 console.log('\n=== dia fixo ===');
 // Maio/2026 tem 04, 11 e 18 como segundas cheias - nenhum feriado no meio.
 const FIXA = '2026-05-04';
+
+// Dia fixo e permissao: sem a chave ligada, nem o administrador fixa ninguem.
+const semChave = await call('PATCH', 'people', { id: ids['Luiz Melo'], fixedDay: 3 });
+ok(semChave.status === 400 && /liberada/.test(semChave.json.error),
+   `sem liberacao, o dia fixo e recusado: ${semChave.json.error}`);
+console.log(`  ${semChave.json.error}`);
+
+const libera = await call('PATCH', 'people', { id: ids['Luiz Melo'], fixedAllowed: true });
+ok(libera.status === 200 && libera.json.person.fixedAllowed === true,
+   'administrador libera a escala fixa');
+ok(libera.json.person.fixedDay === null, 'liberar nao escolhe o dia por ninguem');
+
 const fx = await call('PATCH', 'people', { id: ids['Luiz Melo'], fixedDay: 3 });
 ok(fx.status === 200 && fx.json.person.fixedDay === 3, `dia fixo gravado: ${JSON.stringify(fx.json)}`);
 
@@ -431,6 +443,8 @@ ok(!stF.stats.fridayQueue.some((q) => q.personId === ids['Luiz Melo']),
 ok(stF.stats.fridayQueue.length === 7, `fila cai de 8 para 7 (${stF.stats.fridayQueue.length})`);
 
 // A quarta tem 2 vagas: cabe mais um fixo, mas nao um terceiro.
+await call('PATCH', 'people', { id: ids['Ana Souza'], fixedAllowed: true });
+await call('PATCH', 'people', { id: ids['Bruno Lima'], fixedAllowed: true });
 ok((await call('PATCH', 'people', { id: ids['Ana Souza'], fixedDay: 3 })).status === 200,
    'segunda pessoa fixa na quarta cabe');
 const terceiro = await call('PATCH', 'people', { id: ids['Bruno Lima'], fixedDay: 3 });
@@ -491,7 +505,13 @@ ok(![ids['Luiz Melo'], ids['Ana Souza']].includes(sexta(gFe).personId),
 // Tirar o dia fixo devolve a pessoa a fila.
 ok((await call('PATCH', 'people', { id: ids['Luiz Melo'], fixedDay: null })).status === 200,
    'dia fixo removido');
-await call('PATCH', 'people', { id: ids['Ana Souza'], fixedDay: null });
+
+// Tirar a liberacao leva o dia junto: guardado, ele voltaria a valer sozinho no
+// dia em que alguem religasse a chave.
+const desliga = await call('PATCH', 'people', { id: ids['Ana Souza'], fixedAllowed: false });
+ok(desliga.status === 200 && desliga.json.person.fixedDay === null
+   && desliga.json.person.fixedAllowed === false, 'tirar a liberacao apaga o dia fixo');
+await call('PATCH', 'people', { id: ids['Bruno Lima'], fixedAllowed: false });
 await call('POST', 'day', { date: '2026-05-13', works: true });
 const volta = (await call('GET', `state?week=${FIXA}`)).json;
 ok(volta.people.find((p) => p.id === ids['Luiz Melo']).fixedDay === null, 'sem dia fixo de novo');
@@ -577,13 +597,21 @@ ok(stP0.people.filter((p) => p.priority).length === 3, 'a flag chega na tela');
 ok(!stP0.stats.fridayQueue.some((q) => COM_FLAG.includes(q.name)),
    'quem tem prioridade sai da fila da sexta');
 
-// Prioridade e dia fixo respondem a mesma pergunta: ligar um desliga o outro.
-const trocaFixo = await call('PATCH', 'people', { id: ids['Luiz Melo'], fixedDay: 1 });
+// Prioridade e escala fixa respondem a mesma pergunta: ligar uma desliga a outra.
+// Com a estrela acesa nem da para fixar o dia - a chave e que muda de regime.
+const fixoComEstrela = await call('PATCH', 'people', { id: ids['Luiz Melo'], fixedDay: 1 });
+ok(fixoComEstrela.status === 400 && /prioridade/.test(fixoComEstrela.json.error),
+   `com estrela, o dia fixo e recusado: ${fixoComEstrela.json.error}`);
+
+const trocaFixo = await call('PATCH', 'people',
+  { id: ids['Luiz Melo'], fixedAllowed: true, fixedDay: 1 });
 ok(trocaFixo.status === 200 && trocaFixo.json.person.priority === false,
-   'cadastrar dia fixo desliga a prioridade');
+   'liberar escala fixa desliga a prioridade');
+ok(trocaFixo.json.person.fixedDay === 1, 'e a mesma chamada ja fixa o dia');
 const trocaPrio = await call('PATCH', 'people', { id: ids['Luiz Melo'], priority: true });
-ok(trocaPrio.status === 200 && trocaPrio.json.person.fixedDay === null,
-   'e voltar a prioridade tira o dia fixo');
+ok(trocaPrio.status === 200 && trocaPrio.json.person.fixedDay === null
+   && trocaPrio.json.person.fixedAllowed === false,
+   'e voltar a prioridade tira o dia fixo e a liberacao');
 
 // Com a flag, tres dias nao servem mais: e um dia, exatamente.
 const tres = await call('POST', 'preferences',
@@ -922,6 +950,7 @@ console.log('\n=== modo administrador ===');
     ['PATCH', 'people', { id: alguem.id, name: 'Nome Trocado' }],
     ['PATCH', 'people', { id: alguem.id, active: false }],
     ['PATCH', 'people', { id: alguem.id, priority: true }],
+    ['PATCH', 'people', { id: alguem.id, fixedAllowed: true }],
     ['DELETE', `people?id=${alguem.id}`],
     ['POST', 'reset', {}],
     ['POST', 'capacity', { monday: '2026-12-07', capWeekday: 9, capFriday: 9 }],
@@ -949,23 +978,34 @@ console.log('\n=== modo administrador ===');
     ok(res.status === 403, `passe ${nome} e recusado (${res.status})`);
   }
 
-  // Continua livre: ver a previa, cuidar das proprias escolhas e do dia fixo.
+  // Continua livre: ver a previa, cuidar das proprias escolhas e, DENTRO da
+  // liberacao, do proprio dia fixo.
   const SEM = '2026-12-14';
   ok((await previa(SEM, SEM, comum)).status === 200, 'ver a escala continua livre');
   ok((await call('POST', 'preferences', { monday: SEM, personId: alguem.id, choices: [1, 2, 3] },
      SEM, comum)).status === 200, 'salvar preferencia continua livre');
+
+  const semLiberacao = await semAdmin('PATCH', 'people', { id: alguem.id, fixedDay: 5 });
+  ok(semLiberacao.status === 400 && /liberada/.test(semLiberacao.json.error),
+     `sem liberacao, ninguem se fixa sozinho: ${semLiberacao.json.error}`);
+
+  await call('PATCH', 'people', { id: alguem.id, fixedAllowed: true });
   const fixo = await semAdmin('PATCH', 'people', { id: alguem.id, fixedDay: 5 });
   ok(fixo.status === 200 && fixo.json.person.fixedDay === 5,
-     `a propria pessoa escolhe o dia fixo: ${JSON.stringify(fixo.json.error ?? '')}`);
+     `liberada, a propria pessoa escolhe o dia: ${JSON.stringify(fixo.json.error ?? '')}`);
   ok((await semAdmin('PATCH', 'people', { id: alguem.id, fixedDay: null })).status === 200,
      'e tira o dia fixo');
+  await call('PATCH', 'people', { id: alguem.id, fixedAllowed: false });
 
-  // Quem tem prioridade nao troca a estrela por dia fixo sem o administrador.
+  // Quem tem prioridade nao troca a estrela por dia fixo sem o administrador -
+  // nem ligando a liberacao, nem fixando o dia.
   const prio = (await call('POST', 'people', { name: 'Pessoa Com Estrela' })).json.person;
   await call('PATCH', 'people', { id: prio.id, priority: true });
   const troca = await semAdmin('PATCH', 'people', { id: prio.id, fixedDay: 2 });
   ok(troca.status === 400 && /prioridade/.test(troca.json.error),
      `prioridade nao vira dia fixo sem admin: ${troca.json.error}`);
+  ok((await semAdmin('PATCH', 'people', { id: prio.id, fixedAllowed: true })).status === 403,
+     'e a liberacao em si so o administrador da');
   ok((await call('GET', 'state')).json.people.find((p) => p.id === prio.id).priority === true,
      'e a estrela continua');
 

@@ -135,14 +135,17 @@
         </form>
       </section>
 
-      <section class="card" id="fixedDayCard">
+      <!-- So aparece para quem o administrador liberou para escala fixa
+           (ver renderMyFixedDay). -->
+      <section class="card" id="fixedDayCard" hidden>
         <h2 class="card-title">
           Meu dia fixo
-          <span class="card-sub">opcional</span>
+          <span class="card-sub">liberado para você</span>
         </h2>
-        <p class="hint hint-muted">Com dia fixo, você fica sempre no mesmo dia e não precisa
-          escolher a cada semana. Cada dia comporta poucas pessoas fixas: quem pede primeiro
-          fica com a vaga.</p>
+        <p class="hint hint-muted">O administrador liberou <strong>escala fixa</strong> para
+          você: escolha aqui o dia em que quer ficar e pronto &mdash; você fica sempre nele e
+          não precisa escolher a cada semana. Cada dia comporta poucas pessoas fixas: quem
+          pede primeiro fica com a vaga.</p>
         <select id="myFixedDay" class="fixedday-select" aria-label="Meu dia fixo">
           <option value="">Sem dia fixo</option>
           <option value="1">Segunda-feira</option>
@@ -151,8 +154,8 @@
           <option value="4">Quinta-feira</option>
           <option value="5">Sexta-feira</option>
         </select>
-        <p id="myFixedDayPrio" class="hint hint-muted" hidden>Você tem <strong>prioridade</strong>:
-          escolhe o dia a cada semana. Para passar a ter dia fixo, fale com o administrador.</p>
+        <p id="myFixedDayPick" class="hint hint-muted" hidden>Enquanto você não escolher um
+          dia, continua escolhendo suas preferências semana a semana, como todo mundo.</p>
       </section>
 
       <div class="card">
@@ -255,10 +258,14 @@
           <input id="addPersonName" type="text" placeholder="Nome" maxlength="60" required>
           <button type="submit" class="btn btn-primary">Adicionar</button>
         </form>
-        <p class="hint hint-muted">A última coluna é o <b>dia fixo</b> de cada pessoa.
-          Desativar mantém o histórico da pessoa nos contadores;
-          remover só vale para quem ainda não tem histórico (cadastro feito por engano). <strong>Dia fixo</strong> reserva a mesma vaga toda semana e
-          tira a pessoa da escolha de preferências e da fila da sexta.</p>
+        <p class="hint hint-muted">Desativar mantém o histórico da pessoa nos contadores;
+          remover só vale para quem ainda não tem histórico (cadastro feito por engano).</p>
+        <p class="hint hint-muted">A última coluna é a chave da <strong>escala fixa</strong>:
+          ligada, a pessoa passa a ver o card &ldquo;Meu dia fixo&rdquo; na aba Escolher e
+          decide lá <strong>qual</strong> dia quer &mdash; a chave mostra o dia assim que ela
+          escolhe. Dia fixo reserva a mesma vaga toda semana e tira a pessoa da escolha de
+          preferências e da fila da sexta; por isso ele é liberado aqui, e não pego por conta
+          própria. Desligar a chave devolve a pessoa ao rodízio.</p>
         <p class="hint hint-muted">A estrela dá <strong>prioridade</strong>: a pessoa
           escolhe <strong>1 dia</strong> a cada semana, em vez de 3, e só entra na escala
           nesse dia &mdash; ou não entra naquela semana. A vaga é disputada pelo mesmo
@@ -321,11 +328,12 @@
           ritmo.
         </p>
         <p class="hint">
-          <strong>Dia fixo vem antes de tudo.</strong> Quem escolhe um dia fixo, no card
-          &ldquo;Meu dia fixo&rdquo;, fica sempre nesse dia: a vaga é reservada antes de
-          qualquer disputa, e não é preciso responder toda semana. Cada dia comporta poucas
-          pessoas fixas &mdash; quem pede primeiro fica com a vaga. É a única coisa que passa
-          na frente do contador. Se o dia fixo cair num feriado ou nas férias da pessoa, ela
+          <strong>Dia fixo vem antes de tudo.</strong> O administrador libera a
+          <strong>escala fixa</strong> para quem precisa dela; só essas pessoas veem o card
+          &ldquo;Meu dia fixo&rdquo; na aba Escolher, e é lá que elas escolhem o dia. Quem tem
+          um fica sempre nesse dia: a vaga é reservada antes de qualquer disputa, e não é
+          preciso responder toda semana. Cada dia comporta poucas pessoas fixas &mdash; quem
+          pede primeiro fica com a vaga. É a única coisa que passa na frente do contador. Se o dia fixo cair num feriado ou nas férias da pessoa, ela
           escolhe como todo mundo naquela semana &mdash; mas continua fora da fila da sexta:
           só pega sexta se a colocar entre as opções.
         </p>
@@ -364,8 +372,8 @@
         </p>
         <p class="hint">
           <strong>Ajustes ficam com o administrador.</strong> Editar, publicar ou reabrir uma
-          escala, cadastrar pessoas, dar prioridade, mudar vagas e calendário e zerar
-          contadores pedem a senha de administrador. Uma escala ajustada à mão conta nos
+          escala, cadastrar pessoas, dar prioridade, liberar escala fixa, mudar vagas e
+          calendário e zerar contadores pedem a senha de administrador. Uma escala ajustada à mão conta nos
           contadores como qualquer outra.
         </p>
       </section>

@@ -82,7 +82,7 @@ async function dispatch(route, method, params, body, request) {
     // rota de gerar: a previa sai pronta em `state`, montada na leitura.
     case 'GET state':       return getState(params.get('week'));
     case 'GET stats':       return getStats(params.get('month'));
-    case 'PATCH people':    return updatePerson(body, request);   // dia fixo e livre; o resto, admin
+    case 'PATCH people':    return updatePerson(body, request);   // so o proprio dia fixo e livre
     case 'POST preferences':return savePreferences(body);
     case 'POST vacations':  return createVacation(body);
     case 'DELETE vacations':return deleteVacation(params);
@@ -293,7 +293,7 @@ async function createPerson({ name }) {
   const [person] = await sql`
     insert into people (name, start_total, start_fridays)
     values (${clean}, ${start.total}, ${start.fridays})
-    returning id, name, active, fixed_day, priority`;
+    returning id, name, active, fixed_day, fixed_allowed, priority`;
   return { person: toPerson(person), start };
 }
 
@@ -319,21 +319,14 @@ async function startingPoint() {
   };
 }
 
-async function updatePerson({ id, name, active, fixedDay, priority }, request) {
+async function updatePerson({ id, name, active, fixedDay, fixedAllowed, priority }, request) {
   const personId = requireId(id);
-  // A propria pessoa so mexe no dia fixo. Nome, ativo e prioridade sao do
-  // administrador - e o dia fixo de quem tem prioridade tambem, porque ligar o
-  // dia fixo desliga a estrela, que so o administrador da e tira.
+  // A propria pessoa so mexe em QUAL dia ela fica - e so dentro da liberacao.
+  // Nome, ativo, prioridade e a liberacao em si sao do administrador.
   const admin = await isAdminRequest(request);
-  if (!admin && (name !== undefined || active !== undefined || priority !== undefined)) {
+  if (!admin && (name !== undefined || active !== undefined
+                 || priority !== undefined || fixedAllowed !== undefined)) {
     await requireAdmin(request);
-  }
-  if (!admin && fixedDay !== undefined) {
-    const [atual] = await sql`select priority from people where id = ${personId}`;
-    if (atual?.priority) {
-      throw bad('Quem tem prioridade escolhe o dia a cada semana. Para passar a ter dia '
-        + 'fixo, fale com o administrador.');
-    }
   }
   if (name !== undefined) {
     const clean = String(name).trim().replace(/\s+/g, ' ');
@@ -346,24 +339,37 @@ async function updatePerson({ id, name, active, fixedDay, priority }, request) {
   if (active !== undefined) {
     await sql`update people set active = ${!!active} where id = ${personId}`;
   }
-  // Dia fixo e prioridade sao dois jeitos de responder a mesma pergunta - "em
-  // que dia essa pessoa fica?" - e nao fazem sentido juntos: o dia fixo ja
-  // reserva a vaga, entao a prioridade nao teria o que decidir. Ligar um
-  // desliga o outro, em vez de recusar: quem clica esta trocando de regime.
+  // Escala fixa e prioridade sao dois jeitos de responder a mesma pergunta - "em
+  // que dia essa pessoa fica?" - e nao fazem sentido juntas: a vaga fixa ja esta
+  // reservada, entao a prioridade nao teria o que decidir. Ligar uma desliga a
+  // outra, em vez de recusar: o administrador esta trocando de regime.
+  //
+  // A liberacao vem antes do dia de proposito: assim uma so chamada consegue
+  // liberar e ja fixar o dia, e nao o contrario.
+  if (fixedAllowed !== undefined) {
+    // Tirar a liberacao leva o dia junto - guardado, ele voltaria a valer
+    // sozinho no dia em que alguem religasse a chave.
+    await sql`update people set fixed_allowed = ${!!fixedAllowed},
+                priority  = case when ${!!fixedAllowed} then false else priority end,
+                fixed_day = case when ${!!fixedAllowed} then fixed_day else null end
+              where id = ${personId}`;
+  }
   if (fixedDay !== undefined) {
     const dia = parseFixedDay(fixedDay);
-    if (dia !== null) await assertFixedDayFits(personId, dia);
-    await sql`update people set fixed_day = ${dia},
-                priority = case when ${dia}::int is null then priority else false end
-              where id = ${personId}`;
+    if (dia !== null) {
+      await assertFixedAllowed(personId);
+      await assertFixedDayFits(personId, dia);
+    }
+    await sql`update people set fixed_day = ${dia} where id = ${personId}`;
   }
   if (priority !== undefined) {
     await sql`update people set priority = ${!!priority},
-                fixed_day = case when ${!!priority} then null else fixed_day end
+                fixed_allowed = case when ${!!priority} then false else fixed_allowed end,
+                fixed_day     = case when ${!!priority} then null else fixed_day end
               where id = ${personId}`;
   }
   const [person] = await sql`
-    select id, name, active, fixed_day, priority from people where id = ${personId}`;
+    select id, name, active, fixed_day, fixed_allowed, priority from people where id = ${personId}`;
   if (!person) throw new HttpError(404, 'Pessoa nao encontrada.');
   return { person: toPerson(person) };
 }
@@ -1414,11 +1420,15 @@ const byName = (rows) => rows.sort((a, b) => collator.compare(a.name, b.name));
 
 const toPerson = (r) => ({
   id: r.id, name: r.name, active: r.active,
-  fixedDay: r.fixed_day ?? null, priority: !!r.priority,
+  // `fixedAllowed` e a permissao, dada pelo administrador; `fixedDay` e o dia
+  // que a pessoa escolheu dentro dela - e pode ser null enquanto ela nao
+  // escolher.
+  fixedDay: r.fixed_day ?? null, fixedAllowed: !!r.fixed_allowed,
+  priority: !!r.priority,
 });
 
 const loadPeople = () =>
-  sql`select id, name, active, fixed_day, priority from people`
+  sql`select id, name, active, fixed_day, fixed_allowed, priority from people`
     .then((rows) => byName(rows.map(toPerson)));
 
 /** Dia fixo vindo da tela: '' e 0 significam "sem dia fixo". */
@@ -1427,6 +1437,23 @@ function parseFixedDay(value) {
   const day = Number(value);
   if (!DAYS.includes(day)) throw bad('Dia fixo invalido: use de segunda a sexta.');
   return day;
+}
+
+/**
+ * Dia fixo e permissao do administrador, e nao escolha livre: a vaga fixa e
+ * reservada antes de qualquer disputa, entao quem se fixasse sozinho sairia do
+ * rodizio por conta propria. Sem a liberacao o card nem aparece na tela; esta
+ * checagem e o que faz a regra valer tambem fora dela.
+ */
+async function assertFixedAllowed(personId) {
+  const [row] = await sql`select fixed_allowed, priority from people where id = ${personId}`;
+  if (!row) throw new HttpError(404, 'Pessoa nao encontrada.');
+  if (row.fixed_allowed) return;
+  throw bad(row.priority
+    ? 'Quem tem prioridade escolhe o dia a cada semana. Para passar a ter dia fixo, '
+      + 'fale com o administrador.'
+    : 'Escala fixa nao esta liberada para essa pessoa: o administrador liga a chave na '
+      + 'lista de pessoas, em Ajustes.');
 }
 
 /**

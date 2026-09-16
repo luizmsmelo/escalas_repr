@@ -63,6 +63,18 @@ export const SCHEMA = [
   // sempre o mesmo dia antes de qualquer disputa.
   `alter table people add column if not exists priority boolean not null default false`,
 
+  // Dia fixo virou permissao, e nao escolha livre: o administrador libera quem
+  // pode ter dia fixo, e a propria pessoa diz QUAL dia na aba Escolher. Antes
+  // qualquer um se fixava sozinho, o que esvaziava o rodizio pelo lado de
+  // dentro - a vaga fixa e reservada antes de qualquer disputa.
+  `alter table people add column if not exists fixed_allowed boolean not null default false`,
+
+  // Quem ja tinha dia fixo antes desta coluna existir continua com ele: ter dia
+  // fixo sempre foi, na pratica, estar liberado para um. Roda a cada instancia
+  // nova da funcao, mas so alcanca quem tem dia gravado - nunca liga a
+  // permissao de quem o administrador tirou de la.
+  `update people set fixed_allowed = true where fixed_day is not null and not fixed_allowed`,
+
   // Por que a escala daquela semana ficou como ficou: o que cada pessoa pediu e
   // com que contadores chegou na semana. Fica gravado junto com a semana porque
   // e o registro de uma geracao - refazer a conta depois daria outro resultado,

@@ -1028,33 +1028,36 @@ body.is-busy { cursor: progress; }
   border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
   background: color-mix(in srgb, var(--warn) 12%, transparent);
 }
-/* Com prioridade o dia fixo nao se aplica: o seletor fica visivelmente inerte. */
-.person-fixed:disabled { opacity: .4; }
-
-/* O seletor fica na mesma linha do nome. Com 9 pessoas, uma segunda linha por
-   pessoa viraria uma parede de "sem dia fixo" numa tela de celular. Em telas
-   muito estreitas o flex-wrap deixa ele cair sozinho para a linha de baixo.
+/* A chave da escala fixa fica na mesma linha do nome. Com 9 pessoas, uma
+   segunda linha por pessoa viraria uma parede de "sem dia fixo" numa tela de
+   celular. Em telas muito estreitas o flex-wrap deixa ela cair sozinha para a
+   linha de baixo.
 
    O flex-basis do nome precisa ser pequeno: num container com wrap, o navegador
    QUEBRA a linha quando a soma dos basis nao cabe, em vez de encolher os itens.
-   Com basis de 100px, o seletor caia de linha em toda pessoa num celular de
+   Com basis de 100px, a chave caia de linha em toda pessoa num celular de
    360px - a parede que este bloco existe para evitar. */
 .person-row { flex-wrap: wrap; }
 .person-row input { flex: 1 1 56px; }
+/* Desligada e so uma chave apagada ("FIXA"); ligada, ela acende e o rotulo vira
+   o dia que a PESSOA escolheu - o administrador libera, nao escolhe o dia. */
 .person-fixed {
   flex: none;
-  padding: 7px 2px 7px 6px;
+  min-width: 44px; height: 34px;
+  padding: 0 7px;
   background: var(--surface-1);
   color: var(--text-muted);
   border: 1px solid var(--border);
   border-radius: 8px;
-  font-size: .78rem;
+  font-size: .72rem; font-weight: 650; letter-spacing: .02em;
+  cursor: pointer;
 }
-.person-fixed[data-set="1"] {
-  color: var(--accent); font-weight: 650;
+.person-fixed:hover { border-color: var(--border-strong); color: var(--text-primary); }
+.person-fixed[data-on="1"] {
+  color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
-.person-fixed:focus { border-color: var(--accent); outline: none; }
 
 /* ---------------------------------------------------------------- ferias --- */
 /* A caixa de semana inteira de ferias reaproveita a do dia fixo: ocupa o mesmo

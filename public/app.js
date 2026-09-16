@@ -403,13 +403,20 @@ function renderPicker() {
   renderMyFixedDay();
 }
 
-/** Dia fixo escolhido pela propria pessoa. Com prioridade, so o administrador troca. */
+/**
+ * O card so existe para quem o administrador liberou para escala fixa. Para o
+ * resto ele nem aparece: a vaga fixa e reservada antes de qualquer disputa,
+ * entao fixar-se sozinho era sair do rodizio por conta propria. Dentro da
+ * liberacao, o dia e escolha da pessoa - inclusive voltar a nao ter nenhum.
+ */
 function renderMyFixedDay() {
   const eu = state.data.people.find((p) => p.id === state.me?.id);
-  const select = $('#myFixedDay');
-  select.value = eu?.fixedDay ? String(eu.fixedDay) : '';
-  select.disabled = !eu || !!eu.priority;
-  $('#myFixedDayPrio').hidden = !eu?.priority;
+  $('#fixedDayCard').hidden = !eu?.fixedAllowed;
+  if (!eu?.fixedAllowed) return;
+  $('#myFixedDay').value = eu.fixedDay ? String(eu.fixedDay) : '';
+  // Liberado e ainda sem dia: a pessoa escolhe normalmente, como todo mundo,
+  // ate dizer em que dia quer ficar.
+  $('#myFixedDayPick').hidden = eu.fixedDay != null;
 }
 
 /** Dia fixo de quem esta usando o app, ou null. */
@@ -1971,6 +1978,19 @@ function renderAdmin() {
 
 /* --- aba: ajustes --------------------------------------------------------- */
 
+/**
+ * O botao da escala fixa e uma chave: liga ou desliga a liberacao. O DIA e da
+ * pessoa, no card "Meu dia fixo" - por isso o botao mostra o dia que ela
+ * escolheu, quando ja escolheu, em vez de deixar escolher por ela.
+ */
+function tituloEscalaFixa(p) {
+  if (!p.fixedAllowed) return 'Liberar escala fixa (a pessoa escolhe o dia)';
+  return p.fixedDay
+    ? `Escala fixa liberada; escolheu ${DAY_NAMES[p.fixedDay].toLowerCase()}-feira. `
+      + 'Tocar tira a liberação.'
+    : 'Escala fixa liberada; a pessoa ainda não escolheu o dia. Tocar tira a liberação.';
+}
+
 function renderSettings() {
   renderAdmin();
   const people = state.data.people;
@@ -1990,14 +2010,12 @@ function renderSettings() {
                 title="${p.priority ? 'Tirar a prioridade' : 'Dar prioridade (escolhe 1 dia por semana)'}"
                 aria-pressed="${p.priority ? 'true' : 'false'}"
                 aria-label="Prioridade de ${esc(p.name)}">★</button>
-        <select class="person-fixed" data-action="fixed" data-set="${p.fixedDay ? 1 : 0}"
-                ${p.priority ? 'disabled' : ''}
-                title="${p.priority ? 'Com prioridade a pessoa escolhe o dia a cada semana' : 'Dia fixo'}"
-                aria-label="Dia fixo de ${esc(p.name)}">
-          <option value=""${p.fixedDay == null ? ' selected' : ''}>—</option>
-          ${[1, 2, 3, 4, 5].map((d) =>
-            `<option value="${d}"${p.fixedDay === d ? ' selected' : ''}>${DAY_SHORT[d]}</option>`).join('')}
-        </select>
+        <button class="person-fixed" type="button" data-action="fixed"
+                data-on="${p.fixedAllowed ? 1 : 0}"
+                aria-pressed="${p.fixedAllowed ? 'true' : 'false'}"
+                title="${esc(tituloEscalaFixa(p))}"
+                aria-label="Escala fixa de ${esc(p.name)}">${
+                  p.fixedDay ? DAY_SHORT[p.fixedDay] : 'FIXA'}</button>
       </li>`,
         )
         .join('')
@@ -2604,6 +2622,14 @@ function wireEvents() {
         await post('/people', { id, active: !person.active }, 'PATCH');
         await loadWeek(state.week);
       });
+    } else if (btn.dataset.action === 'fixed') {
+      run(async () => {
+        await post('/people', { id, fixedAllowed: !person.fixedAllowed }, 'PATCH');
+        await loadWeek(state.week);
+        toast(person.fixedAllowed
+          ? `${person.name} volta a escolher os dias toda semana.`
+          : `${person.name} pode ter escala fixa e escolhe o dia na aba Escolher.`);
+      });
     } else if (btn.dataset.action === 'priority') {
       run(async () => {
         await post('/people', { id, priority: !person.priority }, 'PATCH');
@@ -2627,23 +2653,6 @@ function wireEvents() {
   $('#peopleList').addEventListener('change', (e) => {
     const id = Number(e.target.closest('[data-person]')?.dataset.person);
     if (!id) return;
-
-    if (e.target.dataset.action === 'fixed') {
-      const escolha = e.target.value;
-      run(async () => {
-        try {
-          await post('/people', { id, fixedDay: escolha === '' ? null : Number(escolha) }, 'PATCH');
-        } catch (err) {
-          renderSettings();   // devolve o select ao valor que o servidor aceita
-          throw err;
-        }
-        await loadWeek(state.week);
-        toast(escolha === ''
-          ? 'Dia fixo removido.'
-          : `Dia fixo: ${DAY_NAMES[Number(escolha)].toLowerCase()}-feira.`);
-      });
-      return;
-    }
 
     if (e.target.tagName !== 'INPUT') return;
     const name = e.target.value;
