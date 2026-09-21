@@ -251,16 +251,28 @@ const limpa = await call('POST', 'assignments', { monday: WEEK, slots: [] });
 ok(limpa.status === 200 && limpa.json.assignments.length === 0, 'lista vazia limpa a semana');
 const marLimpo = (await call('GET', 'stats?month=2026-03')).json.stats.totals.assigned;
 ok(marLimpo < marCheio, `os totais do mes acompanham (${marCheio} -> ${marLimpo})`);
-ok((await call('POST', 'publish', { monday: WEEK, published: true })).status === 400,
-   'semana esvaziada de proposito nao tem o que publicar');
+// Esvaziar a semana e uma decisao ("ninguem fica ate as 18h nesta semana"), e
+// publica como qualquer outra - sem linha nenhuma, nao mexe em contador algum.
+const pubVazia = await call('POST', 'publish', { monday: WEEK, published: true });
+ok(pubVazia.status === 200, 'semana esvaziada de proposito publica como esta');
+ok(pubVazia.json.assignments.length === 0, 'e publica vazia mesmo');
+await call('POST', 'publish', { monday: WEEK, published: false });
 // E ela continua vazia: escala gravada e fato, e fato nao se remonta sozinho.
 ok((await previa(WEEK)).json.assignments.length === 0,
    'semana esvaziada nao volta a se montar na leitura seguinte');
+// A tela precisa saber POR QUE ela esta vazia - antes dizia "ninguem
+// disponivel" para todo caso, que era o unico motivo que ela nao podia saber.
+ok((await previa(WEEK)).json.week.semEscala?.code === 'guardada-vazia',
+   'e a semana diz que foi guardada vazia');
 
 // Descartar os ajustes devolve a semana a previa, montada de novo a cada leitura.
 const voltou = await call('DELETE', `assignments?monday=${WEEK}`, undefined, WEEK);
 ok(voltou.status === 200 && voltou.json.assignments.length === 9,
    `descartar os ajustes devolve a previa (${voltou.json.assignments.length} vagas)`);
+// Descartar desfaz TUDO o que a mao fez na semana, inclusive o `auto_hold` que
+// a reabertura deixou: com ele de pe, a semana saia da publicacao de segunda em
+// silencio e virava passado sem escala, fora dos contadores de todo mundo.
+ok(voltou.json.week.autoHold === false, 'e devolve a semana a publicacao automatica');
 ok(voltou.json.assignments.every((a) => a.via !== 'manual'),
    'sem nenhum resto do ajuste manual');
 ok(voltou.json.preview != null, 'e a semana volta a ser previa');
@@ -1107,6 +1119,97 @@ console.log('\n=== publicacao automatica ===');
   ok(atrasada.assignments.length > 0, 'com a escala que ela teria tido');
 
   process.env.ESCALAS_SEM_PUBLICACAO_AUTOMATICA = '1';
+}
+
+console.log('\n=== por que a semana esta sem escala ===');
+/*
+ * A tela mostrava uma frase so - "Ninguem disponivel para esta semana" - para
+ * TODOS os jeitos de uma semana chegar vazia, inclusive para os que nada tinham
+ * a ver com gente disponivel: escala salva vazia, semana sem vaga, semana fora
+ * da janela da previa. Quem lia nao ficava sabendo o que estava acontecendo nem
+ * o que fazer. O motivo passa a vir do servidor, que e quem tem os dados.
+ */
+{
+  const VAZIA = '2027-03-01';                       // segunda, sem feriado
+  const HOJE = '2027-02-22';                        // a semana anterior
+  const motivo = async (semana, hoje) =>
+    (await call('GET', `state?week=${semana}`, undefined, hoje)).json.week.semEscala;
+
+  // Fora da janela da previa: nao ha o que montar, e nao ha nada a resolver.
+  ok((await motivo('2027-04-05', HOJE))?.code === 'adiantada',
+     'semana adiantada se explica como adiantada');
+  ok((await motivo('2026-02-02', HOJE))?.code === 'ja-passou',
+     'semana que ja passou se explica como passada');
+
+  // Semana inteira sem expediente (recesso de fim de ano).
+  ok((await motivo('2026-12-21', '2026-12-14'))?.code === 'sem-expediente',
+     'semana de recesso se explica pelo calendario');
+
+  // Sem vaga nenhuma: nao e falta de gente, e a semana esta zerada.
+  await call('POST', 'capacity', { monday: VAZIA, capWeekday: 0, capFriday: 0 }, HOJE);
+  ok((await motivo(VAZIA, HOJE))?.code === 'sem-vagas', 'semana sem vaga se explica assim');
+  await call('POST', 'capacity', { monday: VAZIA, capWeekday: 2, capFriday: 1 }, HOJE);
+
+  // Todo mundo fora - o unico caso em que "ninguem disponivel" era a resposta
+  // certa. Agora ela vem com os nomes, e com ausencia e ferias separadas.
+  const ativos = (await call('GET', `state?week=${VAZIA}`, undefined, HOJE))
+    .json.people.filter((p) => p.active);
+  for (const p of ativos.slice(1)) {
+    await call('POST', 'preferences',
+      { monday: VAZIA, personId: p.id, choices: [], unavailable: true }, HOJE);
+  }
+  const ferias = await call('POST', 'vacations',
+    { monday: VAZIA, personId: ativos[0].id, start: VAZIA, end: '2027-03-05' }, HOJE);
+  ok(ferias.status === 200, 'ferias da semana inteira cadastradas');
+  const fora = await motivo(VAZIA, HOJE);
+  ok(fora?.code === 'todos-fora', 'todo mundo fora se explica com os nomes');
+  ok(fora?.ferias.includes(ativos[0].name), 'quem esta de ferias aparece como ferias');
+  ok(fora?.ausentes.length === ativos.length - 1 && !fora.ausentes.includes(ativos[0].name),
+     'e quem marcou ausencia aparece separado');
+
+  // Escala salva vazia: a semana para de se montar, e isso precisa estar dito.
+  for (const p of ativos.slice(1)) {
+    await call('POST', 'preferences',
+      { monday: VAZIA, personId: p.id, choices: TOP3[0] }, HOJE);
+  }
+  ok((await motivo(VAZIA, HOJE)) === null, 'com gente de volta, a semana tem escala');
+  await call('POST', 'assignments', { monday: VAZIA, slots: [] }, HOJE);
+  ok((await motivo(VAZIA, HOJE))?.code === 'guardada-vazia',
+     'escala salva vazia se explica como guardada vazia');
+  await call('DELETE', `assignments?monday=${VAZIA}`, undefined, HOJE);
+
+  // Reabrir e depois descartar tirava a semana da publicacao de segunda em
+  // silencio: a previa seguia na tela a semana inteira e, na segunda seguinte,
+  // a semana virava passado sem escala nenhuma - e sem botao que a trouxesse
+  // de volta, porque descartar so vale dentro da janela da previa.
+  await call('POST', 'publish', { monday: VAZIA, published: true }, HOJE);
+  await call('POST', 'publish', { monday: VAZIA, published: false }, HOJE);
+  const volta = await call('DELETE', `assignments?monday=${VAZIA}`, undefined, HOJE);
+  ok(volta.json.week.autoHold === false, 'descartar tira a semana do auto_hold');
+
+  delete process.env.ESCALAS_SEM_PUBLICACAO_AUTOMATICA;
+  const naSegunda = (await call('GET', `state?week=${VAZIA}`, undefined, VAZIA)).json;
+  ok(naSegunda.week.published === true, 'e ela volta a ser publicada na segunda');
+  ok(naSegunda.assignments.length > 0, 'com a escala que ela teria tido');
+  process.env.ESCALAS_SEM_PUBLICACAO_AUTOMATICA = '1';
+
+  // Quem tem prioridade so entra no dia que pedir. Com todo mundo assim e
+  // ninguem tendo pedido, a semana fica vazia sem faltar gente nem vaga.
+  const PRIO = '2027-03-15';
+  const gente = (await call('GET', `state?week=${PRIO}`, undefined, '2027-03-08'))
+    .json.people.filter((p) => p.active);
+  for (const p of gente) await call('PATCH', 'people', { id: p.id, priority: true });
+  ok((await motivo(PRIO, '2027-03-08'))?.code === 'prioridade-sem-dia',
+     'so prioridade e ninguem pediu dia: a semana diz exatamente isso');
+
+  // E sem ninguem ativo nao ha escala possivel - nem e caso de "indisponivel".
+  for (const p of gente) await call('PATCH', 'people', { id: p.id, active: false });
+  ok((await motivo(PRIO, '2027-03-08'))?.code === 'sem-gente',
+     'sem ninguem ativo, a semana diz que falta gente no cadastro');
+  for (const p of gente) {
+    await call('PATCH', 'people', { id: p.id, active: true });
+    await call('PATCH', 'people', { id: p.id, priority: false });
+  }
 }
 
 console.log('\n=== rotas invalidas ===');

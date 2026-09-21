@@ -134,7 +134,8 @@ async function getState(weekParam) {
   // Quem separa os dois e o `generated_at` - ver `congelada`. Por ele, semana
   // que o administrador esvaziou de proposito - ninguem fica ate as 18h nesta
   // semana - continua sendo fato, e nao volta a se montar sozinha.
-  const previa = !congelada(week, gravadas.length) && temPrevia(monday)
+  const guardada = congelada(week, gravadas.length);
+  const previa = !guardada && temPrevia(monday)
     ? await montarSemanaSafe(monday, { cfg: week, overrides, vacations })
     : null;
 
@@ -145,13 +146,14 @@ async function getState(weekParam) {
         rank: a.rank, via: a.via, date: isoOf(a.work_date),
       }));
 
+  const dates = weekDayStatus(monday, overrides);
   const today = todayISO();
   return {
     today,
     currentMonday: mondayOf(today),
     week: {
       monday,
-      dates: weekDayStatus(monday, overrides),
+      dates,
       hasCalendar: hasCalendar(monday),
       published: week.published,
       capWeekday: week.cap_weekday,
@@ -162,6 +164,13 @@ async function getState(weekParam) {
       // O que explica a escala que esta na tela: calculada junto com a previa,
       // ou gravada no instante em que a semana virou fato.
       explain: previa ? previa.explain : (week.explain ?? null),
+      // Semana sem ninguem na escala: POR QUE ela esta assim. Sao motivos bem
+      // diferentes - escala salva vazia, todo mundo fora, semana sem vaga -, e
+      // a tela dizia "ninguem disponivel" para todos eles, que e o unico que
+      // ela nao tinha como saber.
+      semEscala: assignments.length
+        ? null
+        : motivoDaSemanaVazia({ monday, cfg: week, dates, people, prefs, vacations, guardada }),
       prevMonday: addDays(monday, -7),
       nextMonday: addDays(monday, 7),
     },
@@ -576,9 +585,12 @@ async function fecharSemana(week) {
      where monday = ${week} and not published and not auto_hold`;
 
   if (congelada(atual, atual.n)) {
-    // Ajuste do administrador: publica como esta. Semana esvaziada de
-    // proposito nao tem o que publicar.
-    if (atual.n) await publicar;
+    // Ajuste do administrador: publica como esta - inclusive a semana que ele
+    // esvaziou de proposito, que e uma decisao como qualquer outra ("ninguem
+    // fica ate as 18h nesta semana"). Antes ela era a unica que nao publicava:
+    // ficava para sempre por publicar, e por isso sem nada que a explicasse na
+    // tela. Publicar nao mexe em contador nenhum - nao ha linha para contar.
+    await publicar;
     return;
   }
 
@@ -723,6 +735,66 @@ function temPrevia(monday) {
  */
 function congelada(week, linhas) {
   return week.generated_at != null || linhas > 0;
+}
+
+/**
+ * POR QUE esta semana esta sem ninguem na escala.
+ *
+ * Ate aqui a tela tinha um texto so - "Ninguem disponivel para esta semana" -,
+ * e ele era um chute: a semana chega vazia por motivos bem diferentes, e esse
+ * era justamente o unico que a tela nao tinha como saber. Quem sabe e quem tem
+ * os dados, e a leitura ja os tem todos em maos - nenhuma consulta a mais.
+ *
+ * A ordem importa: o primeiro motivo da lista e o que de fato explica a semana.
+ */
+function motivoDaSemanaVazia({ monday, cfg, dates, people, prefs, vacations, guardada }) {
+  // Escala GRAVADA e vazia: alguem salvou a semana sem ninguem. Nao falta
+  // gente - o app parou de montar esta semana, e e por isso que ela nao volta
+  // sozinha por mais que as respostas mudem.
+  if (guardada) return { code: 'guardada-vazia' };
+
+  // Fora da janela da previa: a semana nao e montada, e nao ha o que resolver.
+  if (monday < mondayOf(todayISO())) return { code: 'ja-passou' };
+  if (monday > nextMonday()) return { code: 'adiantada' };
+
+  const abertos = dates.filter((d) => d.works);
+  if (!abertos.length) return { code: 'sem-expediente' };
+
+  const ativos = people.filter((p) => p.active);
+  if (!ativos.length) return { code: 'sem-gente' };
+
+  const ausentes = new Set(prefs.filter((p) => p.unavailable).map((p) => p.person_id));
+  const ferias = ativos.filter((p) => vacationWeek(p.id, dates, vacations).fullWeek);
+  const idsFerias = new Set(ferias.map((p) => p.id));
+  const disputando = ativos.filter((p) => !ausentes.has(p.id) && !idsFerias.has(p.id));
+  // O unico caso em que "ninguem disponivel" era a resposta certa - e agora ela
+  // vem com os nomes, que e o que faz a frase poder ser conferida.
+  if (!disputando.length) {
+    return {
+      code: 'todos-fora',
+      ausentes: ativos.filter((p) => ausentes.has(p.id) && !idsFerias.has(p.id)).map((p) => p.name),
+      ferias: ferias.map((p) => p.name),
+    };
+  }
+
+  const vagas = abertos.reduce(
+    (soma, d) => soma + (d.day === FRIDAY ? cfg.cap_friday : cfg.cap_weekday), 0);
+  if (!vagas) return { code: 'sem-vagas' };
+
+  // Quem tem prioridade so entra no dia que pediu. Se todo mundo que sobrou tem
+  // prioridade e ninguem pediu um dia com vaga, nao ha onde encaixar ninguem -
+  // e isso nao e falta de gente nem falta de vaga.
+  const escolha = new Map(prefs.map((p) => [p.person_id, p.choice1]));
+  const semDia = disputando.every((p) => {
+    if (!p.priority) return false;
+    const dia = escolha.get(p.id) ?? null;
+    return dia == null
+      || !abertos.some((d) => d.day === dia)
+      || vacationWeek(p.id, dates, vacations).blocked.includes(dia);
+  });
+  if (semDia) return { code: 'prioridade-sem-dia' };
+
+  return { code: 'sem-encaixe' };
 }
 
 /**
@@ -1009,7 +1081,14 @@ async function discardAssignments(params, request) {
   const quem = await actorOf(params.get('byPersonId'), request);
   await sql.transaction([
     sql`delete from assignments where monday = ${week}`,
-    sql`update weeks set generated_at = null, explain = null where monday = ${week}`,
+    // `auto_hold` sai junto. Ele existe para a semana REABERTA nao ser
+    // republicada no acesso seguinte; voltar a previa e desfazer tudo o que a
+    // mao fez nesta semana, e deixa-lo ligado a tirava da publicacao de
+    // segunda em silencio - a previa seguia na tela a semana inteira e, na
+    // segunda seguinte, a semana virava passado sem escala nenhuma, fora dos
+    // contadores de todo mundo e sem botao que a trouxesse de volta.
+    sql`update weeks set generated_at = null, explain = null, auto_hold = false
+         where monday = ${week}`,
     logQuery(week, 'descartar', quem),
   ]);
   return getState(week);
@@ -1050,10 +1129,13 @@ async function publish({ monday, published, byPersonId }, request) {
            (select count(*)::int from assignments a where a.monday = w.monday) as n
       from weeks w where w.monday = ${week}`;
   // Sem escala gravada, publicar e congelar a previa que esta na tela.
-  const montada = congelada(semana, semana.n) || !temPrevia(week)
-    ? null
-    : await montarSemanaSafe(week);
-  if (!semana.n && !montada?.result.assignments.length) {
+  const jaGravada = congelada(semana, semana.n);
+  const montada = jaGravada || !temPrevia(week) ? null : await montarSemanaSafe(week);
+  // Semana ja gravada publica como esta, mesmo vazia: esvazia-la e uma decisao
+  // ("ninguem fica ate as 18h nesta semana"), e a publicacao de segunda ja a
+  // trata assim - recusar aqui deixaria o app fazendo o que o administrador
+  // nao pode.
+  if (!jaGravada && !montada?.result.assignments.length) {
     throw bad('Esta semana nao tem escala para publicar - ninguem disponivel, semana inteira '
       + 'sem expediente, ou semana fora da previa.');
   }

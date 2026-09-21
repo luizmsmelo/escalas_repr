@@ -487,11 +487,36 @@ A janela em que cada coisa vale:
 | editar à mão | só o administrador, em semana que já tenha escala na tela — publicada ou não |
 | descartar ajustes | só o administrador, em semana **não publicada** dentro da janela da prévia |
 
+**Descartar ajustes** desfaz tudo o que a mão fez na semana: apaga a escala gravada
+e devolve a semana à publicação automática de segunda-feira — inclusive quando ela
+tinha sido **reaberta** antes. Deixar a reabertura de pé tirava a semana da
+publicação em silêncio: a prévia seguia na tela a semana inteira e, na segunda
+seguinte, a semana virava passado sem escala nenhuma, fora dos contadores de todo
+mundo e sem botão que a trouxesse de volta.
+
 Semana adiantada ainda não tem preferência nenhuma: a prévia sairia só da fila e
 não diria nada a ninguém. Semana que já passou é o registro do que aconteceu — se
 ficou sem escala, é porque não houve escala, e montar uma agora, com os contadores
 de hoje, seria inventar passado. Nos dois casos a aba Escala simplesmente mostra a
 semana vazia; não há erro a resolver.
+
+**Semana sem ninguém na escala: por quê.** Uma semana chega vazia por motivos bem
+diferentes, e o que se faz com ela muda conforme o motivo — então a tela diz qual é,
+em vez de dar um palpite:
+
+| o que a tela diz | o que aconteceu | o que fazer |
+| --- | --- | --- |
+| escala **salva sem ninguém** | alguém salvou a semana vazia pela edição à mão. Não falta gente: o app **deixou de montá-la**, e ela não acompanha mais as respostas | **Descartar ajustes** para ela voltar a ser montada sozinha |
+| **ninguém disponível** | todo mundo marcou ausência ou está de férias a semana inteira — a tela lista os nomes, separando um caso do outro | nada: a semana é essa mesmo |
+| **zero vagas** em todos os dias | a semana está com a capacidade zerada | mudar as vagas da semana, em Ajustes |
+| só quem tem **prioridade**, sem dia pedido | quem sobrou só entra no dia que pedir, e ninguém pediu um dia com vaga | esperar as respostas, ou tirar a prioridade de alguém |
+| **ninguém ativo** no cadastro | não há pessoa ativa para escalar | cadastrar ou reativar gente, em Ajustes |
+| semana **sem expediente**, **adiantada** ou que **já passou** | a semana não é montada | nada: não há erro a resolver |
+
+A frase antiga era uma só — "Ninguém disponível para esta semana" — e valia para
+todos esses casos, inclusive para os que nada tinham a ver com gente disponível.
+Era justamente o único motivo que a tela não tinha como saber sozinha: quem sabe é
+quem tem os dados, e agora o motivo vem pronto do servidor.
 
 **Publicação automática.** A escala da semana é publicada pelo próprio app a
 partir de **segunda-feira 00h00** (horário de Brasília), no primeiro acesso — não
@@ -506,7 +531,9 @@ app.
   que a tela vinha mostrando a semana inteira; ali ela deixa de ser prévia e vira
   fato.
 - Semana **com escala gravada**: veio de um ajuste do administrador, e é publicada
-  exatamente como está.
+  exatamente como está — inclusive a que ele **esvaziou de propósito** ("ninguém
+  fica até as 18h nesta semana"), que é uma decisão como qualquer outra. Publicar
+  não mexe em contador nenhum: não há linha para contar.
 - Semana **reaberta pelo administrador** fica de fora até ele publicar de novo.
 - **A semana anterior também é fechada**, se tiver ficado sem publicar. Numa
   semana de recesso, feriadão ou férias coletivas pode não haver ninguém para

@@ -686,6 +686,53 @@ function applyWeekBadge(el, monday) {
 
 /* --- aba: escala ---------------------------------------------------------- */
 
+/**
+ * Por que a semana esta sem escala, em uma frase - e, quando existe, o caminho
+ * de volta. O motivo vem pronto do servidor (`week.semEscala`), que e o unico
+ * que tem como saber: a tela dizia "Ninguem disponivel para esta semana" para
+ * todos os casos, inclusive para os que nada tinham a ver com gente disponivel
+ * - e quem lia ficava sem saber o que estava acontecendo nem o que fazer.
+ */
+function textoSemEscala(week) {
+  const motivo = week.semEscala;
+  switch (motivo?.code) {
+    case 'guardada-vazia':
+      return 'Esta escala foi <b>salva sem ninguém</b> e ficou guardada assim: não é falta '
+        + 'de gente — o app deixou de montá-la, e ela não acompanha mais as respostas. '
+        + (week.published
+          ? 'Para voltar a montá-la, use <b>Reabrir escala</b> e depois <b>Descartar ajustes</b>.'
+          : 'Use <b>Descartar ajustes</b> para ela voltar a ser montada sozinha.');
+    case 'ja-passou':
+      return 'Semana que já passou: a Escala mostra o que ficou registrado, e nesta não '
+        + 'houve escala nenhuma.';
+    case 'adiantada':
+      return 'Ela aparece quando esta virar a próxima semana.';
+    case 'sem-expediente':
+      return 'A semana inteira está sem expediente.';
+    case 'sem-gente':
+      return 'Ninguém ativo no cadastro: o administrador cadastra e reativa pessoas em '
+        + '<b>Ajustes</b>.';
+    case 'todos-fora': {
+      const partes = [];
+      if (motivo.ausentes.length) {
+        partes.push(`marcou ausência: <b>${esc(motivo.ausentes.join(', '))}</b>`);
+      }
+      if (motivo.ferias.length) {
+        partes.push(`de férias a semana inteira: <b>${esc(motivo.ferias.join(', '))}</b>`);
+      }
+      return `Ninguém disponível para esta semana — ${partes.join('; ')}.`;
+    }
+    case 'sem-vagas':
+      return 'A semana está com <b>zero vagas</b> em todos os dias. O administrador muda as '
+        + 'vagas da semana em <b>Ajustes</b>.';
+    case 'prioridade-sem-dia':
+      return 'Quem sobrou tem <b>prioridade</b> e só entra no dia que pedir — e ninguém pediu '
+        + 'um dia com vaga nesta semana.';
+    default:
+      return 'Ninguém pôde ser encaixado nesta semana.';
+  }
+}
+
 /*
  * `generation` e o resumo da montagem - fila da sexta, dias fixos, quem ficou
  * de fora. Ele vem no proprio estado enquanto a semana e previa, e por isso
@@ -735,12 +782,7 @@ function renderSchedule(generation = state.data.generation) {
           </div>`;
         })
         .join('')
-    : `<p class="empty">Sem escala para esta semana.<br>${
-        week.monday > addDays(state.data.currentMonday, 7)
-          ? 'Ela aparece quando esta virar a próxima semana.'
-          : week.dates.every((d) => !d.works)
-            ? 'A semana inteira está sem expediente.'
-            : 'Ninguém disponível para esta semana.'}</p>`;
+    : `<p class="empty">Sem escala para esta semana.<br>${textoSemEscala(week)}</p>`;
 
   const summary = $('#schedSummary');
   if (hasAny) {
@@ -815,11 +857,13 @@ function renderSchedule(generation = state.data.generation) {
   // Escala que nao e previa e nao esta publicada ficou guardada por um ajuste:
   // ela parou no tempo, e e isso que explica por que nao acompanha as
   // respostas que continuam chegando.
-  if (hasAny && !week.published) {
-    if (week.autoHold) {
-      messages.push('Esta escala foi <b>reaberta pelo administrador</b> e não é publicada '
-        + 'automaticamente: ela só volta a contar quando ele publicar de novo.');
-    } else if (!state.data.preview) {
+  if (!week.published && week.autoHold) {
+    // Vale mesmo com a semana vazia: reaberta e nao publicada, ela nao conta
+    // para ninguem - e e justamente aí que o aviso faz falta.
+    messages.push('Esta escala foi <b>reaberta pelo administrador</b> e não é publicada '
+      + 'automaticamente: ela só volta a contar quando ele publicar de novo.');
+  } else if (hasAny && !week.published) {
+    if (!state.data.preview) {
       messages.push('Esta escala foi <b>ajustada à mão</b> e ficou guardada como está: ela '
         + 'não acompanha mais as respostas que chegarem. Na segunda-feira é publicada assim '
         + '— para voltar à prévia automática, use <b>Descartar ajustes</b>.');
@@ -912,7 +956,11 @@ function renderSchedule(generation = state.data.generation) {
   // Sem nenhum dia com expediente nao ha o que editar.
   $('#editBtn').disabled = !week.dates.some((d) => d.works);
   $('#publishBtn').textContent = week.published ? 'Reabrir escala' : 'Publicar escala';
-  $('#publishBtn').disabled = (!hasAny && !week.published) || (!week.published && adiantada);
+  // Semana guardada vazia tambem se publica: o `generatedAt` diz que ela foi
+  // decidida assim, e a publicacao de segunda ja a publica desse jeito.
+  const temOQuePublicar = hasAny || !!week.generatedAt;
+  $('#publishBtn').disabled = (!temOQuePublicar && !week.published)
+    || (!week.published && adiantada);
   // Publicar e reabrir sao do administrador.
   $('#publishBtn').hidden = !isAdmin();
   // Descartar so aparece onde ha o que descartar: semana guardada por um
