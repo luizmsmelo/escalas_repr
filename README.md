@@ -312,8 +312,8 @@ que, nas mãos erradas, quebrariam o sistema pedem a **senha de administrador**:
 ## Pedidos — quem pediu cada dia
 
 A aba **Pedidos** mostra, para a semana escolhida nas setas, quem pediu cada dia —
-o que as pessoas **escolheram**, não quem vai ficar. Quem fica é da aba Escala. A
-tela é aberta a todo mundo, como a prévia.
+o que as pessoas **escolheram** —, com quem ficou com o dia em destaque. A tela é
+aberta a todo mundo, como a prévia.
 
 - Em cada dia, quem o pediu, com a posição que ele tem na lista da pessoa (1ª, 2ª
   ou 3ª opção), primeiro quem o pediu como 1ª. Quem tem **dia fixo** valendo
@@ -327,7 +327,14 @@ tela é aberta a todo mundo, como a prévia.
   a bolinha azul é o de **escalas**, e a âmbar, o de **sextas**. É por eles que se
   vê, entre quem pediu o mesmo dia, quem está à frente: entra quem tem menos
   escalas, e entre quem entra, leva a sexta quem tem menos sextas. Uma legenda
-  embaixo dos dias explica as cores.
+  embaixo dos dias explica as cores. As mesmas bolinhas aparecem na aba Escala,
+  inclusive na edição à mão.
+- Em **destaque** — fundo verde e um filete à esquerda —, quem está na escala
+  daquele dia: a prévia enquanto a semana é prévia, e a escala gravada depois.
+  Quem ficou com um dia sem tê-lo pedido — pela fila da sexta, sem ter respondido
+  ou por ajuste manual — entra no fim do dia, em destaque, com a mesma etiqueta
+  da aba Escala. Assim a tela mostra, lado a lado, quem disputou o dia e quem
+  ficou com ele; o porquê de cada caso continua em "Como essa escala foi montada?".
 - Na sexta, também quem marcou **"Não posso esta sexta"**: a pessoa aparece como as
   outras, com a etiqueta vermelha *não pode*, e não entra na conta de pedidos.
 - No fim, quem não tem dia pedido: quem marcou que não vai participar, quem está

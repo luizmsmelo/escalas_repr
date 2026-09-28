@@ -368,6 +368,8 @@ button { font: inherit; color: inherit; }
 .slot-empty { color: var(--text-muted); font-style: italic; font-size: .9rem; }
 .slot .avatar { width: 30px; height: 30px; font-size: .7rem; }
 .slot[data-me="1"] .slot-name::after {
+  /* Inteiro: muda de linha junto, em vez de partir no meio da palavra. */
+  display: inline-block;
   content: "você"; margin-left: 8px;
   font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
   color: var(--accent);
@@ -802,13 +804,17 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 .avatar-cnt { flex: none; display: inline-flex; align-items: flex-start; }
 /* Largura reservada para o caso comum - escalas com dois digitos, sextas com
    um -, para os nomes comecarem todos na mesma coluna. */
-#requests .avatar-cnt { min-width: 62px; }
+.avatar-cnt { min-width: 62px; }
+/* Onde ha bolinhas sobra menos largura para o nome. Quando nome e etiqueta nao
+   cabem juntos, a etiqueta desce para a linha de baixo, em vez de o nome ser
+   espremido letra por letra. */
+#requests .slot, #schedule .slot { flex-wrap: wrap; row-gap: 4px; }
 .cnts {
   display: inline-flex;
   margin: -7px 0 0 -9px;
   position: relative;
 }
-.cnts .cnt { box-shadow: 0 0 0 2px var(--surface-1); }
+.cnts .cnt { box-shadow: 0 0 0 2px var(--cnt-ring, var(--surface-1)); }
 .cnts .cnt + .cnt { margin-left: 1px; }
 .cnt {
   display: inline-block;
@@ -821,18 +827,33 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 .cnt[data-kind="sexta"] { background: var(--warn); color: #1f1600; }
 /* Na legenda, a bolinha vai sem numero: e ela que se aprende a reconhecer. */
 .cnt:empty { min-width: 11px; height: 11px; padding: 0; }
-/* O selo "voce" muda de linha inteiro, e nao parte no meio da palavra. */
-#requests .slot[data-me="1"] .slot-name::after { display: inline-block; }
-.reqlegend {
+/* Legenda das bolinhas, embaixo dos dias - nas abas Pedidos e Escala. */
+.cntlegend {
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
   font-size: .78rem; color: var(--text-muted);
   padding: 0 4px;
 }
-.reqlegend-row {
+.cntlegend-item {
   display: inline-flex; align-items: center; gap: 6px;
   font-weight: 650; color: var(--text-secondary);
 }
-.reqlegend-text { flex-basis: 100%; }
+.cntlegend-text { flex-basis: 100%; }
+
+/* Quem esta na escala naquele dia, na aba Pedidos: fundo verde e um filete a
+   esquerda - o filete e o sinal que nao depende so da cor. A linha ganha folga
+   dos dois lados para o fundo nao encostar no texto; a margem negativa devolve
+   o alinhamento com o resto do dia. */
+#requests .dayrow-people { gap: 2px; }
+#requests .reqcount { margin-bottom: 4px; }
+#requests .reqnote { margin-top: 4px; }
+#requests .slot { padding: 5px 8px; margin: 0 -8px; border-radius: var(--radius-sm); }
+#requests .slot[data-escalado="1"],
+.cntlegend-escalado {
+  --cnt-ring: color-mix(in srgb, var(--good) 14%, var(--surface-1));
+  background: var(--cnt-ring);
+  box-shadow: inset 3px 0 0 var(--good);
+}
+.cntlegend-escalado { width: 18px; height: 12px; border-radius: 3px; }
 /* Nao pode esta sexta: veto, e nao preferencia - por isso o vermelho. */
 .slot-rank[data-rank="veto"] {
   color: var(--danger);

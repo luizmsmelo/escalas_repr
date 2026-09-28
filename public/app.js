@@ -441,6 +441,40 @@ const prioMark = (personId) => (isPriority(personId) ? '★ ' : '');
 const nomePrio = (personId, nome) => `${prioStar(personId)}${esc(nome)}`;
 
 /**
+ * Avatar com os dois contadores acumulados no canto - escalas e sextas, os
+ * mesmos da aba Contadores -, como o numero de notificacao no icone de um app.
+ * O texto por extenso vai no rotulo: a cor sozinha nao diz qual contador e.
+ * Quem nao esta nos contadores (pessoa inativa numa escala antiga) fica so com
+ * o avatar. Devolve HTML.
+ */
+function avatarContadores(personId, nome) {
+  const c = state.stats?.counters?.perPerson.find((q) => q.personId === personId);
+  const bolinha = (tipo, extenso, n) =>
+    `<span class="cnt" data-kind="${tipo}" title="${extenso}" aria-label="${extenso}">${n}</span>`;
+  return `<span class="avatar-cnt">
+    <span class="avatar">${esc(initials(nome))}</span>${c ? `<span class="cnts">${
+      bolinha('total', escalas(c.total), c.total)}${
+      bolinha('sexta', sextasDe(c.fridays), c.fridays)}</span>` : ''}
+  </span>`;
+}
+
+/**
+ * Legenda das bolinhas, embaixo dos dias. `destaque`, quando vem, e mais um
+ * item - o fundo de quem esta na escala, na aba Pedidos - e a frase que o explica.
+ */
+function legendaContadores(destaque = null) {
+  return `<span class="cntlegend-item"><span class="cnt" data-kind="total"
+        aria-hidden="true"></span> escalas</span>
+    <span class="cntlegend-item"><span class="cnt" data-kind="sexta"
+        aria-hidden="true"></span> sextas</span>${destaque
+      ? `<span class="cntlegend-item"><span class="cntlegend-escalado"
+           aria-hidden="true"></span> na escala</span>` : ''}
+    <span class="cntlegend-text">Os números nas bolinhas de cada pessoa são os contadores
+      acumulados até hoje, os mesmos da aba Contadores. Quem tem menos escalas entra na
+      semana; entre quem entra, quem tem menos sextas leva a sexta.${destaque ? ` ${destaque}` : ''}</span>`;
+}
+
+/**
  * Ferias de uma pessoa na semana aberta - o mesmo criterio da API: `blocked`
  * sao os dias com expediente que caem nas ferias, e `fullWeek` e ter ferias em
  * todos eles, que e quando a pessoa sai da semana e recebe credito.
@@ -733,6 +767,7 @@ function pedidosDaSemana() {
 }
 
 function pedidoLabel(x) {
+  if (x.escala) return slotRankLabel(x.escala);
   if (x.veto) return 'não pode';
   if (x.fixo) return 'dia fixo';
   if (x.pessoa.priority) return 'prioridade';
@@ -740,6 +775,7 @@ function pedidoLabel(x) {
 }
 
 function pedidoTone(x) {
+  if (x.escala) return slotRankTone(x.escala);
   if (x.veto) return 'veto';
   if (x.fixo) return 'fixo';
   if (x.pessoa.priority) return 'prioridade';
@@ -753,25 +789,17 @@ function renderRequests() {
 
   const { porDia, fora, ferias, semEscolha, vetos } = pedidosDaSemana();
   const capOf = (d) => (d === FRIDAY ? week.capFriday : week.capWeekday);
-  // Os contadores acumulados de hoje - os mesmos da aba Contadores. Sao eles que
-  // decidem, entre quem pediu o mesmo dia, quem entra.
-  const contadores = new Map((state.stats?.counters?.perPerson ?? []).map((c) => [c.personId, c]));
-  // Bolinha com o numero, como o contador de notificacao do celular. O texto
-  // por extenso vai no rotulo: a cor sozinha nao diz qual contador e.
-  const cnt = (tipo, extenso, n) =>
-    `<span class="cnt" data-kind="${tipo}" title="${extenso}" aria-label="${extenso}">${n}</span>`;
-  const linha = (x) => {
-    const c = contadores.get(x.pessoa.id);
-    return `<div class="slot" data-me="${x.pessoa.id === state.me?.id ? 1 : 0}">
-      <span class="avatar-cnt">
-        <span class="avatar">${esc(initials(x.pessoa.name))}</span>
-        <span class="cnts">${cnt('total', escalas(c?.total ?? 0), c?.total ?? 0)}${
-          cnt('sexta', sextasDe(c?.fridays ?? 0), c?.fridays ?? 0)}</span>
-      </span>
+  const linha = (x) => `<div class="slot" data-me="${x.pessoa.id === state.me?.id ? 1 : 0}"
+        data-escalado="${x.escalado ? 1 : 0}">
+      ${avatarContadores(x.pessoa.id, x.pessoa.name)}
       <span class="slot-name">${nomePrio(x.pessoa.id, x.pessoa.name)}</span>
       <span class="slot-rank" data-rank="${pedidoTone(x)}">${pedidoLabel(x)}</span>
     </div>`;
-  };
+  // A escala que esta na tela da aba Escala - a previa, enquanto ela for previa.
+  const { assignments } = state.data;
+  const temEscala = assignments.length > 0;
+  const pessoaDe = (a) => state.data.people.find((p) => p.id === a.personId)
+    ?? { id: a.personId, name: a.name };
 
   $('#requests').innerHTML = week.dates
     .map(({ day, date, works, holiday }) => {
@@ -791,14 +819,23 @@ function renderRequests() {
       // contador de escalas decide quem entra.
       const tom = fixos + primeiras > cap ? 'over' : '';
 
-      const pessoas = lista.length
-        ? lista.map(linha).join('')
+      const escala = assignments.filter((a) => a.day === day);
+      const escalado = new Set(escala.map((a) => a.personId));
+      // Quem ficou com o dia sem te-lo pedido - pela fila da sexta, sem
+      // preferencia ou pela mao do administrador - entra depois de quem pediu:
+      // sem ele, o dia pareceria nao ter ninguem na escala.
+      const semPedir = escala.filter((a) => !lista.some((x) => x.pessoa.id === a.personId));
+      const pessoas = lista.length || semPedir.length
+        ? [...lista.map((x) => linha({ ...x, escalado: escalado.has(x.pessoa.id) })),
+           ...semPedir.map((a) => linha({ pessoa: pessoaDe(a), escala: a, escalado: true }))].join('')
         : '<div class="slot slot-empty">ninguém pediu este dia</div>';
 
       // Quem marcou "Nao posso esta sexta" aparece como os outros, depois de
-      // quem pediu: nao e pedido, e nao entra na conta do dia.
+      // quem pediu: nao e pedido, e nao entra na conta do dia. Escalado na sexta
+      // mesmo assim - so a mao faz isso -, ja aparece acima, com o rotulo da escala.
       const sexta = day === FRIDAY
-        ? `${vetos.map((p) => linha({ pessoa: p, veto: true })).join('')}
+        ? `${vetos.filter((p) => !escalado.has(p.id))
+             .map((p) => linha({ pessoa: p, veto: true })).join('')}
            <p class="reqnote" data-muted="1">A sexta é também a 4ª opção automática de quem
              está na fila dela &mdash; a fila fica em Contadores.</p>`
         : '';
@@ -816,12 +853,12 @@ function renderRequests() {
     })
     .join('');
 
-  $('#reqLegend').innerHTML = `<span class="reqlegend-row"><span class="cnt" data-kind="total"
-      aria-hidden="true"></span> escalas</span> <span class="reqlegend-row"><span class="cnt"
-      data-kind="sexta" aria-hidden="true"></span> sextas</span>
-    <span class="reqlegend-text">Os números nas bolinhas de cada pessoa são os contadores acumulados
-      até hoje, os mesmos da aba Contadores. Quem tem menos escalas entra na semana; entre
-      quem entra, quem tem menos sextas leva a sexta.</span>`;
+  $('#reqLegend').innerHTML = legendaContadores(!temEscala ? null
+    : state.data.preview
+      ? 'O destaque verde marca quem está no dia na prévia da escala: ela muda a cada '
+        + 'resposta, até o prazo.'
+      : week.published ? 'O destaque verde marca quem ficou com o dia na escala publicada.'
+      : 'O destaque verde marca quem está no dia na escala guardada, ainda não publicada.');
 
   // O que esta tela e, e o que ela nao e: pedido nao e vaga garantida.
   const { responderam, de } = contagemDeRespostas();
@@ -836,9 +873,11 @@ function renderRequests() {
         : '';
   const notice = $('#reqNotice');
   notice.className = `notice${week.published ? ' notice-lock' : ''}`;
-  notice.innerHTML = `Quem <b>pediu</b> cada dia, na ordem de preferência de cada um &mdash;
-      não quem vai ficar nele. Quando o dia tem mais pedidos do que vagas, entra quem tem
-      menos escalas acumuladas; quem ficou em cada dia está na aba Escala.
+  notice.innerHTML = `Quem <b>pediu</b> cada dia, na ordem de preferência de cada um${temEscala
+      ? ` &mdash; em destaque, quem está na escala naquele dia${
+          state.data.preview ? ', por enquanto na prévia' : ''}` : ''}. Quando o dia tem mais
+      pedidos do que vagas, entra quem tem menos escalas acumuladas; o porquê de cada caso
+      está na aba Escala, em &ldquo;Como essa escala foi montada?&rdquo;.
     <br><br>${situacao ? `${situacao} ` : ''}<b>${responderam} de ${de}</b>
       ${de === 1 ? 'pessoa' : 'pessoas'} ${week.published ? 'responderam' : 'já responderam'}.`;
   renderCountdown();
@@ -881,6 +920,9 @@ function renderSchedule(generation = state.data.generation) {
   applyWeekBadge($('#schedWeekBadge'), week.monday);
 
   renderWhy();
+  // A legenda das bolinhas vale tambem para o editor, que mostra as mesmas.
+  $('#schedLegend').hidden = !assignments.length;
+  $('#schedLegend').innerHTML = legendaContadores();
   if (state.edit) return renderScheduleEditor();
 
   const byDay = new Map([1, 2, 3, 4, 5].map((d) => [d, []]));
@@ -899,7 +941,7 @@ function renderSchedule(generation = state.data.generation) {
             slots
               .map(
                 (a) => `<div class="slot" data-me="${a.personId === state.me?.id ? 1 : 0}">
-                  <span class="avatar">${esc(initials(a.name))}</span>
+                  ${avatarContadores(a.personId, a.name)}
                   <span class="slot-name">${nomePrio(a.personId, a.name)}</span>
                   <span class="slot-rank" data-rank="${slotRankTone(a)}">${
                     slotRankLabel(a)
@@ -1554,7 +1596,7 @@ function whyWeekdays(explain, byDay) {
   for (const a of daSemana) {
     if (a.via === 'fixo') conta.fixo++;
     // O dia de quem tem prioridade e a 1a escolha, mas na escala ele aparece
-    // como "dia pedido · prioridade" - aqui tambem.
+    // como "prioridade" - aqui tambem.
     else if (a.via === 'prioridade') conta.prioridade++;
     else if (conta[a.rank] != null) conta[a.rank]++;
     else conta.fora++;
@@ -1571,7 +1613,7 @@ function whyWeekdays(explain, byDay) {
   const linhas = uteis.map((d) => {
     const gente = (byDay.get(d) ?? []).map((a) => `${nomePrio(a.personId, a.name)} <span class="why-tag">${
       a.via === 'fixo' ? 'dia fixo'
-        : a.via === 'prioridade' ? 'dia pedido · prioridade'
+        : a.via === 'prioridade' ? 'prioridade'
         : a.rank ? `${ORDINAL[a.rank]} opção`
         : 'fora do top 3'}</span>`).join('<br>');
     return `<tr><td>${DAY_NAMES[d]}</td><td>${plural(explain.capacity[d], 'vaga', 'vagas')}</td>
@@ -1804,7 +1846,7 @@ function closedRow(day, date, holiday) {
 function slotRankLabel(a) {
   if (a.via === 'manual') return a.rank ? `${ORDINAL[a.rank]} opção · manual` : 'ajuste manual';
   if (a.via === 'fixo') return 'dia fixo';
-  if (a.via === 'prioridade') return 'dia pedido · prioridade';
+  if (a.via === 'prioridade') return 'prioridade';
   if (a.via === 'fila') return '4ª opção · fila';
   if (a.via === 'voluntario') return `${ORDINAL[a.rank] ?? '4ª'} opção · voluntário`;
   return a.rank ? `${ORDINAL[a.rank]} opção` : 'fora das opções';
@@ -1854,7 +1896,7 @@ function renderScheduleEditor() {
           const p = pessoas.get(id);
           const nome = p?.name ?? 'Desconhecido';
           return `<div class="slot" data-me="${id === state.me?.id ? 1 : 0}">
-            <span class="avatar">${esc(initials(nome))}</span>
+            ${avatarContadores(id, nome)}
             <span class="slot-name">${nomePrio(id, nome)}</span>
             <button class="iconbtn" type="button" data-danger="1" data-remove="${day}:${id}"
                     aria-label="Tirar ${esc(nome)} de ${DAY_NAMES[day].toLowerCase()}">×</button>
