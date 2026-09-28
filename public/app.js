@@ -1848,7 +1848,8 @@ function slotRankLabel(a) {
   if (a.via === 'fixo') return 'dia fixo';
   if (a.via === 'prioridade') return 'prioridade';
   if (a.via === 'fila') return '4ª opção · fila';
-  if (a.via === 'voluntario') return `${ORDINAL[a.rank] ?? '4ª'} opção · voluntário`;
+  // Quem pediu a sexta e ficou com ela - o voluntario - mostra so a posicao,
+  // como nos outros dias: ja diz que a sexta estava entre as opcoes dele.
   return a.rank ? `${ORDINAL[a.rank]} opção` : 'fora das opções';
 }
 
@@ -1856,7 +1857,6 @@ function slotRankTone(a) {
   if (a.via === 'manual') return 'manual';
   if (a.via === 'fixo') return 'fixo';
   if (a.via === 'prioridade') return 'prioridade';
-  if (a.via === 'voluntario') return '1';
   if (a.via === 'fila') return 'fila';
   return a.rank ?? 'none';
 }
