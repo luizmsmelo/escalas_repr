@@ -239,6 +239,7 @@ function renderAll() {
   $('#whoamiInitials').textContent = initials(state.me.name);
   $('#whoamiName').innerHTML = nomePrio(state.me.id, state.me.name);
   renderPicker();
+  renderRequests();
   renderSchedule();
   renderCounters();
   renderSettings();
@@ -453,6 +454,17 @@ function vacationWeek(personId = state.me?.id) {
   return { blocked, fullWeek: abertos.length > 0 && blocked.length === abertos.length };
 }
 
+/**
+ * O dia fixo da pessoa vale na semana aberta? So quando ele tem expediente e nao
+ * cai nas ferias dela - o mesmo criterio da API (savePreferences). Quando nao
+ * vale, ela escolhe como todo mundo naquela semana.
+ */
+function fixoVale(p) {
+  return p.fixedDay != null
+    && state.data.week.dates.find((d) => d.day === p.fixedDay)?.works === true
+    && !vacationWeek(p.id).blocked.includes(p.fixedDay);
+}
+
 const fmtFull = (iso) => iso.split('-').reverse().join('/');
 
 /** Semana inteira de ferias: ocupa o lugar do seletor e diz o que acontece com o contador. */
@@ -593,7 +605,6 @@ function renderFridayBox(fridayPicked, locked, fridayOpen = true, fridayVacation
 function renderRespondedList() {
   const byId = new Map(state.data.preferences.map((p) => [p.personId, p]));
   const active = state.data.people.filter((p) => p.active);
-  const aberto = new Set(state.data.week.dates.filter((d) => d.works).map((d) => d.day));
 
   $('#responded').innerHTML = active.length
     ? active
@@ -601,7 +612,7 @@ function renderRespondedList() {
           const pref = byId.get(p.id);
           // Quem tem dia fixo valendo nesta semana nunca fica "pendente": nao ha
           // o que ele responder.
-          const fixo = p.fixedDay != null && aberto.has(p.fixedDay);
+          const fixo = fixoVale(p);
           const state_ = vacationWeek(p.id).fullWeek ? 'vacation'
             : pref?.unavailable ? 'away'
             : fixo ? 'fixed'
@@ -624,9 +635,8 @@ function renderRespondedList() {
  */
 function contagemDeRespostas() {
   const respondeu = new Set(state.data.preferences.map((p) => p.personId));
-  const aberto = new Set(state.data.week.dates.filter((d) => d.works).map((d) => d.day));
   const devem = state.data.people.filter((p) => p.active
-    && !(p.fixedDay != null && aberto.has(p.fixedDay))
+    && !fixoVale(p)
     && !vacationWeek(p.id).fullWeek);
   return { responderam: devem.filter((p) => respondeu.has(p.id)).length, de: devem.length };
 }
@@ -682,6 +692,153 @@ function applyWeekBadge(el, monday) {
   // toa ali levaria para a semana atual, que costuma estar publicada e travada.
   const atalho = el.parentElement.querySelector('[data-week-today]');
   if (atalho) atalho.hidden = monday === current || monday === next;
+}
+
+/* --- aba: pedidos --------------------------------------------------------- */
+
+/*
+ * Quem pediu cada dia: o que cada um escolheu, e nao quem fica - quem fica e da
+ * aba Escala. As escolhas sao lidas como o montador as le: dia de ferias nao
+ * vale, e de quem tem prioridade vale so a primeira. Quem tem dia fixo valendo
+ * aparece no dia dele, que e reservado antes de qualquer pedido.
+ */
+function pedidosDaSemana() {
+  const { week, people, preferences } = state.data;
+  const prefs = new Map(preferences.map((p) => [p.personId, p]));
+  const porDia = new Map(week.dates.map((d) => [d.day, []]));
+  const fora = [], ferias = [], semEscolha = [], vetos = [];
+
+  for (const p of people.filter((q) => q.active)) {
+    const pref = prefs.get(p.id);
+    const semana = vacationWeek(p.id);
+    if (semana.fullWeek) { ferias.push(p); continue; }
+    if (pref?.unavailable) { fora.push(p); continue; }
+    if (fixoVale(p)) { porDia.get(p.fixedDay).push({ pessoa: p, fixo: true }); continue; }
+
+    const escolhas = (pref?.choices ?? [])
+      .filter((d) => !semana.blocked.includes(d))
+      .slice(0, p.priority ? 1 : 3);
+    // Sem nenhuma escolha que valha, a pessoa disputa sem preferencia - para o
+    // montador e o mesmo que nao ter respondido.
+    if (!escolhas.length) { semEscolha.push(p); continue; }
+    escolhas.forEach((day, i) => porDia.get(day)?.push({ pessoa: p, rank: i + 1 }));
+    if (pref.noFriday && !semana.blocked.includes(FRIDAY)) vetos.push(p);
+  }
+
+  // Dia fixo primeiro, depois pela posicao do dia na lista de cada um; no
+  // empate, a ordem alfabetica em que as pessoas ja chegam da API.
+  const ordem = (x) => (x.fixo ? 0 : x.rank);
+  for (const lista of porDia.values()) lista.sort((a, b) => ordem(a) - ordem(b));
+  return { porDia, fora, ferias, semEscolha, vetos };
+}
+
+function pedidoLabel(x) {
+  if (x.fixo) return 'dia fixo';
+  if (x.pessoa.priority) return 'prioridade';
+  return `${ORDINAL[x.rank]} opção`;
+}
+
+function pedidoTone(x) {
+  if (x.fixo) return 'fixo';
+  if (x.pessoa.priority) return 'prioridade';
+  return String(x.rank);
+}
+
+function renderRequests() {
+  const { week } = state.data;
+  $('#reqWeekLabel').textContent = weekLabel(week.monday);
+  applyWeekBadge($('#reqWeekBadge'), week.monday);
+
+  const { porDia, fora, ferias, semEscolha, vetos } = pedidosDaSemana();
+  const capOf = (d) => (d === FRIDAY ? week.capFriday : week.capWeekday);
+
+  $('#requests').innerHTML = week.dates
+    .map(({ day, date, works, holiday }) => {
+      if (!works) return closedRow(day, date, holiday);
+
+      const lista = porDia.get(day);
+      const cap = capOf(day);
+      const fixos = lista.filter((x) => x.fixo).length;
+      const primeiras = lista.filter((x) => x.rank === 1).length;
+      const vagas = plural(cap, 'vaga', 'vagas');
+      const conta = lista.length
+        ? [`${plural(lista.length, 'pedido', 'pedidos')} para ${vagas}`,
+           fixos ? `${fixos} com dia fixo` : '',
+           primeiras ? `${primeiras} como 1ª opção` : ''].filter(Boolean).join(' · ')
+        : `Ninguém pediu · ${vagas}`;
+      // Mais gente querendo o dia de saida do que o dia comporta: e ai que o
+      // contador de escalas decide quem entra.
+      const tom = fixos + primeiras > cap ? 'over' : '';
+
+      const pessoas = lista.length
+        ? lista.map((x) => `<div class="slot" data-me="${x.pessoa.id === state.me?.id ? 1 : 0}">
+            <span class="avatar">${esc(initials(x.pessoa.name))}</span>
+            <span class="slot-name">${nomePrio(x.pessoa.id, x.pessoa.name)}</span>
+            <span class="slot-rank" data-rank="${pedidoTone(x)}">${pedidoLabel(x)}</span>
+          </div>`).join('')
+        : '<div class="slot slot-empty">ninguém pediu este dia</div>';
+
+      const sexta = day === FRIDAY
+        ? `${vetos.length ? `<p class="reqnote">Não podem esta sexta: <b>${listaPessoas(vetos)}</b></p>` : ''}
+           <p class="reqnote" data-muted="1">A sexta é também a 4ª opção automática de quem
+             está na fila dela &mdash; a fila fica em Contadores.</p>`
+        : '';
+
+      return `<div class="dayrow" data-friday="${day === FRIDAY ? 1 : 0}">
+        <div class="dayrow-when">
+          <span class="dayrow-day">${DAY_SHORT[day]}</span>
+          <span class="dayrow-date">${fmtDay(date)}</span>
+        </div>
+        <div class="dayrow-people">
+          <p class="reqcount" data-tone="${tom}">${conta}</p>
+          ${pessoas}${sexta}
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  // O que esta tela e, e o que ela nao e: pedido nao e vaga garantida.
+  const { responderam, de } = contagemDeRespostas();
+  const futura = week.monday > state.data.currentMonday;
+  const situacao = week.published
+    ? '<b>Semana publicada:</b> os pedidos travaram.'
+    : futura
+      ? `Os pedidos ainda podem mudar até <b>domingo, ${fmtDay(addDays(week.monday, -1))}, 23h59</b>
+         &mdash; <span data-deadline="${week.monday}"></span>.`
+      : week.monday === state.data.currentMonday
+        ? 'Os pedidos ainda podem mudar enquanto a escala desta semana não for publicada.'
+        : '';
+  const notice = $('#reqNotice');
+  notice.className = `notice${week.published ? ' notice-lock' : ''}`;
+  notice.innerHTML = `Quem <b>pediu</b> cada dia, na ordem de preferência de cada um &mdash;
+      não quem vai ficar nele. Quando o dia tem mais pedidos do que vagas, entra quem tem
+      menos escalas acumuladas; quem ficou em cada dia está na aba Escala.
+    <br><br>${situacao ? `${situacao} ` : ''}<b>${responderam} de ${de}</b>
+      ${de === 1 ? 'pessoa' : 'pessoas'} ${week.published ? 'responderam' : 'já responderam'}.`;
+  renderCountdown();
+
+  const grupo = (titulo, pessoas, estado) => (pessoas.length
+    ? `<div class="reqgroup">
+         <p class="reqgroup-title">${titulo} <span class="reqgroup-n">${pessoas.length}</span></p>
+         <ul class="people-status">${pessoas.map((p) => `<li class="chip" data-state="${estado}">
+           <span class="chip-dot"></span>${nomePrio(p.id, p.name)}</li>`).join('')}</ul>
+       </div>`
+    : '');
+  const grupos = [
+    grupo('Não vão participar', fora, 'away'),
+    grupo('De férias a semana inteira', ferias, 'vacation'),
+    grupo(week.published ? 'Não escolheram dia' : 'Ainda não escolheram', semEscolha, 'pending'),
+  ].join('');
+  // A mesma regra que a aba Escala conta depois de montada, dita antes do prazo.
+  const semEscolhaNota = semEscolha.length && !week.published
+      && week.monday >= state.data.currentMonday
+    ? `<p class="hint hint-muted">Sem escolha até o prazo, a pessoa disputa sem preferência:
+         qualquer dia de segunda a quinta serve, e a sexta é a 4ª opção automática. Quem tem
+         prioridade e não escolhe fica de fora da semana.</p>`
+    : '';
+  $('#reqOut').innerHTML = grupos
+    ? grupos + semEscolhaNota
+    : '<p class="hint hint-muted">Ninguém ficou sem dia pedido.</p>';
 }
 
 /* --- aba: escala ---------------------------------------------------------- */

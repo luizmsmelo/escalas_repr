@@ -164,6 +164,32 @@
       </div>
     </section>
 
+    <!-- ABA: pedidos ----------------------------------------------------- -->
+    <!-- Quem pediu cada dia - o que as pessoas escolheram, nao quem fica. Sai
+         inteira das preferencias que o /api/state ja traz (ver renderRequests). -->
+    <section id="tab-pedidos" class="tab" data-tab="pedidos" hidden>
+      <nav class="weeknav">
+        <button class="weeknav-arrow" data-week-step="-1" type="button" aria-label="Semana anterior">‹</button>
+        <div class="weeknav-label">
+          <strong id="reqWeekLabel">—</strong>
+          <span id="reqWeekBadge" class="badge"></span>
+          <button class="linkbtn weeknav-today" type="button" data-week-today hidden>Ir para a semana atual</button>
+        </div>
+        <button class="weeknav-arrow" data-week-step="1" type="button" aria-label="Próxima semana">›</button>
+      </nav>
+
+      <div id="reqNotice" class="notice"></div>
+      <div id="requests" class="schedule"></div>
+
+      <section class="card">
+        <h2 class="card-title">
+          Sem dia pedido
+          <span class="card-sub">fora, de férias ou sem resposta</span>
+        </h2>
+        <div id="reqOut" class="reqout"></div>
+      </section>
+    </section>
+
     <!-- ABA: escala ------------------------------------------------------ -->
     <section id="tab-escala" class="tab" data-tab="escala" hidden>
       <nav class="weeknav">
@@ -446,6 +472,8 @@
   <nav class="tabbar" role="tablist">
     <button class="tabbtn is-active" data-goto="escolher" role="tab" type="button">
       <span class="tabicon" aria-hidden="true">✓</span>Escolher</button>
+    <button class="tabbtn" data-goto="pedidos" role="tab" type="button">
+      <span class="tabicon" aria-hidden="true">☰</span>Pedidos</button>
     <button class="tabbtn" data-goto="escala" role="tab" type="button">
       <span class="tabicon" aria-hidden="true">▦</span>Escala</button>
     <button class="tabbtn" data-goto="contadores" role="tab" type="button">

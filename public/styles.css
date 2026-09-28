@@ -670,7 +670,7 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 /* ---------------------------------------------------------------- tabbar -- */
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
   background: color-mix(in srgb, var(--surface-1) 92%, transparent);
   backdrop-filter: blur(12px);
   border-top: 1px solid var(--border);
@@ -781,6 +781,28 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 }
 .editcount[data-tone="over"]  { color: var(--warn); }
 .editcount[data-tone="ok"]    { color: var(--good); }
+
+/* ------------------------------------------------------------- pedidos --- */
+/* A aba Pedidos reaproveita a linha de dia da escala; o que muda e a conta de
+   pedidos no topo de cada dia e as notas da sexta. */
+.reqcount {
+  margin: 0;
+  font-size: .74rem; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* Mais 1as opcoes do que vagas: e ai que o contador decide quem entra. */
+.reqcount[data-tone="over"] { color: var(--warn); font-weight: 650; }
+.reqnote { margin: 0; font-size: .8rem; color: var(--text-secondary); }
+.reqnote b { color: var(--text-primary); font-weight: 650; }
+.reqnote[data-muted="1"] { font-size: .76rem; color: var(--text-muted); }
+.reqout { display: grid; gap: 14px; }
+.reqgroup { display: grid; gap: 7px; }
+.reqgroup-title { font-size: .82rem; font-weight: 650; color: var(--text-secondary); }
+.reqgroup-n {
+  margin-left: 4px;
+  font-size: .72rem; font-weight: 600; color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
 
 /* ------------------------------------------------------ fila da sexta ----- */
 .queue { display: grid; gap: 2px; margin-top: 10px; counter-reset: none; }

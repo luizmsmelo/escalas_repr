@@ -309,6 +309,29 @@ que, nas mãos erradas, quebrariam o sistema pedem a **senha de administrador**:
 
 ---
 
+## Pedidos — quem pediu cada dia
+
+A aba **Pedidos** mostra, para a semana escolhida nas setas, quem pediu cada dia —
+o que as pessoas **escolheram**, não quem vai ficar. Quem fica é da aba Escala. A
+tela é aberta a todo mundo, como a prévia.
+
+- Em cada dia, quem o pediu, com a posição que ele tem na lista da pessoa (1ª, 2ª
+  ou 3ª opção), primeiro quem o pediu como 1ª. Quem tem **dia fixo** valendo
+  aparece no dia dele, marcado *dia fixo*; quem tem **prioridade** aparece só no
+  dia que escolheu, marcado *prioridade*.
+- No topo de cada dia, a conta: quantos pedidos para quantas vagas, e quantos
+  como 1ª opção. Ela fica em destaque quando há mais 1ªs opções (e dias fixos) do
+  que vagas: é ali que o contador de escalas decide quem entra.
+- Na sexta, também quem marcou **"Não posso esta sexta"**.
+- No fim, quem não tem dia pedido: quem marcou que não vai participar, quem está
+  de **férias** a semana inteira e quem ainda não escolheu.
+
+As escolhas são lidas como o montador as lê: dia que caiu nas férias da pessoa não
+conta, e de quem tem prioridade vale só a primeira. Não há rota nova na API — a
+aba sai das mesmas preferências que o `/api/state` já traz.
+
+---
+
 ## Tour guiado
 
 O app tem um passeio pelos próprios botões, pensado para quem tem pouca prática
