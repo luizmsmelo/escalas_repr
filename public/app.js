@@ -733,12 +733,14 @@ function pedidosDaSemana() {
 }
 
 function pedidoLabel(x) {
+  if (x.veto) return 'não pode';
   if (x.fixo) return 'dia fixo';
   if (x.pessoa.priority) return 'prioridade';
   return `${ORDINAL[x.rank]} opção`;
 }
 
 function pedidoTone(x) {
+  if (x.veto) return 'veto';
   if (x.fixo) return 'fixo';
   if (x.pessoa.priority) return 'prioridade';
   return String(x.rank);
@@ -751,6 +753,25 @@ function renderRequests() {
 
   const { porDia, fora, ferias, semEscolha, vetos } = pedidosDaSemana();
   const capOf = (d) => (d === FRIDAY ? week.capFriday : week.capWeekday);
+  // Os contadores acumulados de hoje - os mesmos da aba Contadores. Sao eles que
+  // decidem, entre quem pediu o mesmo dia, quem entra.
+  const contadores = new Map((state.stats?.counters?.perPerson ?? []).map((c) => [c.personId, c]));
+  // Bolinha com o numero, como o contador de notificacao do celular. O texto
+  // por extenso vai no rotulo: a cor sozinha nao diz qual contador e.
+  const cnt = (tipo, extenso, n) =>
+    `<span class="cnt" data-kind="${tipo}" title="${extenso}" aria-label="${extenso}">${n}</span>`;
+  const linha = (x) => {
+    const c = contadores.get(x.pessoa.id);
+    return `<div class="slot" data-me="${x.pessoa.id === state.me?.id ? 1 : 0}">
+      <span class="avatar-cnt">
+        <span class="avatar">${esc(initials(x.pessoa.name))}</span>
+        <span class="cnts">${cnt('total', escalas(c?.total ?? 0), c?.total ?? 0)}${
+          cnt('sexta', sextasDe(c?.fridays ?? 0), c?.fridays ?? 0)}</span>
+      </span>
+      <span class="slot-name">${nomePrio(x.pessoa.id, x.pessoa.name)}</span>
+      <span class="slot-rank" data-rank="${pedidoTone(x)}">${pedidoLabel(x)}</span>
+    </div>`;
+  };
 
   $('#requests').innerHTML = week.dates
     .map(({ day, date, works, holiday }) => {
@@ -771,15 +792,13 @@ function renderRequests() {
       const tom = fixos + primeiras > cap ? 'over' : '';
 
       const pessoas = lista.length
-        ? lista.map((x) => `<div class="slot" data-me="${x.pessoa.id === state.me?.id ? 1 : 0}">
-            <span class="avatar">${esc(initials(x.pessoa.name))}</span>
-            <span class="slot-name">${nomePrio(x.pessoa.id, x.pessoa.name)}</span>
-            <span class="slot-rank" data-rank="${pedidoTone(x)}">${pedidoLabel(x)}</span>
-          </div>`).join('')
+        ? lista.map(linha).join('')
         : '<div class="slot slot-empty">ninguém pediu este dia</div>';
 
+      // Quem marcou "Nao posso esta sexta" aparece como os outros, depois de
+      // quem pediu: nao e pedido, e nao entra na conta do dia.
       const sexta = day === FRIDAY
-        ? `${vetos.length ? `<p class="reqnote">Não podem esta sexta: <b>${listaPessoas(vetos)}</b></p>` : ''}
+        ? `${vetos.map((p) => linha({ pessoa: p, veto: true })).join('')}
            <p class="reqnote" data-muted="1">A sexta é também a 4ª opção automática de quem
              está na fila dela &mdash; a fila fica em Contadores.</p>`
         : '';
@@ -796,6 +815,13 @@ function renderRequests() {
       </div>`;
     })
     .join('');
+
+  $('#reqLegend').innerHTML = `<span class="reqlegend-row"><span class="cnt" data-kind="total"
+      aria-hidden="true"></span> escalas</span> <span class="reqlegend-row"><span class="cnt"
+      data-kind="sexta" aria-hidden="true"></span> sextas</span>
+    <span class="reqlegend-text">Os números nas bolinhas de cada pessoa são os contadores acumulados
+      até hoje, os mesmos da aba Contadores. Quem tem menos escalas entra na semana; entre
+      quem entra, quem tem menos sextas leva a sexta.</span>`;
 
   // O que esta tela e, e o que ela nao e: pedido nao e vaga garantida.
   const { responderam, de } = contagemDeRespostas();

@@ -322,7 +322,14 @@ tela é aberta a todo mundo, como a prévia.
 - No topo de cada dia, a conta: quantos pedidos para quantas vagas, e quantos
   como 1ª opção. Ela fica em destaque quando há mais 1ªs opções (e dias fixos) do
   que vagas: é ali que o contador de escalas decide quem entra.
-- Na sexta, também quem marcou **"Não posso esta sexta"**.
+- No canto do avatar de cada pessoa, como o número de notificação no ícone de um
+  app, os dois **contadores** acumulados até hoje — os mesmos da aba Contadores:
+  a bolinha azul é o de **escalas**, e a âmbar, o de **sextas**. É por eles que se
+  vê, entre quem pediu o mesmo dia, quem está à frente: entra quem tem menos
+  escalas, e entre quem entra, leva a sexta quem tem menos sextas. Uma legenda
+  embaixo dos dias explica as cores.
+- Na sexta, também quem marcou **"Não posso esta sexta"**: a pessoa aparece como as
+  outras, com a etiqueta vermelha *não pode*, e não entra na conta de pedidos.
 - No fim, quem não tem dia pedido: quem marcou que não vai participar, quem está
   de **férias** a semana inteira e quem ainda não escolheu.
 

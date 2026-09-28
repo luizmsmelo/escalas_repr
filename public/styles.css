@@ -793,8 +793,52 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 /* Mais 1as opcoes do que vagas: e ai que o contador decide quem entra. */
 .reqcount[data-tone="over"] { color: var(--warn); font-weight: 650; }
 .reqnote { margin: 0; font-size: .8rem; color: var(--text-secondary); }
-.reqnote b { color: var(--text-primary); font-weight: 650; }
 .reqnote[data-muted="1"] { font-size: .76rem; color: var(--text-muted); }
+/* Contadores no canto do avatar, como o numero de notificacao no icone de um
+   app: azul para escalas, ambar para sextas - o mesmo ambar da borda da sexta.
+   Cada cor tem a tinta que da leitura nos dois temas. As bolinhas entram na
+   largura do bloco: se o numero cresce, o nome anda, em vez de ficar por baixo
+   delas. */
+.avatar-cnt { flex: none; display: inline-flex; align-items: flex-start; }
+/* Largura reservada para o caso comum - escalas com dois digitos, sextas com
+   um -, para os nomes comecarem todos na mesma coluna. */
+#requests .avatar-cnt { min-width: 62px; }
+.cnts {
+  display: inline-flex;
+  margin: -7px 0 0 -9px;
+  position: relative;
+}
+.cnts .cnt { box-shadow: 0 0 0 2px var(--surface-1); }
+.cnts .cnt + .cnt { margin-left: 1px; }
+.cnt {
+  display: inline-block;
+  min-width: 17px; height: 17px; padding: 0 5px;
+  border-radius: 999px;
+  font-size: .64rem; font-weight: 700; line-height: 17px; text-align: center;
+  font-variant-numeric: tabular-nums;
+  background: var(--series-1); color: var(--accent-ink);
+}
+.cnt[data-kind="sexta"] { background: var(--warn); color: #1f1600; }
+/* Na legenda, a bolinha vai sem numero: e ela que se aprende a reconhecer. */
+.cnt:empty { min-width: 11px; height: 11px; padding: 0; }
+/* O selo "voce" muda de linha inteiro, e nao parte no meio da palavra. */
+#requests .slot[data-me="1"] .slot-name::after { display: inline-block; }
+.reqlegend {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
+  font-size: .78rem; color: var(--text-muted);
+  padding: 0 4px;
+}
+.reqlegend-row {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-weight: 650; color: var(--text-secondary);
+}
+.reqlegend-text { flex-basis: 100%; }
+/* Nao pode esta sexta: veto, e nao preferencia - por isso o vermelho. */
+.slot-rank[data-rank="veto"] {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
 .reqout { display: grid; gap: 14px; }
 .reqgroup { display: grid; gap: 7px; }
 .reqgroup-title { font-size: .82rem; font-weight: 650; color: var(--text-secondary); }
