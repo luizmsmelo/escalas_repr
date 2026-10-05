@@ -690,24 +690,20 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 .tabicon { font-size: 1.4rem; line-height: 1.1; }
 .tabbtn.is-active { color: var(--accent); background: var(--accent-soft); }
 
-/* Desktop: o menu vira uma barra flutuante vertical, na lateral esquerda e
-   centralizada na altura da tela. O conteudo tem 640px e fica no meio, entao
-   so cabe sem sobrepor a partir de ~1040px; abaixo disso fica embaixo. */
-@media (min-width: 1040px) {
+/* Desktop: o menu vira uma barra flutuante estreita e vertical, colada na
+   lateral esquerda da coluna de conteudo (640px + 14px de padding, centrada)
+   e centralizada na altura da tela. */
+@media (min-width: 900px) {
   .tabbar {
-    left: 24px; right: auto; bottom: auto; top: 50%;
+    left: calc(50% - 404px); right: auto; bottom: auto; top: 50%;
     transform: translateY(-50%);
-    width: 160px;
-    grid-template-columns: 1fr; gap: 4px; padding: 8px;
+    width: 84px;
+    grid-template-columns: 1fr; gap: 4px; padding: 6px;
     border: 1px solid var(--border-strong);
     border-radius: 22px;
     box-shadow: 0 12px 36px -8px rgb(0 0 0 / .35), 0 2px 6px rgb(0 0 0 / .1);
   }
-  .tabbtn {
-    grid-auto-flow: column; justify-content: start; align-items: center;
-    gap: 10px; padding: 12px 14px; font-size: .9rem; border-radius: 16px;
-  }
-  .tabicon { width: 1.5rem; text-align: center; }
+  .tabbtn { padding: 10px 2px 8px; font-size: .66rem; border-radius: 16px; }
   .main { padding-bottom: 32px; }
   .toast { bottom: 24px; }
 }
