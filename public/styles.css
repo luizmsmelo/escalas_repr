@@ -187,7 +187,7 @@ button { font: inherit; color: inherit; }
 .main {
   flex: 1;
   width: 100%; max-width: 640px; margin: 0 auto;
-  padding: 14px 14px calc(88px + var(--safe-bottom));
+  padding: 14px 14px calc(104px + var(--safe-bottom));
   display: grid; gap: 14px; align-content: start;
   /* minmax(0,...) e o que impede a pagina inteira de crescer por causa de UM
      texto que nao quebra. Sem isso, a coluna do grid assume o min-content do
@@ -673,26 +673,28 @@ td:not(:first-child), th:not(:first-child) { text-align: right; font-variant-num
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
   display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
-  background: color-mix(in srgb, var(--surface-1) 92%, transparent);
-  backdrop-filter: blur(12px);
-  border-top: 1px solid var(--border);
-  padding-bottom: var(--safe-bottom);
+  gap: 4px; padding: 8px 8px calc(8px + var(--safe-bottom));
+  /* Fundo opaco e sombra para cima: a barra precisa se destacar do conteudo. */
+  background: var(--surface-1);
+  border-top: 2px solid var(--border-strong);
+  box-shadow: 0 -8px 24px -10px rgb(0 0 0 / .28);
 }
 .tabbtn {
-  display: grid; gap: 2px; justify-items: center;
-  padding: 9px 4px 10px;
-  background: none; border: 0; cursor: pointer;
-  font-size: .68rem; font-weight: 600; letter-spacing: .01em;
-  color: var(--text-muted);
+  display: grid; gap: 3px; justify-items: center;
+  padding: 8px 4px 7px;
+  background: none; border: 0; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: .76rem; font-weight: 700; letter-spacing: .01em;
+  color: var(--text-secondary);
 }
-.tabicon { font-size: 1.05rem; line-height: 1.1; }
-.tabbtn.is-active { color: var(--accent); }
+.tabbtn:hover { background: var(--surface-2); }
+.tabicon { font-size: 1.4rem; line-height: 1.1; }
+.tabbtn.is-active { color: var(--accent); background: var(--accent-soft); }
 
 /* ----------------------------------------------------------------- toast -- */
 .toast {
   position: fixed; z-index: 80;
   left: 50%; transform: translateX(-50%);
-  bottom: calc(78px + var(--safe-bottom));
+  bottom: calc(96px + var(--safe-bottom));
   max-width: min(92vw, 460px);
   padding: 11px 16px;
   border-radius: 999px;
