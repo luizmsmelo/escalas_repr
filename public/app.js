@@ -876,7 +876,8 @@ function renderRequests() {
   notice.innerHTML = `Quem <b>pediu</b> cada dia, na ordem de preferência de cada um${temEscala
       ? ` &mdash; em destaque, quem está na escala naquele dia${
           state.data.preview ? ', por enquanto na prévia' : ''}` : ''}. Quando o dia tem mais
-      pedidos do que vagas, entra quem tem menos escalas acumuladas; o porquê de cada caso
+      pedidos do que vagas, entra quem tem menos escalas acumuladas; entre quem pede o mesmo
+      dia na mesma opção, leva quem vem ficando menos com a 1ª opção; o porquê de cada caso
       está na aba Escala, em &ldquo;Como essa escala foi montada?&rdquo;.
     <br><br>${situacao ? `${situacao} ` : ''}<b>${responderam} de ${de}</b>
       ${de === 1 ? 'pessoa' : 'pessoas'} ${week.published ? 'responderam' : 'já responderam'}.`;
@@ -908,6 +909,24 @@ function renderRequests() {
 
 /* --- aba: escala ---------------------------------------------------------- */
 
+/* Aviso de novidade no topo da aba: fica ate a pessoa fechar. O "ja vi" e deste
+ * aparelho, como o tema. Sem armazenamento (modo privado) o aviso aparece, e
+ * "Fechar" o esconde ate a pagina ser recarregada. */
+const STORAGE_NEWS = 'escalas.avisoDesempate';
+let avisoFechado = false;
+
+function renderNews() {
+  let visto = false;
+  try { visto = localStorage.getItem(STORAGE_NEWS) === '1'; } catch { /* modo privado */ }
+  $('#schedNews').hidden = visto || avisoFechado;
+}
+
+function fecharNews() {
+  avisoFechado = true;
+  try { localStorage.setItem(STORAGE_NEWS, '1'); } catch { /* modo privado: some so ate recarregar */ }
+  renderNews();
+}
+
 /*
  * `generation` e o resumo da montagem - fila da sexta, dias fixos, quem ficou
  * de fora. Ele vem no proprio estado enquanto a semana e previa, e por isso
@@ -919,6 +938,7 @@ function renderSchedule(generation = state.data.generation) {
   $('#schedWeekLabel').textContent = weekLabel(week.monday);
   applyWeekBadge($('#schedWeekBadge'), week.monday);
 
+  renderNews();
   renderWhy();
   // A legenda das bolinhas vale tambem para o editor, que mostra as mesmas.
   $('#schedLegend').hidden = !assignments.length;
@@ -2279,6 +2299,7 @@ function renderCounters() {
     statCard('Minhas sextas', mine?.fridays ?? 0,
       notaContador(c.avgFridays, mine?.startFridays, mine?.vacationFridays),
       diffTone(mine?.fridays ?? 0, c.avgFridays)),
+    cartaoPrimeiraOpcao(mine?.pref, c.avgFirstChoice),
     statCard('Posição na fila', myPos || '—',
       myPos ? `de ${queue.length} pessoas`
         : myFixedDay() != null ? 'fora da fila: dia fixo' : 'fora da fila'),
@@ -2305,6 +2326,48 @@ function renderCounters() {
 
   renderChartTable($('#chartTotalTable'), totalData, 'Escalas');
   renderChartTable($('#chartFridayTable'), fridayData, 'Sextas');
+
+  renderFirstChoiceChart(c);
+}
+
+/** "60%" - a proporcao de escalas que cairam na 1ª opcao, ja arredondada. */
+const pctPrimeira = (pref) => Math.round((100 * pref.c1) / pref.n);
+
+/**
+ * Cartao pessoal "Na 1ª opção". So conta o que o app decidiu a partir das
+ * opcoes marcadas (`pref.n`); sem nenhuma escala assim, nao ha proporcao a dizer.
+ * A media do grupo e nula quando ninguem tem escala que conte.
+ */
+function cartaoPrimeiraOpcao(pref, media) {
+  const n = pref?.n ?? 0;
+  if (!n) return statCard('Na 1ª opção', '—', 'ainda sem escalas que contam');
+  const nota = [`${pref.c1} de ${plural(n, 'escala', 'escalas')}`];
+  if (media != null) nota.push(`média do grupo ${Math.round(100 * media)}%`);
+  return statCard('Na 1ª opção', `${pctPrimeira(pref)}%`, nota.join(' · '));
+}
+
+/** Grafico "Na 1ª opção por pessoa": so quem tem escala que conte. */
+function renderFirstChoiceChart(c) {
+  const data = porValor(c.perPerson
+    .filter((p) => p.pref?.n > 0)
+    .map((p) => ({ full: p.name, value: pctPrimeira(p.pref), id: p.personId })));
+  const media = c.avgFirstChoice == null ? null : Math.round(100 * c.avgFirstChoice);
+  const pct = (v) => `${v}%`;
+
+  $('#chartFirstSub').textContent = media == null ? '' : `média ${pct(media)} · linha cinza`;
+  if (!data.length) {
+    // Sem ninguem para mostrar, "nenhuma pessoa ativa" seria mentira.
+    $('#chartFirst').innerHTML = '<p class="empty">Ainda sem escalas que contam.</p>';
+    $('#chartFirstTable').innerHTML = '';
+    return;
+  }
+  drawBarList($('#chartFirst'), data, {
+    target: (c.avgFirstChoice ?? 0) * 100,
+    unit: 'porcentagem de escalas na 1ª opção',
+    unitPlural: 'porcentagens de escalas na 1ª opção',
+    fmt: pct,
+  });
+  renderChartTable($('#chartFirstTable'), data, 'Na 1ª opção', pct);
 }
 
 function renderFridayQueue(queue) {
@@ -2399,11 +2462,11 @@ function diffTone(actual, target) {
   return actual > target ? 'over' : 'under';
 }
 
-function renderChartTable(el, data, valueHeader) {
+function renderChartTable(el, data, valueHeader, fmt = (v) => v) {
   el.innerHTML = `<table>
     <thead><tr><th>Pessoa</th><th>${esc(valueHeader)}</th></tr></thead>
     <tbody>${data
-      .map((d) => `<tr><td>${nomePrio(d.id, d.full)}</td><td>${d.value}</td></tr>`)
+      .map((d) => `<tr><td>${nomePrio(d.id, d.full)}</td><td>${fmt(d.value)}</td></tr>`)
       .join('')}</tbody>
   </table>`;
 }
@@ -2418,7 +2481,11 @@ function renderChartTable(el, data, valueHeader) {
 const porValor = (data) => [...data].sort((a, b) =>
   b.value - a.value || a.full.localeCompare(b.full, 'pt-BR'));
 
-function drawBarList(container, data, { target = 0, unit, unitPlural }) {
+/**
+ * `fmt(valor)` e opcional: escreve o numero que aparece (e que a leitura de tela
+ * le) quando ele nao e uma contagem - "60%". Sem ele, a saida e a de sempre.
+ */
+function drawBarList(container, data, { target = 0, unit, unitPlural, fmt }) {
   if (!data.length) {
     container.innerHTML = '<p class="empty">Nenhuma pessoa ativa cadastrada.</p>';
     return;
@@ -2431,10 +2498,10 @@ function drawBarList(container, data, { target = 0, unit, unitPlural }) {
   container.dataset.media = target > 0 ? '1' : '0';
   container.style.setProperty('--media', pct(target));
 
-  container.innerHTML = `<div class="barlist" role="list"
+  container.innerHTML = `<div class="barlist"${fmt ? ' data-fmt="1"' : ''} role="list"
       aria-label="${esc(unitPlural)} por pessoa, do maior para o menor">${data.map((d) => {
     const eu = d.id === state.me?.id;
-    const conta = `${d.value} ${d.value === 1 ? unit : unitPlural}`;
+    const conta = fmt ? fmt(d.value) : `${d.value} ${d.value === 1 ? unit : unitPlural}`;
     // Zero nao some: vira um tracinho, para a pessoa aparecer na lista.
     const largura = d.value > 0 ? pct(d.value) : '3px';
     // A estrela e visual: para quem ouve a tela, a prioridade vai escrita.
@@ -2445,7 +2512,7 @@ function drawBarList(container, data, { target = 0, unit, unitPlural }) {
       <span class="barlist-track" aria-hidden="true">
         <span class="barlist-bar" data-zero="${d.value > 0 ? 0 : 1}" style="width:${largura}"></span>
       </span>
-      <span class="barlist-value" aria-hidden="true">${d.value}</span>
+      <span class="barlist-value" aria-hidden="true">${fmt ? fmt(d.value) : d.value}</span>
     </div>`;
   }).join('')}</div>`;
 }
@@ -3102,6 +3169,8 @@ function wireEvents() {
       renderAll();
       toast(next ? 'Escala publicada.' : 'Escala reaberta para alterações.');
     }));
+
+  $('#schedNewsClose').addEventListener('click', fecharNews);
 
   // contadores
   $$('[data-table]').forEach((btn) => {

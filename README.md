@@ -358,6 +358,11 @@ aberta a todo mundo, como a prévia.
   escalas, e entre quem entra, leva a sexta quem tem menos sextas. Uma legenda
   embaixo dos dias explica as cores. As mesmas bolinhas aparecem na aba Escala,
   inclusive na edição à mão.
+- O quadro explicativo do topo também diz como o empate se resolve: *entre quem
+  pede o mesmo dia na mesma opção, leva quem vem ficando menos com a 1ª opção*.
+  Não há bolinha nova para isso — é a proporção de 1ª opção (ver "Os contadores"),
+  que só desempata — e o porquê de cada caso continua em "Como essa escala foi
+  montada?".
 - Em **destaque** — fundo verde e um filete à esquerda —, quem está na escala
   daquele dia: a prévia enquanto a semana é prévia, e a escala gravada depois.
   Quem ficou com um dia sem tê-lo pedido — pela fila da sexta, sem ter respondido
@@ -537,7 +542,9 @@ em julho. Comparar quantas escalas cada um fez "no mês" compara períodos de
 tamanhos diferentes. No acumulado, todo mundo mediu o mesmo período.
 
 A referência nos gráficos é a **média do grupo** — com contadores acumulados, é
-onde todos deveriam estar.
+onde todos deveriam estar. O gráfico da 1ª opção (abaixo, em "As proporções de 1ª
+opção") é de outra natureza: não decide quem trabalha nem quantas escalas cada um
+faz, só desempata.
 
 ### Só conta escala publicada
 
@@ -649,6 +656,21 @@ continua contando pelo que o app tinha decidido para ela.
 empatadas** no custo de preferência: nunca muda quem trabalha nem quantas escalas
 cada um faz. A prévia não conta; semana reaberta sai da conta até ser publicada de
 novo.
+
+**Na aba Contadores.** Dois lugares mostram essas proporções, os dois só com as
+escalas que contam:
+
+- O cartão pessoal **"Na 1ª opção"**, entre os cartões do topo: a porcentagem das
+  suas escalas que caíram na 1ª opção, com a conta e a média do grupo na nota —
+  por exemplo, *60%* e *"6 de 10 escalas · média do grupo 55%"*. A média do grupo
+  é a média das proporções de cada pessoa ativa que tem escala que conta; sem
+  ninguém assim, a nota fica só com a conta. Quem ainda não tem escala que conte
+  vê "—". Embaixo dos cartões, uma frase resume a regra: *"Em empate, leva o dia
+  quem vem ficando menos com a 1ª opção."*
+- O gráfico **"Na 1ª opção por pessoa"**, depois dos de escalas e de sextas e no
+  mesmo formato — barras deitadas, linha cinza na média do grupo, "Ver como
+  tabela" —, com a porcentagem de cada pessoa, da maior para a menor. Quem ainda
+  não tem escala que conte não aparece nele.
 
 ---
 

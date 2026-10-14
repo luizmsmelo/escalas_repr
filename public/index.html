@@ -203,6 +203,13 @@
         <button class="weeknav-arrow" data-week-step="1" type="button" aria-label="Próxima semana">›</button>
       </nav>
 
+      <!-- Aviso de novidade: fica ate a pessoa fechar (ver renderNews). -->
+      <div id="schedNews" class="notice" hidden>
+        <p><b>Mudou a regra do empate.</b> Quando duas pessoas pedem o mesmo dia na mesma
+          opção, agora leva quem vem ficando menos com a 1ª opção, e não mais uma ordem
+          fixa. O porquê de cada caso está em &ldquo;Como essa escala foi montada?&rdquo;.</p>
+        <button id="schedNewsClose" class="linkbtn" type="button">Fechar</button>
+      </div>
       <div id="schedPreview" class="preview" hidden></div>
       <div id="schedNotice" class="notice" hidden></div>
       <div id="schedule" class="schedule"></div>
@@ -240,6 +247,7 @@
       <p id="countersSince" class="since"></p>
 
       <div id="myStats" class="mystats"></div>
+      <p class="hint hint-muted">Em empate, leva o dia quem vem ficando menos com a 1ª opção.</p>
 
       <section class="card">
         <h2 class="card-title">
@@ -273,6 +281,16 @@
         <div id="chartFriday" class="chart"></div>
         <button class="linkbtn" type="button" data-table="chartFriday">Ver como tabela</button>
         <div id="chartFridayTable" class="tablewrap" hidden></div>
+      </figure>
+
+      <figure class="card chart-card">
+        <figcaption class="card-title">
+          Na 1ª opção por pessoa
+          <span class="card-sub" id="chartFirstSub"></span>
+        </figcaption>
+        <div id="chartFirst" class="chart"></div>
+        <button class="linkbtn" type="button" data-table="chartFirst">Ver como tabela</button>
+        <div id="chartFirstTable" class="tablewrap" hidden></div>
       </figure>
 
     </section>
