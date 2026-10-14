@@ -4,6 +4,11 @@
 
 const BELOW_THIRD = 4; // posicao de quem veio da fila ou de um dia fora das opcoes
 
+// Todo valor de perfil passa por aqui. A media do grupo soma doubles e pode cair
+// um ulp longe de quem tem exatamente o mesmo valor; arredondado, o empate exato
+// continua exato na ordenacao e na tela, que compara esses mesmos numeros.
+const tidy = (x) => Math.round(x * 1e9) / 1e9;
+
 /** Posicao da escala para o desempate: 1, 2, 3 ou 4 ("abaixo da 3a"). */
 export function positionOf({ rank, via }) {
   if (via === 'fila' || rank == null) return BELOW_THIRD;
@@ -41,8 +46,8 @@ export function tieProfile(history) {
   const { n, c1 = 0, c2 = 0, c3 = 0 } = history;
   const c4 = n - c1 - c2 - c3;
   return {
-    below: [1 - c1 / n, 1 - (c1 + c2) / n, 1 - (c1 + c2 + c3) / n],
-    avgPos: (c1 + 2 * c2 + 3 * c3 + 4 * c4) / n,
+    below: [1 - c1 / n, 1 - (c1 + c2) / n, 1 - (c1 + c2 + c3) / n].map(tidy),
+    avgPos: tidy((c1 + 2 * c2 + 3 * c3 + 4 * c4) / n),
   };
 }
 
@@ -55,7 +60,7 @@ export function tieProfile(history) {
 export function tieOrders(people) {
   const profiles = people.map((p) => tieProfile(p.prefHistory));
   const known = profiles.filter(Boolean);
-  const mean = (get) => (known.length ? known.reduce((s, pf) => s + get(pf), 0) / known.length : 0);
+  const mean = (get) => (known.length ? tidy(known.reduce((s, pf) => s + get(pf), 0) / known.length) : 0);
   const average = {
     below: [0, 1, 2].map((i) => mean((pf) => pf.below[i])),
     avgPos: mean((pf) => pf.avgPos),
