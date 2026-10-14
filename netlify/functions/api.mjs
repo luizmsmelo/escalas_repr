@@ -1,6 +1,7 @@
 import { sql, ensureSchema } from './lib/db.mjs';
 import { env, platform } from './lib/env.mjs';
 import { solveWeek, rankOf, DAYS, DAY_NAMES, FRIDAY } from './lib/solver.mjs';
+import { decisionsFromExplain } from './lib/tiebreak.mjs';
 import {
   todayISO, mondayOf, nextMonday, addDays, weekDates, monthOf, parseISO,
   isValidISO, isValidMonth,
@@ -767,7 +768,8 @@ async function montarSemana(week, ja = {}) {
   // Historico GERAL, nao mensal: e ele que faz a fila da sexta girar. Com 4 ou
   // 5 sextas por mes para 9 pessoas, um contador mensal zera antes de o rodizio
   // fechar e metade do grupo nunca pegaria sexta.
-  const history = await allTimeCounts(week);
+  // As proporcoes de 1a opcao vem do mesmo recorte e so desempatam; ver prefCounts.
+  const [history, prefs] = await Promise.all([allTimeCounts(week), prefCounts(week)]);
 
   const input = participants.map((r) => {
     const blockedDays = ferias.get(r.id).blocked;
@@ -784,6 +786,7 @@ async function montarSemana(week, ja = {}) {
       blockedDays,
       totalCount: history.get(r.id)?.total ?? 0,
       fridayCount: history.get(r.id)?.fridays ?? 0,
+      prefHistory: prefs.get(r.id) ?? { n: 0, c1: 0, c2: 0, c3: 0 },
     };
   });
 
@@ -852,6 +855,24 @@ function gravacaoDaSemana(week, { result, explain, dates }) {
     ),
     sql`update weeks set generated_at = now(), explain = ${JSON.stringify(explain)}
          where monday = ${week}`,
+    ...gravacaoDasDecisoes(week, explain),
+  ];
+}
+
+/**
+ * As decisoes do app que alimentam o desempate (app_decisions): espelham o
+ * `explain` da semana, entao toda gravacao dele regrava estas linhas na mesma
+ * transacao, e toda limpeza o apaga junto. Ajuste manual de semana ja gravada
+ * nao passa por aqui: o que a mao mexeu nao e decisao do app.
+ */
+function gravacaoDasDecisoes(week, explain) {
+  return [
+    sql`delete from app_decisions where monday = ${week}`,
+    ...decisionsFromExplain(explain).map(
+      (d) => sql`
+        insert into app_decisions (monday, person_id, day, work_date, position)
+        values (${week}, ${d.personId}, ${d.day}, ${addDays(week, d.day - 1)}, ${d.position})`,
+    ),
   ];
 }
 
@@ -977,7 +998,8 @@ async function setAssignments({ monday, slots, byPersonId }, request) {
     // depois, o que o app tinha montado antes de a mao mexer.
     ...(previa ? [sql`update weeks set generated_at = now(),
                              explain = ${JSON.stringify(previa.explain)}
-                       where monday = ${week}`] : []),
+                       where monday = ${week}`,
+                  ...gravacaoDasDecisoes(week, previa.explain)] : []),
     sql`delete from assignments where monday = ${week}`,
     ...linhas.map(
       (a) => sql`
@@ -1010,6 +1032,7 @@ async function discardAssignments(params, request) {
   await sql.transaction([
     sql`delete from assignments where monday = ${week}`,
     sql`update weeks set generated_at = null, explain = null where monday = ${week}`,
+    sql`delete from app_decisions where monday = ${week}`,
     logQuery(week, 'descartar', quem),
   ]);
   return getState(week);
@@ -1085,13 +1108,14 @@ async function getStats(monthParam) {
 
 async function computeStats(ym, overrides) {
   const excecoes = overrides ?? (await loadOverrides());
-  const [people, rows, weekRows, allTime, resetAt] = await Promise.all([
+  const [people, rows, weekRows, allTime, prefs, resetAt] = await Promise.all([
     loadPeople(),
     sql`select person_id, day, work_date from assignments
          where to_char(work_date, 'YYYY-MM') = ${ym}`,
     sql`select cap_weekday, cap_friday from weeks
          where to_char(monday, 'YYYY-MM') = ${ym} order by monday limit 1`,
     allTimeCounts(),
+    prefCounts(),
     countersResetAt(),
   ]);
 
@@ -1137,11 +1161,15 @@ async function computeStats(ym, overrides) {
         startFridays: allTime.get(p.id)?.startFridays ?? 0,
         vacationTotal: allTime.get(p.id)?.vacationTotal ?? 0,
         vacationFridays: allTime.get(p.id)?.vacationFridays ?? 0,
+        // Escalas que contam para o desempate e quantas foram na 1a, 2a e 3a
+        // opcao (as demais ficaram abaixo da 3a).
+        pref: prefs.get(p.id) ?? { n: 0, c1: 0, c2: 0, c3: 0 },
       })),
       avgTotal: round2(sumOf(activePeople, allTime, 'total') / (activePeople.length || 1)),
       avgFridays: round2(sumOf(activePeople, allTime, 'fridays') / (activePeople.length || 1)),
       grandTotal: sumOf(activePeople, allTime, 'total'),
       grandFridays: sumOf(activePeople, allTime, 'fridays'),
+      avgFirstChoice: mediaPrimeiraOpcao(activePeople, prefs),
     },
     // A fila da sexta e acumulada e independente do mes que estiver na tela.
     fridayQueue: buildFridayQueue(activePeople, allTime, capWeekday * 4 + capFriday),
@@ -1204,6 +1232,38 @@ async function allTimeCounts(excludeMonday = null) {
   }
   if (vacations.length) await addVacationCredit(map, rows, vacations, people);
   return map;
+}
+
+/**
+ * Proporcoes de 1a opcao por pessoa: das escalas que o app decidiu a partir das
+ * opcoes marcadas (app_decisions), quantas contam (`n`) e quantas foram na 1a,
+ * 2a e 3a opcao - o resto ficou abaixo da 3a. Mesmo recorte de allTimeCounts:
+ * so semana publicada, desde o ultimo zeramento, e `excludeMonday` tira a semana
+ * em montagem para regerar nao contar duas vezes. So desempata; nao e cota.
+ */
+async function prefCounts(excludeMonday = null) {
+  const desde = await countersResetAt();
+  const rows = await sql`
+    select d.person_id, count(*)::int as n,
+           (count(*) filter (where d.position = 1))::int as c1,
+           (count(*) filter (where d.position = 2))::int as c2,
+           (count(*) filter (where d.position = 3))::int as c3
+      from app_decisions d
+      join weeks w on w.monday = d.monday and w.published
+     where d.work_date >= ${desde}
+       and (${excludeMonday}::date is null or d.monday <> ${excludeMonday}::date)
+     group by d.person_id`;
+  return new Map(rows.map((r) => [r.person_id, { n: r.n, c1: r.c1, c2: r.c2, c3: r.c3 }]));
+}
+
+/**
+ * Media, entre os ativos que ja tem escala contada, da proporcao na 1a opcao
+ * (c1/n de cada um). Null quando ninguem tem.
+ */
+function mediaPrimeiraOpcao(activePeople, prefs) {
+  const razoes = activePeople.map((p) => prefs.get(p.id)).filter((c) => c?.n > 0)
+    .map((c) => c.c1 / c.n);
+  return razoes.length ? round2(razoes.reduce((s, x) => s + x, 0) / razoes.length) : null;
 }
 
 /**

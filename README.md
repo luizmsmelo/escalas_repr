@@ -605,6 +605,37 @@ alcançar o grupo, e ela não tem culpa de ter entrado depois.
   histórico; afastamento se registra como férias, que dão a média semana a semana.
 - Com o grupo ainda sem nenhuma escala, a média é zero e a pessoa começa em zero.
 
+### As proporções de 1ª opção
+
+Além de escalas e sextas, o app guarda por pessoa **quantas escalas ele decidiu a
+partir das opções marcadas** e em que posição cada uma caiu: na 1ª, na 2ª, na 3ª ou
+abaixo da 3ª. É daí que saem as proporções do desempate (ver "Desempate entre
+preferências iguais") e a proporção média de 1ª opção que a aba Contadores mostra.
+
+**O que conta.** A escala entra na conta quando:
+
+- a semana está **publicada** e o dia trabalhado não é anterior ao último
+  zeramento — zerar os contadores zera estas proporções também, e desfazer o
+  zeramento as devolve;
+- foi o **app** quem decidiu: vale o que ficou gravado na montagem da semana;
+- a pessoa **tinha marcado opções** naquela semana;
+- o dia veio por **preferência**, por **voluntário** (sexta pedida como opção) ou
+  pela **fila** (sexta automática). A fila e um dia fora da lista contam como
+  "abaixo da 3ª".
+
+Quem dobrou na semana conta as duas escalas.
+
+**O que não conta.** Ajuste manual: trocar alguém de dia, tirar ou incluir uma
+pessoa à mão não mexe nestas proporções, nem mesmo numa semana já publicada — vale
+o que o app tinha decidido. Também ficam de fora o **dia fixo**, a **prioridade**
+e a semana em que a pessoa **não marcou opção nenhuma**. Quem foi tirado à mão
+continua contando pelo que o app tinha decidido para ela.
+
+**Para que serve.** Só para desempatar, e só quando duas pessoas estão **exatamente
+empatadas** no custo de preferência: nunca muda quem trabalha nem quantas escalas
+cada um faz. A prévia não conta; semana reaberta sai da conta até ser publicada de
+novo.
+
 ---
 
 ## Férias
