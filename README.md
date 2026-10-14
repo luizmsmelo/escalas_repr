@@ -432,8 +432,9 @@ estava em disputa (a melhor em jogo) e o que decidiu: a proporção de vezes aba
 dela (*"Geovani, 6 de 10 escalas (60%); Arthur, 4 de 10 (40%)"*), a posição média
 ou a ordem fixa de cadastro — e, para quem perdeu, como fica a conta com esta
 semana. Quem ainda não tem escala que conte aparece com a média do grupo, que é o
-que o montador usou. Se um disputava a 1ª opção e o outro só a 2ª, leva quem
-disputava a 1ª, seja qual for o histórico. Quando a troca deixaria o grupo pior, a
+que o montador usou. Se a 1ª opção só está em jogo para um dos dois (um fica
+entre a 1ª e a 2ª, o outro entre a 2ª e a 3ª), ela fica com ele, seja qual for o
+histórico. Quando a troca deixaria o grupo pior, a
 linha diz que **não foi empate**, com o motivo quando o colega não pediu aquele
 dia. A tela refaz só a conta da troca, com os custos do montador (0 / 1.000 /
 2.000 / 8.000); os números vêm gravados na semana. Semana montada antes dessa

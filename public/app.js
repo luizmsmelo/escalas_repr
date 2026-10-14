@@ -1290,8 +1290,9 @@ function whyRules(explain) {
       <li><b>Em qual dia.</b> Só aqui a preferência entra. A sexta sai de uma fila pelo
         contador de sextas; de segunda a quinta, o app procura a distribuição que deixa
         o grupo <b>inteiro</b> o mais perto possível da 1ª opção.${temDesempate(explain)
-          ? ` Quando trocar duas pessoas de dia dá exatamente no mesmo para o grupo, o dia
-            fica com quem mais vezes ficou abaixo da opção em disputa.` : ''}</li>
+          ? ` Quando trocar duas pessoas de dia dá exatamente no mesmo para o grupo, decide
+            a melhor opção em jogo: ela fica com quem a disputa e, se os dois a disputam,
+            com quem mais vezes ficou abaixo dela.` : ''}</li>
     </ol>
     <p class="why-note"><b>Prioridade</b> não é uma camada à parte nem exceção ao
       contador: quem tem a estrela escolhe um dia por semana e disputa a vaga pelo
@@ -1636,7 +1637,9 @@ function whyWeekdays(explain, byDay) {
       opção): leva quem, nas escalas anteriores, mais vezes ficou <b>abaixo dela</b>;
       empatando, quem tem a <b>pior posição média</b>; empatando de novo, a ordem fixa de
       cadastro. Essa ordem só decide empates perfeitos e se corrige sozinha: quem ganha
-      um empate desses melhora as próprias proporções e perde o próximo. O empate não muda
+      um empate desses melhora as próprias proporções e perde o próximo. Se a 1ª opção só
+      está em jogo para um dos dois (um fica entre a 1ª e a 2ª, o outro entre a 2ª e a
+      3ª), ela fica com ele, seja qual for o histórico. O empate não muda
       quem entra na semana, quantas escalas cada um faz nem o total do grupo — só quem
       fica com qual dia. Não há sorteio nem ordem de chegada.</p>` : ''}
     <p class="why-p">Como a escala saiu: ${resumo}.</p>
@@ -1803,28 +1806,39 @@ const EMPATE_PERFEITO = `empataram em tudo; decidiu a ordem fixa de cadastro. Qu
 const abaixoDe = (h, nivel) =>
   (h?.n ?? 0) - [h?.c1, h?.c2, h?.c3].slice(0, nivel).reduce((s, c) => s + (c ?? 0), 0);
 
-/** A proporcao que o solver usou no nivel, em porcentagem inteira. */
-const pctNoNivel = (p, nivel) => `${Math.round(p.tieProfile.below[nivel - 1] * 100)}%`;
+/**
+ * Dois numeros com virgula e o minimo de casas para que valores diferentes nao
+ * saiam iguais na tela - senao "40% contra 40%" pareceria empate onde a
+ * proporcao decidiu. `casas` e o minimo sempre mostrado (zeros a direita alem
+ * dele somem: "40,4%" contra "40%"). Os perfis vem arredondados a 1e-9, entao
+ * 9 casas bastam.
+ */
+function semEmpateFalso(a, b, { casas = 0, sufixo = '' } = {}) {
+  for (let c = casas; ; c++) {
+    const fmt = (x) => `${x.toLocaleString('pt-BR',
+      { minimumFractionDigits: casas, maximumFractionDigits: c })}${sufixo}`;
+    if (a === b || fmt(a) !== fmt(b) || c >= 9) return [fmt(a), fmt(b)];
+  }
+}
+
+/** As posicoes medias de dois: uma casa, ou mais se uma casa as igualar. */
+const medias = (a, b) => semEmpateFalso(a, b, { casas: 1 });
+
+/** As proporcoes que o solver usou no nivel, para p e q: inteiras, ou com casas. */
+const porcentagens = (p, q, nivel) => semEmpateFalso(
+  p.tieProfile.below[nivel - 1] * 100, q.tieProfile.below[nivel - 1] * 100, { sufixo: '%' });
 
 /**
  * O numero de p na disputa: "6 de 10 escalas (60%)" - ou a media do grupo, que e
- * o que o solver usou para quem ainda nao tem escala que conte.
+ * o que o solver usou para quem ainda nao tem escala que conte. `pct` ja vem
+ * formatada junto com a do outro (porcentagens).
  */
-function numeroNaDisputa(p, nivel, { negrito = false, escalas = true } = {}) {
-  if (p.tieProfile.fromAverage) return `${SEM_HISTORICO} (${pctNoNivel(p, nivel)})`;
+function numeroNaDisputa(p, nivel, pct, { negrito = false, escalas = true } = {}) {
+  if (p.tieProfile.fromAverage) return `${SEM_HISTORICO} (${pct})`;
   const { n } = p.prefBefore;
   const conta = `${abaixoDe(p.prefBefore, nivel)} de ${n}`;
   const palavra = escalas ? ` ${n === 1 ? 'escala' : 'escalas'}` : '';
-  return `${negrito ? `<b>${conta}</b>` : conta}${palavra} (${pctNoNivel(p, nivel)})`;
-}
-
-/** As duas posicoes medias com virgula: uma casa, ou mais se uma casa as igualar. */
-function medias(a, b) {
-  for (let casas = 1; ; casas++) {
-    const fmt = (x) => x.toLocaleString('pt-BR',
-      { minimumFractionDigits: casas, maximumFractionDigits: casas });
-    if (fmt(a) !== fmt(b) || casas >= 4) return [fmt(a), fmt(b)];
-  }
+  return `${negrito ? `<b>${conta}</b>` : conta}${palavra} (${pct})`;
 }
 
 /**
@@ -1852,11 +1866,12 @@ function textoPerdeu(p, { outro: q, diaDoOutro, nivel, criterio }) {
       melhor posição em jogo, e a ${ORDINAL[nivel]} opção só estava em jogo para ${ele}`;
   }
   const [mEle, mEu] = medias(q.tieProfile.avgPos, p.tieProfile.avgPos);
+  const [pctEle, pctEu] = porcentagens(q, p, nivel);
   const porque = {
     proporcao: `leva quem mais vezes ${DISPUTA[nivel].quem}: ${ele}, ${numeroNaDisputa(q, nivel,
-      { negrito: true })}; ${eu}, ${numeroNaDisputa(p, nivel,
+      pctEle, { negrito: true })}; ${eu}, ${numeroNaDisputa(p, nivel, pctEu,
       { negrito: true, escalas: !!q.tieProfile.fromAverage })}`,
-    media: `as proporções empataram (${pctNoNivel(p, nivel)} cada); decidiu a posição média:
+    media: `as proporções empataram (${pctEu} cada); decidiu a posição média:
       ${mEle} de ${ele} contra ${mEu} de ${eu}`,
     ordem: EMPATE_PERFEITO,
   }[criterio];
@@ -1874,13 +1889,14 @@ function textoGanhou(p, { outro: q, meuDia, nivel, criterio }) {
       ${ele}, e vale primeiro a melhor posição em jogo`;
   }
   const [mEu, mEle] = medias(p.tieProfile.avgPos, q.tieProfile.avgPos);
-  const meu = p.tieProfile.fromAverage ? numeroNaDisputa(p, nivel)
-    : `tinha ficado ${DISPUTA[nivel].ficou} em ${numeroNaDisputa(p, nivel)}`;
-  const dele = q.tieProfile.fromAverage ? `${ele}, ${numeroNaDisputa(q, nivel)}`
-    : `${numeroNaDisputa(q, nivel, { escalas: false })} de ${ele}`;
+  const [pctEu, pctEle] = porcentagens(p, q, nivel);
+  const meu = p.tieProfile.fromAverage ? numeroNaDisputa(p, nivel, pctEu)
+    : `tinha ficado ${DISPUTA[nivel].ficou} em ${numeroNaDisputa(p, nivel, pctEu)}`;
+  const dele = q.tieProfile.fromAverage ? `${ele}, ${numeroNaDisputa(q, nivel, pctEle)}`
+    : `${numeroNaDisputa(q, nivel, pctEle, { escalas: false })} de ${ele}`;
   const porque = {
     proporcao: `${meu}, contra ${dele}`,
-    media: `as proporções empataram (${pctNoNivel(p, nivel)} cada); decidiu a posição média:
+    media: `as proporções empataram (${pctEu} cada); decidiu a posição média:
       ${mEu} contra ${mEle}`,
     ordem: EMPATE_PERFEITO,
   }[criterio];
