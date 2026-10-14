@@ -1217,7 +1217,7 @@ function renderWhy() {
   box.hidden = false;
   $('#whyBody').innerHTML = [
     whyIntro(explain, whyEdits(explain, assignments)),
-    whyRules(),
+    whyRules(explain),
     whyFixed(explain),
     whyCut(explain),
     whyFriday(explain, byDay),
@@ -1277,7 +1277,7 @@ function whyIntro(explain, edits) {
       quem editou. Ele conta nos contadores como qualquer outra escala.</p>` : ''}`;
 }
 
-function whyRules() {
+function whyRules(explain) {
   return `
     <h3 class="why-h">As três camadas, nesta ordem</h3>
     <ol class="why-steps">
@@ -1289,7 +1289,9 @@ function whyRules() {
         preferência só desempatam quem chegou com o mesmo número.</li>
       <li><b>Em qual dia.</b> Só aqui a preferência entra. A sexta sai de uma fila pelo
         contador de sextas; de segunda a quinta, o app procura a distribuição que deixa
-        o grupo <b>inteiro</b> o mais perto possível da 1ª opção.</li>
+        o grupo <b>inteiro</b> o mais perto possível da 1ª opção.${temDesempate(explain)
+          ? ` Quando trocar duas pessoas de dia dá exatamente no mesmo para o grupo, o dia
+            fica com quem mais vezes ficou abaixo da opção em disputa.` : ''}</li>
     </ol>
     <p class="why-note"><b>Prioridade</b> não é uma camada à parte nem exceção ao
       contador: quem tem a estrela escolhe um dia por semana e disputa a vaga pelo
@@ -1627,6 +1629,16 @@ function whyWeekdays(explain, byDay) {
       <b>de uma vez só</b>, procurando a combinação que deixa o grupo inteiro o mais perto
       possível da 1ª opção. Às vezes alguém fica com a 2ª porque isso permite que dois
       outros fiquem com a 1ª, e o total do grupo melhora.</p>
+    ${temDesempate(explain) ? `<p class="why-p"><b>Empate.</b> Quando trocar duas pessoas
+      de dia dá <b>exatamente</b> a mesma soma para o grupo — por exemplo, duas pessoas com
+      a mesma lista e uma vaga só no dia que as duas querem —, a preferência não decide.
+      Aí, e só aí, vale a disputa pela <b>melhor posição em jogo</b> (a 1ª, a 2ª ou a 3ª
+      opção): leva quem, nas escalas anteriores, mais vezes ficou <b>abaixo dela</b>;
+      empatando, quem tem a <b>pior posição média</b>; empatando de novo, a ordem fixa de
+      cadastro. Essa ordem só decide empates perfeitos e se corrige sozinha: quem ganha
+      um empate desses melhora as próprias proporções e perde o próximo. O empate não muda
+      quem entra na semana, quantas escalas cada um faz nem o total do grupo — só quem
+      fica com qual dia. Não há sorteio nem ordem de chegada.</p>` : ''}
     <p class="why-p">Como a escala saiu: ${resumo}.</p>
     <div class="why-tablewrap"><table class="why-table">
       <thead><tr><th>Dia</th><th></th><th>Quem ficou, e que opção era</th></tr></thead>
@@ -1679,6 +1691,245 @@ function whyVacationNote(p) {
     escala da semana.</span>`;
 }
 
+/* --- Empates de preferencia (explain.tieBreak = 1) ------------------------- */
+/* Quando trocar duas pessoas de dia da exatamente a mesma soma de custos, o dia
+ * em disputa vai para quem mais vezes ficou abaixo da melhor posicao em jogo;
+ * empatando, para a pior posicao media; empatando de novo, pela ordem fixa de
+ * cadastro (etapa 2 do solver). A tela refaz so o que da para conferir - quem
+ * podia trocar com quem, e se a troca empatava -, com os mesmos custos do
+ * solver. Quem levou, e com que numeros, vem gravado no explain: prefBefore,
+ * tieProfile e tieOrder. Semana gravada sem `tieBreak` foi montada pela regra
+ * antiga, e fica com o texto da epoca.                                        */
+
+// Espelho do solver (RANK_COST e NO_PREFERENCE_COST): 1a, 2a, 3a, dia nao pedido.
+const CUSTO_POSICAO = { 1: 0, 2: 1000, 3: 2000, 4: 8000 };
+const SEG_A_QUI = [1, 2, 3, 4];
+// As escalas que entram na conta do desempate (decisionsFromExplain, na API).
+const VIA_CONTA = new Set(['preferencia', 'voluntario', 'fila']);
+
+const temDesempate = (explain) => explain?.tieBreak === 1;
+
+/** Posicao do dia na lista da pessoa: 1, 2, 3 - ou 4, dia que ela nao pediu. */
+function posicaoNa(p, day) {
+  const i = (p.choices ?? []).indexOf(day);
+  return i === -1 ? 4 : i + 1;
+}
+
+const custo = (p, day) => CUSTO_POSICAO[posicaoNa(p, day)];
+
+/**
+ * A pessoa podia ser posta neste dia? As mesmas arestas do solver (allowsDay e
+ * openWeekdays): dia de ferias nao, prioridade so no dia que escolheu, e nunca
+ * num dia em que ja esta - o que inclui o dia fixo reservado.
+ */
+function aceitaDia(p, day) {
+  if ((p.blockedDays ?? []).includes(day)) return false;
+  if (p.priority && p.priorityDay !== day) return false;
+  return !p.days.some((d) => d.day === day);
+}
+
+/**
+ * Quanto trocar p (no meuDia) com q (no diaDoOutro) muda a soma do grupo: 0 e
+ * empate, mais que 0 piora. Null quando um dos dois nao podia ir para o outro dia.
+ */
+function custoDaTroca(p, q, meuDia, diaDoOutro) {
+  if (!aceitaDia(p, diaDoOutro) || !aceitaDia(q, meuDia)) return null;
+  return custo(p, diaDoOutro) + custo(q, meuDia) - custo(p, meuDia) - custo(q, diaDoOutro);
+}
+
+/**
+ * Os empates de p: cada colega em outro dia de segunda a quinta, os dois pela
+ * preferencia, com quem trocar era possivel e dava a mesma soma. Rotacao entre
+ * tres ou mais pessoas sai par a par.
+ */
+function duelosDe(p, explain, byDay) {
+  if (!temDesempate(explain)) return [];
+  const pessoa = new Map(explain.people.map((x) => [x.personId, x]));
+  const duelos = [];
+  for (const a of p.days) {
+    if (a.via !== 'preferencia' || !SEG_A_QUI.includes(a.day)) continue;
+    for (const d of SEG_A_QUI.filter((x) => x !== a.day)) {
+      for (const b of byDay.get(d) ?? []) {
+        const q = pessoa.get(b.personId);
+        if (b.via !== 'preferencia' || !q || q === p) continue;
+        if (custoDaTroca(p, q, a.day, d) !== 0) continue;
+        const duelo = dueloEntre(p, q, a.day, d);
+        if (duelo) duelos.push(duelo);
+      }
+    }
+  }
+  return duelos;
+}
+
+/**
+ * Um empate: o nivel e a melhor posicao em jogo, a menor das quatro. No empate
+ * os dois sempre preferem o mesmo dia, e ganhou quem ficou com ele.
+ *
+ * Com a mesma posicao nos dois dias, quem decide e a fila do nivel (tieOrder),
+ * e o criterio e o primeiro numero que difere. Sem ela - um entre a 1a e a 2a
+ * opcao, o outro entre a 2a e a 3a -, so um dos dois disputava a melhor posicao,
+ * e ela fica com ele seja qual for o historico: criterio 'posicao'.
+ */
+function dueloEntre(p, q, meuDia, diaDoOutro) {
+  const [pAqui, pLa] = [posicaoNa(p, meuDia), posicaoNa(p, diaDoOutro)];
+  const [qLa, qAqui] = [posicaoNa(q, diaDoOutro), posicaoNa(q, meuDia)];
+  const nivel = Math.min(pAqui, pLa, qLa, qAqui);
+  // Os dois fora da lista nos dois dias: o desempate nao tem o que decidir.
+  if (nivel > 3) return null;
+  const duelo = { outro: q, meuDia, diaDoOutro, nivel, ganhou: pAqui < pLa };
+  if (pAqui !== qAqui || pLa !== qLa) return { ...duelo, criterio: 'posicao' };
+
+  if (!p.tieOrder || !q.tieOrder || !p.tieProfile || !q.tieProfile) return null;
+  // Registro que contradiz a escala gravada: melhor calar do que explicar errado.
+  if ((p.tieOrder[nivel] < q.tieOrder[nivel]) !== duelo.ganhou) return null;
+  const k = nivel - 1;
+  const criterio = p.tieProfile.below[k] !== q.tieProfile.below[k] ? 'proporcao'
+    : p.tieProfile.avgPos !== q.tieProfile.avgPos ? 'media' : 'ordem';
+  return { ...duelo, criterio };
+}
+
+// Como a tela diz "abaixo da posicao em disputa" em cada nivel.
+const DISPUTA = {
+  1: { quem: 'ficou sem ela', ficou: 'sem a 1ª' },
+  2: { quem: 'ficou abaixo dela', ficou: 'abaixo da 2ª' },
+  3: { quem: 'ficou abaixo dela', ficou: 'abaixo da 3ª' },
+};
+const SEM_HISTORICO = 'sem escalas que contam ainda, contou a média do grupo';
+const EMPATE_PERFEITO = `empataram em tudo; decidiu a ordem fixa de cadastro. Quem ganha
+  um empate desses passa a ter proporção menor, e por isso a ordem fixa nunca favorece a
+  mesma pessoa duas vezes seguidas`;
+
+/** Das escalas que contavam, quantas ficaram abaixo da posicao `nivel`. */
+const abaixoDe = (h, nivel) =>
+  (h?.n ?? 0) - [h?.c1, h?.c2, h?.c3].slice(0, nivel).reduce((s, c) => s + (c ?? 0), 0);
+
+/** A proporcao que o solver usou no nivel, em porcentagem inteira. */
+const pctNoNivel = (p, nivel) => `${Math.round(p.tieProfile.below[nivel - 1] * 100)}%`;
+
+/**
+ * O numero de p na disputa: "6 de 10 escalas (60%)" - ou a media do grupo, que e
+ * o que o solver usou para quem ainda nao tem escala que conte.
+ */
+function numeroNaDisputa(p, nivel, { negrito = false, escalas = true } = {}) {
+  if (p.tieProfile.fromAverage) return `${SEM_HISTORICO} (${pctNoNivel(p, nivel)})`;
+  const { n } = p.prefBefore;
+  const conta = `${abaixoDe(p.prefBefore, nivel)} de ${n}`;
+  const palavra = escalas ? ` ${n === 1 ? 'escala' : 'escalas'}` : '';
+  return `${negrito ? `<b>${conta}</b>` : conta}${palavra} (${pctNoNivel(p, nivel)})`;
+}
+
+/** As duas posicoes medias com virgula: uma casa, ou mais se uma casa as igualar. */
+function medias(a, b) {
+  for (let casas = 1; ; casas++) {
+    const fmt = (x) => x.toLocaleString('pt-BR',
+      { minimumFractionDigits: casas, maximumFractionDigits: casas });
+    if (fmt(a) !== fmt(b) || casas >= 4) return [fmt(a), fmt(b)];
+  }
+}
+
+/**
+ * Como fica a conta de p no nivel com esta semana: as escalas dela que contam,
+ * como o servidor vai gravar (fila e dia fora da lista sao a posicao 4).
+ */
+function contaDepois(p, nivel) {
+  const contam = (p.choices ?? []).length && !p.priority
+    ? p.days.filter((d) => VIA_CONTA.has(d.via)) : [];
+  const posicao = (d) => (d.via === 'fila' || d.rank == null ? 4 : d.rank);
+  return {
+    abaixo: abaixoDe(p.prefBefore, nivel) + contam.filter((d) => posicao(d) > nivel).length,
+    n: (p.prefBefore?.n ?? 0) + contam.length,
+  };
+}
+
+/** O empate que p perdeu: com quem, pelo que, e o numero que decidiu. */
+function textoPerdeu(p, { outro: q, diaDoOutro, nivel, criterio }) {
+  const [eu, ele] = [nomePrio(p.personId, p.name), nomePrio(q.personId, q.name)];
+  const abre = `<b>empatou com ${ele} pela ${nomeDia(diaDoOutro)}</b>: trocar os dois dava
+    exatamente o mesmo resultado para o grupo`;
+  if (criterio === 'posicao') {
+    return `${abre}. Mas a ${nomeDia(diaDoOutro)} era a ${ORDINAL[posicaoNa(q, diaDoOutro)]}
+      opção de ${ele} e a ${ORDINAL[posicaoNa(p, diaDoOutro)]} de ${eu}: vale primeiro a
+      melhor posição em jogo, e a ${ORDINAL[nivel]} opção só estava em jogo para ${ele}`;
+  }
+  const [mEle, mEu] = medias(q.tieProfile.avgPos, p.tieProfile.avgPos);
+  const porque = {
+    proporcao: `leva quem mais vezes ${DISPUTA[nivel].quem}: ${ele}, ${numeroNaDisputa(q, nivel,
+      { negrito: true })}; ${eu}, ${numeroNaDisputa(p, nivel,
+      { negrito: true, escalas: !!q.tieProfile.fromAverage })}`,
+    media: `as proporções empataram (${pctNoNivel(p, nivel)} cada); decidiu a posição média:
+      ${mEle} de ${ele} contra ${mEu} de ${eu}`,
+    ordem: EMPATE_PERFEITO,
+  }[criterio];
+  const depois = contaDepois(p, nivel);
+  return `${abre}. Na disputa pela ${ORDINAL[nivel]} opção, ${porque}. Esta semana entra na
+    conta de ${eu}: agora ${depois.abaixo === 1 ? 'é' : 'são'} ${depois.abaixo} de ${depois.n}`;
+}
+
+/** O empate que p levou, com o numero que decidiu. */
+function textoGanhou(p, { outro: q, meuDia, nivel, criterio }) {
+  const [eu, ele] = [nomePrio(p.personId, p.name), nomePrio(q.personId, q.name)];
+  if (criterio === 'posicao') {
+    return `empatou com ${ele} e levou: a ${nomeDia(meuDia)} era a
+      ${ORDINAL[posicaoNa(p, meuDia)]} opção de ${eu} e a ${ORDINAL[posicaoNa(q, meuDia)]} de
+      ${ele}, e vale primeiro a melhor posição em jogo`;
+  }
+  const [mEu, mEle] = medias(p.tieProfile.avgPos, q.tieProfile.avgPos);
+  const meu = p.tieProfile.fromAverage ? numeroNaDisputa(p, nivel)
+    : `tinha ficado ${DISPUTA[nivel].ficou} em ${numeroNaDisputa(p, nivel)}`;
+  const dele = q.tieProfile.fromAverage ? `${ele}, ${numeroNaDisputa(q, nivel)}`
+    : `${numeroNaDisputa(q, nivel, { escalas: false })} de ${ele}`;
+  const porque = {
+    proporcao: `${meu}, contra ${dele}`,
+    media: `as proporções empataram (${pctNoNivel(p, nivel)} cada); decidiu a posição média:
+      ${mEu} contra ${mEle}`,
+    ordem: EMPATE_PERFEITO,
+  }[criterio];
+  return `empatou com ${ele} e levou: ${porque}`;
+}
+
+/**
+ * "Nao foi empate": q esta, pela preferencia, num dia melhor para p, e a troca
+ * era possivel, mas deixaria o grupo pior. Null quando nao era possivel, ou
+ * quando empatava (ai e duelo). Se q nao pediu o dia de p, esse e o motivo.
+ */
+function naoFoiEmpate(p, q, meuDia, diaDoOutro) {
+  if (!(custoDaTroca(p, q, meuDia, diaDoOutro) > 0)) return null;
+  const pedidos = q.choices ?? [];
+  const motivo = pedidos.includes(meuDia) ? ''
+    : pedidos.length === 1 ? `, que só pediu ${nomeDia(pedidos[0])}`
+    : `, que não pediu ${nomeDia(meuDia)}`;
+  return `a ${nomeDia(diaDoOutro)} ficou com ${nomePrio(q.personId, q.name)}${motivo}: trocar
+    os dois deixaria o grupo pior, então <b>não foi empate</b>`;
+}
+
+/**
+ * Por que p nao ficou no dia d, melhor na lista dela: os empates que perdeu
+ * nesse dia e quem ficou com ele sem empate. `resto` diz se mais alguem ficou
+ * no dia sem frase propria (dia fixo, prioridade, ferias). Null quando nao ha
+ * nada disso a dizer: semana sem a regra, sexta, ou ninguem a explicar.
+ */
+function porQueNaoFicou(p, meuDia, d, explain, byDay, duelos) {
+  if (!temDesempate(explain) || d === FRIDAY) return null;
+  const pessoa = new Map(explain.people.map((x) => [x.personId, x]));
+  const perdidos = duelos.filter((x) => x.meuDia === meuDia && x.diaDoOutro === d && !x.ganhou);
+  const lista = perdidos.map((x) => textoPerdeu(p, x));
+  const explicados = new Set(perdidos.map((x) => x.outro.personId));
+  for (const b of byDay.get(d) ?? []) {
+    if (b.via !== 'preferencia' || explicados.has(b.personId)) continue;
+    const frase = naoFoiEmpate(p, pessoa.get(b.personId), meuDia, d);
+    if (frase) { lista.push(frase); explicados.add(b.personId); }
+  }
+  if (!lista.length) return null;
+  return { frases: lista, resto: (byDay.get(d) ?? []).some((b) => !explicados.has(b.personId)) };
+}
+
+/** Primeira letra maiuscula, pulando as tags do comeco: o fragmento vira frase. */
+const maiuscula = (html) =>
+  html.replace(/^(\s*(?:<[^>]*>\s*)*)(\S)/, (_, antes, c) => antes + c.toUpperCase());
+
+/** Junta fragmentos em frases, cada uma a partir da segunda com maiuscula. */
+const frases = (lista) => lista.map((f, i) => (i ? maiuscula(f) : f)).join('. ');
+
 /** A frase de uma pessoa - sempre citando o numero que decidiu o caso dela. */
 function whyOnePerson(p, explain, byDay) {
   const pedidos = p.choices.length
@@ -1727,6 +1978,7 @@ function whyOnePerson(p, explain, byDay) {
       opção.${naProxima}`;
   }
 
+  const duelos = duelosDe(p, explain, byDay);
   const partes = p.days.map((a) => {
     if (a.via === 'prioridade') {
       return `<b>${nomeDia(a.day)}</b>, o único dia que pediu — tem <b>prioridade</b>,
@@ -1754,27 +2006,48 @@ function whyOnePerson(p, explain, byDay) {
           a.via === 'voluntario' ? ', e também tinha pedido sexta' : ''}`;
       return `<b>sexta</b> — ${nota}`;
     }
-    if (a.rank === 1) return `<b>${nomeDia(a.day)}</b>, a 1ª opção que pediu`;
+    // Os empates que esta escala levou (os perdidos entram na explicacao de cada
+    // dia melhor, logo abaixo). Semana montada antes da regra do desempate nao
+    // tem nenhum, e o texto e o de sempre.
+    const ganhos = duelos.filter((x) => x.meuDia === a.day && x.ganhou)
+      .map((x) => textoGanhou(p, x));
+    if (a.rank === 1) {
+      return ganhos.length
+        ? `<b>${nomeDia(a.day)}</b>, a 1ª opção — ${frases(ganhos)}`
+        : `<b>${nomeDia(a.day)}</b>, a 1ª opção que pediu`;
+    }
     if (a.rank === 2 || a.rank === 3) {
+      const quemFicou = (d) => {
+        const donos = byDay.get(d) ?? [];
+        if (d === FRIDAY) {
+          return `a sexta foi para ${listaPessoas(donos) || 'ninguém'}, que estava à
+            frente na fila das sextas`;
+        }
+        return `a ${nomeDia(d)} tinha ${plural(explain.capacity?.[d] ?? 0, 'vaga', 'vagas')}
+          e ficou com ${listaPessoas(donos) || 'ninguém'}`;
+      };
       const melhores = p.choices.slice(0, a.rank - 1)
         // Quem dobrou ja esta num dos dias que pediu: nao faz sentido explicar
         // que "a segunda ficou com fulano" quando fulano e a propria pessoa.
-        .filter((d) => !p.days.some((x) => x.day === d))
-        .map((d) => {
-          const donos = byDay.get(d) ?? [];
-          if (d === FRIDAY) {
-            return `a sexta foi para ${listaPessoas(donos) || 'ninguém'}, que estava à
-              frente na fila das sextas`;
-          }
-          return `a ${nomeDia(d)} tinha ${plural(explain.capacity?.[d] ?? 0, 'vaga', 'vagas')}
-            e ficou com ${listaPessoas(donos) || 'ninguém'}`;
-        })
-        .join('; ');
+        .filter((d) => !p.days.some((x) => x.day === d));
+      const porDia = melhores.map((d) => porQueNaoFicou(p, a.day, d, explain, byDay, duelos));
+      const texto = ganhos.length || porDia.some(Boolean)
+        ? frases([...melhores.flatMap((d, i) => {
+          const e = porDia[i];
+          // Quem esta no dia sem empate nem troca a explicar (dia fixo, prioridade,
+          // ferias) continua na frase de sempre, que cita todo mundo do dia.
+          if (!e) return [quemFicou(d)];
+          return e.resto ? [quemFicou(d), ...e.frases] : e.frases;
+        }), ...ganhos])
+        : melhores.map(quemFicou).join('; ');
       return `<b>${nomeDia(a.day)}</b>, a ${ORDINAL[a.rank]} opção${
-        melhores ? ` — ${melhores}` : ''}`;
+        texto ? ` — ${texto}` : ''}`;
     }
+    const perdidos = duelos.filter((x) => x.meuDia === a.day && !x.ganhou)
+      .map((x) => textoPerdeu(p, x));
     return `<b>${nomeDia(a.day)}</b>, que não estava no top 3: os dias pedidos já
-      estavam cheios, e alguém precisava cobrir esse`;
+      estavam cheios, e alguém precisava cobrir esse${
+      perdidos.length ? `. ${frases(perdidos)}` : ''}`;
   });
 
   const dobrou = p.days.length > 1

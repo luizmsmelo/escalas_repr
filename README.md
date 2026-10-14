@@ -426,6 +426,19 @@ explica **aquela** semana — não o método em abstrato:
 - **pessoa por pessoa**, uma frase com o número que decidiu o caso dela — quem
   ficou na 2ª opção vê quem levou a 1ª e com que contador.
 
+**Os empates, par a par.** Quando trocar duas pessoas de dia daria exatamente a
+mesma soma para o grupo, a linha de cada uma diz com quem empatou, qual posição
+estava em disputa (a melhor em jogo) e o que decidiu: a proporção de vezes abaixo
+dela (*"Geovani, 6 de 10 escalas (60%); Arthur, 4 de 10 (40%)"*), a posição média
+ou a ordem fixa de cadastro — e, para quem perdeu, como fica a conta com esta
+semana. Quem ainda não tem escala que conte aparece com a média do grupo, que é o
+que o montador usou. Se um disputava a 1ª opção e o outro só a 2ª, leva quem
+disputava a 1ª, seja qual for o histórico. Quando a troca deixaria o grupo pior, a
+linha diz que **não foi empate**, com o motivo quando o colega não pediu aquele
+dia. A tela refaz só a conta da troca, com os custos do montador (0 / 1.000 /
+2.000 / 8.000); os números vêm gravados na semana. Semana montada antes dessa
+regra (sem `tieBreak` no registro) continua com o texto da época.
+
 Enquanto a semana é **prévia**, a explicação é refeita junto com ela: as duas
 contam o mesmo instante, e a caixa diz *"Calculada agora, às 14h32"*. Quando a
 semana vira fato — publicada, ou ajustada à mão —, a explicação é **gravada junto
