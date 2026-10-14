@@ -125,9 +125,11 @@ quem mais tinha perdido a 1ª opção ficava de fora da semana.
 
 - Entrada nova por participante: `prefHistory: { n, c1, c2, c3 }` (ausente = `n` 0).
   O solver não lê o banco.
-- O `explain` gravado ganha, por pessoa: `prefBefore: { n, c1, c2, c3 }` e
-  `tieOrder: { 1, 2, 3 }` (posição da pessoa em cada fila de prioridade, 1 =
-  primeira), e na raiz `tieBreak: 1` (versão da regra). Semanas sem `tieBreak`
+- O `explain` gravado ganha, por pessoa: `prefBefore: { n, c1, c2, c3 }`,
+  `tieProfile: { below, avgPos, fromAverage }` (os números que o solver de fato
+  usou — para quem tem `n = 0`, a média do grupo) e `tieOrder: { 1, 2, 3 }`
+  (posição da pessoa em cada fila de prioridade, 1 = primeira), e na raiz
+  `tieBreak: 1` (versão da regra). Semanas sem `tieBreak`
   foram montadas pela regra antiga.
 
 ## 6. Banco e API
