@@ -130,14 +130,15 @@ console.log('\n=== 2. ajuste manual da semana publicada nao mexe nos contadores 
     .map((s) => (s.personId === mover.personId ? { ...s, day: diaLivre(mover.personId, atuais) } : s));
   slots.push({ day: diaLivre(dobrar.personId, atuais), personId: dobrar.personId });
   const edicao = await call('POST', 'assignments', { monday: SEM1, slots });
-  ok(edicao.status === 200, `edicao aceita (${edicao.json.error ?? ''})`);
-  ok(edicao.json.assignments.some((a) => a.via === 'manual'), 'a escala ganhou linhas manuais');
-  ok(!edicao.json.assignments.some((a) => a.personId === tirar.personId),
-     `${nomeDe(tirar.personId)} saiu da escala`);
-  ok(edicao.json.assignments.filter((a) => a.personId === dobrar.personId).length === 2,
-     `${nomeDe(dobrar.personId)} ficou com dois dias`);
-  confere('state.stats depois da edicao: pref identico ao do passo 1', edicao.json.stats.counters, base);
-  confere('stats depois da edicao: pref identico ao do passo 1', (await stats()).counters, base);
+  if (ok(edicao.status === 200, `edicao aceita (${edicao.json.error ?? ''})`)) {
+    ok(edicao.json.assignments.some((a) => a.via === 'manual'), 'a escala ganhou linhas manuais');
+    ok(!edicao.json.assignments.some((a) => a.personId === tirar.personId),
+       `${nomeDe(tirar.personId)} saiu da escala`);
+    ok(edicao.json.assignments.filter((a) => a.personId === dobrar.personId).length === 2,
+       `${nomeDe(dobrar.personId)} ficou com dois dias`);
+    confere('state.stats depois da edicao: pref identico ao do passo 1', edicao.json.stats.counters, base);
+    confere('stats depois da edicao: pref identico ao do passo 1', (await stats()).counters, base);
+  }
 }
 
 console.log('\n=== 3. a proxima previa recebe o historico e o desempate roda ===');
@@ -230,6 +231,34 @@ console.log('\n=== 7. proporcao media na 1a opcao ===');
   ok(s2.counters.avgFirstChoice === m2, `pessoa inativa sai da media (${s2.counters.avgFirstChoice} contra ${m2})`);
   ok(!s2.counters.perPerson.some((p) => p.personId === fora), 'e sai da lista do contador');
   await call('PATCH', 'people', { id: fora, active: true });
+}
+
+console.log('\n=== 8. publicar direto uma previa editada: conta o que o app decidiu ===');
+{
+  // A semana sai da previa com um ajuste a mao e e publicada como esta, sem
+  // descartar nem regerar: as linhas de app_decisions so existem se a propria
+  // edicao a partir da previa as gravou.
+  const SEM4 = '2026-03-23';
+  await marcar(SEM4);
+  const pv = (await previa(SEM4)).json;
+  const decidido = esperado(pv);
+  const slots = pv.assignments.map((a) => ({ day: a.day, personId: a.personId }));
+  const mover = pv.assignments.find((a) => a.rank === 1 && a.via === 'preferencia');
+  const dia = [1, 2, 3, 4, 5].find((d) => !slots.some((x) => x.personId === mover.personId && x.day === d));
+  const editados = slots.map((x) => (x.personId === mover.personId && x.day === mover.day ? { ...x, day: dia } : x));
+  const ed = await call('POST', 'assignments', { monday: SEM4, slots: editados });
+  if (ok(ed.status === 200 && ed.json.preview === null, `edicao a partir da previa congela a semana (${ed.json.error ?? ''})`)) {
+    ok(ed.json.assignments.some((a) => a.personId === mover.personId && a.day === dia && a.via === 'manual'),
+       `${nomeDe(mover.personId)} foi levado a mao para outro dia`);
+    ok(forma(esperado(ed.json).get(mover.personId)) !== forma(decidido.get(mover.personId)),
+       'a mao muda o que a escala diz, mas nao o que o app decidiu');
+    const pb = await call('POST', 'publish', { monday: SEM4, published: true });
+    ok(pb.status === 200 && pb.json.week.published === true, `publicada direto, sem regerar (${pb.json.error ?? ''})`);
+    ok(pb.json.assignments.some((a) => a.personId === mover.personId && a.day === dia && a.via === 'manual'),
+       'e a escala publicada e a editada');
+    confere('pref soma o historico e o que o app decidiu (sem o ajuste a mao)',
+      (await stats()).counters, somar(espFinal, decidido));
+  }
 }
 
 console.log(`\n${pass} passaram, ${fail} falharam`);
