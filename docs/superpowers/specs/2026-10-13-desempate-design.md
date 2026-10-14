@@ -1,6 +1,6 @@
 # Desempate justo entre preferências iguais — design
 
-Data: 13/10/2026 · Status: aguardando revisão
+Data: 13/10/2026 · Status: aprovada e implementada (14/10/2026)
 
 ## 1. Problema
 
