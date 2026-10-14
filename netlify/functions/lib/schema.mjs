@@ -1,5 +1,60 @@
 // Schema em um lugar so, como texto puro e sem dependencias, para que o mesmo
 // SQL que roda em producao possa ser exercitado nos testes.
+
+// Preenchimento unico de app_decisions com as semanas que ja existiam. Fica
+// declarado antes de SCHEMA, que o inclui no fim, e exportado para o teste
+// rodar so estes comandos. Os dois primeiros so preenchem enquanto a marca nao
+// existe; o terceiro grava a marca.
+export const BACKFILL_APP_DECISIONS = [
+  // Semanas com explain: o que o app decidiu esta em weeks.explain. Mesma regra
+  // de decisionsFromExplain (tiebreak.mjs): so quem marcou opcoes e nao tem
+  // prioridade, e so os dias que vieram de preferencia, voluntario ou fila.
+  // Campo ausente (explain antigo) conta como vazio. Pessoa que nao existe mais
+  // em people fica de fora, senao a chave estrangeira derrubaria a migracao.
+  `insert into app_decisions (monday, person_id, day, work_date, position)
+     select w.monday, pe.id, (d.v->>'day')::int, w.monday + ((d.v->>'day')::int - 1),
+            case when d.v->>'via' = 'fila' then 4
+                 when (d.v->>'rank')::int between 1 and 3 then (d.v->>'rank')::int
+                 else 4 end
+       from weeks w
+       cross join lateral jsonb_array_elements(
+              case when jsonb_typeof(w.explain->'people') = 'array'
+                   then w.explain->'people' else '[]'::jsonb end) as p(v)
+       join people pe on pe.id = (p.v->>'personId')::int
+       cross join lateral jsonb_array_elements(
+              case when jsonb_typeof(p.v->'days') = 'array'
+                   then p.v->'days' else '[]'::jsonb end) as d(v)
+      where (case when jsonb_typeof(p.v->'choices') = 'array'
+                  then jsonb_array_length(p.v->'choices') else 0 end) > 0
+        and coalesce(p.v->>'priority', 'false') <> 'true'
+        and d.v->>'via' in ('preferencia', 'voluntario', 'fila')
+        and not exists (select 1 from settings where key = 'app_decisions_backfill')
+     on conflict do nothing`,
+
+  // Semanas sem explain (gravadas antes dele existir): o que o app decidiu so se
+  // reconhece pelas escalas. Conta a pessoa que marcou a 1a opcao na semana; sem
+  // `via` gravado, so o dia que caiu numa das tres opcoes (rank 1 a 3).
+  `insert into app_decisions (monday, person_id, day, work_date, position)
+     select a.monday, a.person_id, a.day, a.work_date,
+            case when a.via = 'fila' then 4
+                 when a.rank between 1 and 3 then a.rank
+                 else 4 end
+       from assignments a
+       join weeks w on w.monday = a.monday and w.explain is null
+      where exists (select 1 from preferences pr
+                     where pr.monday = a.monday and pr.person_id = a.person_id
+                       and pr.choice1 is not null)
+        and (a.via in ('preferencia', 'voluntario', 'fila')
+             or (a.via is null and a.rank between 1 and 3))
+        and not exists (select 1 from settings where key = 'app_decisions_backfill')
+     on conflict do nothing`,
+
+  // Marco do preenchimento: sem ele, as linhas apagadas depois voltariam a cada
+  // instancia nova da funcao.
+  `insert into settings (key, value) values ('app_decisions_backfill', now()::text)
+     on conflict (key) do nothing`,
+];
+
 export const SCHEMA = [
   `create table if not exists people (
      id         serial primary key,
@@ -180,4 +235,20 @@ export const SCHEMA = [
   // ainda nao foi publicada.
   `insert into settings (key, value) values ('previa_viva', now()::text)
      on conflict (key) do nothing`,
+
+  // O que o app decidiu a partir das opcoes marcadas, com a posicao em que cada
+  // escala caiu: 1 a 3 e a opcao atendida, 4 e "abaixo da 3a" (fila ou dia fora
+  // das opcoes). E o historico do desempate por proporcao, e fica separado de
+  // `assignments`, onde o administrador ajusta a mao. Dia fixo, prioridade e
+  // inclusao manual nao entram aqui.
+  `create table if not exists app_decisions (
+     monday    date not null,
+     person_id int  not null references people(id) on delete cascade,
+     day       int  not null,
+     work_date date not null,
+     position  int  not null check (position between 1 and 4),
+     primary key (monday, person_id, day)
+   )`,
+
+  ...BACKFILL_APP_DECISIONS,
 ];
