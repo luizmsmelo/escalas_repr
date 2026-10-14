@@ -12,7 +12,8 @@ const tidy = (x) => Math.round(x * 1e9) / 1e9;
 /** Posicao da escala para o desempate: 1, 2, 3 ou 4 ("abaixo da 3a"). */
 export function positionOf({ rank, via }) {
   if (via === 'fila' || rank == null) return BELOW_THIRD;
-  return rank;
+  // Como o backfill do banco: so 1..3 e posicao de preferencia, o resto e "abaixo".
+  return rank >= 1 && rank <= 3 ? rank : BELOW_THIRD;
 }
 
 // As unicas formas de chegar a um dia que o app decidiu a partir das opcoes

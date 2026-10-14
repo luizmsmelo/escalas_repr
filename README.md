@@ -257,13 +257,17 @@ em jogo —, ganha:
    se corrige sozinha: quem ganha um empate perfeito melhora as próprias
    proporções e perde o próximo.
 
+Se a 1ª opção só está em jogo para um dos dois (um fica entre a 1ª e a 2ª, o outro
+entre a 2ª e a 3ª), ela fica com ele, seja qual for o histórico.
+
 Não há sorteio nem ordem de chegada. Quem ainda não tem histórico entra com a
 média do grupo. Exemplo: Arthur e Geovani pedem terça e depois segunda; Arthur
 ficou abaixo da 1ª opção em 60% das vezes, Geovani em 40% — a terça vai para
 Arthur. Quando quem perde a disputa cai mais de uma posição — da 1ª para a 3ª,
 por exemplo —, a disputa continua sendo pela 1ª, a melhor posição em jogo: não
 importa quem ficou mais vezes abaixo da 3ª. Com três pessoas pedindo a mesma
-lista para três vagas, em 24 semanas cada uma fica 8 vezes em cada posição.
+lista para três vagas, em 24 semanas, começando do mesmo histórico, cada uma fica
+8 vezes em cada posição.
 
 **Por que o desempate é uma etapa separada.** Ele nunca muda quem trabalha,
 quantas escalas cada um faz, quantas vagas cada dia preenche nem o custo total

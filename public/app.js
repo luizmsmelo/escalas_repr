@@ -1800,7 +1800,12 @@ function dueloEntre(p, q, meuDia, diaDoOutro) {
   // Os dois fora da lista nos dois dias: o desempate nao tem o que decidir.
   if (nivel > 3) return null;
   const duelo = { outro: q, meuDia, diaDoOutro, nivel, ganhou: pAqui < pLa };
-  if (pAqui !== qAqui || pLa !== qLa) return { ...duelo, criterio: 'posicao' };
+  if (pAqui !== qAqui || pLa !== qLa) {
+    // Registro que contradiz a escala gravada: quem tem a melhor posicao em jogo
+    // tem de ter ficado no dia dela (p aqui, ou q la) - melhor calar.
+    if (pAqui !== nivel && qLa !== nivel) return null;
+    return { ...duelo, criterio: 'posicao' };
+  }
 
   if (!p.tieOrder || !q.tieOrder || !p.tieProfile || !q.tieProfile) return null;
   // Registro que contradiz a escala gravada: melhor calar do que explicar errado.
@@ -2083,7 +2088,7 @@ function whyOnePerson(p, explain, byDay) {
       .map((x) => textoPerdeu(p, x));
     return `<b>${nomeDia(a.day)}</b>, que não estava no top 3: os dias pedidos já
       estavam cheios, e alguém precisava cobrir esse${
-      perdidos.length ? `. ${frases(perdidos)}` : ''}`;
+      perdidos.length ? `. ${maiuscula(frases(perdidos))}` : ''}`;
   });
 
   const dobrou = p.days.length > 1

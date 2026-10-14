@@ -12,6 +12,7 @@ ok(positionOf({ rank: 1, via: 'preferencia' }) === 1, 'rank 1');
 ok(positionOf({ rank: 3, via: 'voluntario' }) === 3, 'voluntario mantem o rank');
 ok(positionOf({ rank: 4, via: 'fila' }) === 4, 'fila e abaixo da 3a');
 ok(positionOf({ rank: null, via: 'preferencia' }) === 4, 'fora das opcoes e abaixo da 3a');
+ok(positionOf({ rank: 5, via: 'preferencia' }) === 4, 'rank fora de 1..3 e abaixo da 3a');
 
 console.log('\n--- decisoes a partir do explain ---');
 const explain = { people: [

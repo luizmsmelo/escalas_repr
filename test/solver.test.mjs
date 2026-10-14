@@ -765,6 +765,21 @@ const TRES = { 1: 1, 2: 1, 3: 1, 4: 0, 5: 0 };
   }
 }
 {
+  // Empate misto: so um dos dois chega a melhor posicao em jogo. A tem [terca,
+  // segunda] e B tem [quarta, terca, segunda]: A-terca/B-segunda (0 + 2000) soma
+  // o mesmo que B-terca/A-segunda (1000 + 1000), mas a 1a opcao so esta em jogo
+  // para A. A terca e dele seja qual for o historico - mesmo sendo B quem
+  // sempre ficou abaixo da 1a e A quem nunca ficou - e com qualquer ordem de id.
+  for (const [idA, idB] of [[1, 2], [2, 1]]) {
+    const r = solveWeek([
+      ph(idA, 'A', [2, 1], hist(10, 10)),
+      ph(idB, 'B', [3, 2, 1], hist(10, 0)),
+    ], SEG_TER);
+    ok(dia(r, 'A') === 2 && dia(r, 'B') === 1,
+       `empate misto, A com id ${idA}: terca fica com A, que a tem como 1a (A ${dia(r, 'A')}, B ${dia(r, 'B')})`);
+  }
+}
+{
   // Empate perfeito: decide a ordem de cadastro - e quem ganhou melhora as
   // proprias proporcoes e perde o proximo.
   const semana = (hx, hy) => solveWeek([ph(1, 'X', [2, 1], hx), ph(2, 'Y', [2, 1], hy)], SEG_TER);

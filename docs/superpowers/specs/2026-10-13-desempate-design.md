@@ -41,6 +41,10 @@ para o grupo, e só depois de decidido quem entra. Na disputa por uma posição 
    se corrige sozinha: quem ganha um empate perfeito melhora as próprias proporções
    e perde o próximo.
 
+Se a melhor posição em jogo só pode ser alcançada por um dos dois (um fica entre a
+1ª e a 2ª opção, o outro entre a 2ª e a 3ª), ela fica com ele, seja qual for o
+histórico.
+
 Não há sorteio nem ordem de chegada.
 
 ## 4. Os contadores
@@ -210,6 +214,13 @@ usa para decidir (5.2). Textos (números ilustrativos):
 - empate perfeito: *"…empataram em tudo; decidiu a ordem fixa de cadastro. Quem
   ganha um empate desses passa a ter proporção menor, e por isso a ordem fixa
   nunca favorece a mesma pessoa duas vezes seguidas."*
+- só um dos dois chegava à melhor posição em jogo (o critério é a própria
+  posição, sem histórico): quem perdeu lê *"…**empatou com Arthur pela terça**:
+  trocar os dois dava exatamente o mesmo resultado para o grupo. Mas a terça era a
+  1ª opção de Arthur e a 2ª de Geovani: vale primeiro a melhor posição em jogo, e
+  a 1ª opção só estava em jogo para Arthur."*; quem levou lê *"…empatou com
+  Geovani e levou: a terça era a 1ª opção de Arthur e a 2ª de Geovani, e vale
+  primeiro a melhor posição em jogo."*
 - não foi empate: *"…a terça ficou com Alan, que só pediu terça: trocar os dois
   deixaria o grupo pior, então **não foi empate**."* (com o motivo concreto quando
   o colega não tinha o dia na lista; senão, só "trocar deixaria o grupo pior").
