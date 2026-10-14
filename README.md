@@ -245,6 +245,35 @@ e o total melhora.
 O resultado é o ótimo global — nenhuma outra distribuição tem custo menor — e é
 determinístico: a mesma entrada sempre produz a mesma escala.
 
+**Desempate entre preferências iguais.** Muitas vezes mais de uma distribuição
+tem exatamente o mesmo custo — o caso típico são duas pessoas com a mesma lista
+disputando o mesmo dia. Só nesse caso, e só depois de decidido quem entra, vale
+o desempate. Na disputa por uma posição (1ª, 2ª ou 3ª opção) — a melhor posição
+em jogo —, ganha:
+
+1. quem mais vezes ficou **abaixo** dessa posição (proporção);
+2. empatando, quem tem a **pior posição média**;
+3. empatando de novo, a ordem fixa de cadastro. Ela só decide empates perfeitos e
+   se corrige sozinha: quem ganha um empate perfeito melhora as próprias
+   proporções e perde o próximo.
+
+Não há sorteio nem ordem de chegada. Quem ainda não tem histórico entra com a
+média do grupo. Exemplo: Arthur e Geovani pedem terça e depois segunda; Arthur
+ficou abaixo da 1ª opção em 60% das vezes, Geovani em 40% — a terça vai para
+Arthur. Quando quem perde a disputa cai mais de uma posição — da 1ª para a 3ª,
+por exemplo —, a disputa continua sendo pela 1ª, a melhor posição em jogo: não
+importa quem ficou mais vezes abaixo da 3ª. Com três pessoas pedindo a mesma
+lista para três vagas, em 24 semanas cada uma fica 8 vezes em cada posição.
+
+**Por que o desempate é uma etapa separada.** Ele nunca muda quem trabalha,
+quantas escalas cada um faz, quantas vagas cada dia preenche nem o custo total
+do grupo. Por isso roda depois, num segundo fluxo preso ao resultado do
+primeiro: as mesmas pessoas, cada uma com o mesmo número de escalas, os mesmos
+dias cheios, e o desempate valendo menos do que um único ponto de preferência.
+Dentro do fluxo principal ele também mexeria em **quem entra** — e ao contrário
+do que pretende: num empate de contador de escalas, quem mais tinha perdido a 1ª
+opção seria justamente quem ficaria de fora da semana.
+
 **Dobrar só por necessidade.** No fluxo, a n-ésima escala de uma pessoa na
 semana custa n degraus de um custo que domina tudo o mais — então o app só dobra
 alguém se não houver outro jeito de preencher a vaga, e espalha as repetições

@@ -2,6 +2,7 @@
 import { solveWeek, rankOf, FRIDAY } from '../netlify/functions/lib/solver.mjs';
 import * as D from '../netlify/functions/lib/dates.mjs';
 import { workingDaysInMonth, dayStatus } from '../netlify/functions/lib/holidays.mjs';
+import { tieProfile } from '../netlify/functions/lib/tiebreak.mjs';
 
 let fails = 0;
 const ok = (cond, msg) => { if (!cond) { fails++; console.log('  FALHA:', msg); } };
@@ -711,6 +712,285 @@ console.log('\n--- ferias ---');
   const r = solveWeek(povo, cap1);
   ok(r.fixed.placed.some((f) => f.name === 'Ana' && f.day === 3),
      `Ana fica com a quarta que Luiz liberou (${JSON.stringify(r.fixed.placed)})`);
+}
+
+console.log('\n--- desempate entre preferencias iguais ---');
+const hist = (n, c1 = 0, c2 = 0, c3 = 0) => ({ n, c1, c2, c3 });
+const ph = (id, name, choices, prefHistory, extra = {}) =>
+  ({ id, name, choices, prefHistory, totalCount: 5, fridayCount: 1, noFriday: false, ...extra });
+const dia = (r, nome) => r.assignments.find((a) => a.name === nome)?.day;
+const SEG_TER = { 1: 1, 2: 1, 3: 0, 4: 0, 5: 0 };
+const TRES = { 1: 1, 2: 1, 3: 1, 4: 0, 5: 0 };
+{
+  // Os dois pediram [terca, segunda]: qualquer distribuicao da a mesma soma, e
+  // a terca vai para quem mais vezes ficou abaixo da 1a opcao - seja quem for.
+  for (const [azarado, sortudo] of [['Arthur', 'Geovani'], ['Geovani', 'Arthur']]) {
+    const h = { [azarado]: hist(10, 4), [sortudo]: hist(10, 6) };
+    const r = solveWeek([
+      ph(1, 'Arthur', [2, 1], h.Arthur),
+      ph(2, 'Geovani', [2, 1], h.Geovani),
+    ], SEG_TER);
+    ok(dia(r, azarado) === 2,
+       `terca vai para ${azarado}, 60% abaixo da 1a contra 40% (ficou na ${dia(r, azarado)})`);
+  }
+}
+{
+  // Prio leva a terca (a 1a de todos) pela prioridade; os outros dois disputam
+  // a 2a opcao. Ganha quem mais ficou abaixo da 2a e, empatando, a pior media.
+  const PRIO = ph(4, 'Prio', [2], hist(0), { priority: true, totalCount: 1 });
+  const trio = {
+    Sortudo: ph(1, 'Sortudo', [2, 1, 3], hist(10, 10)),
+    Meio: ph(2, 'Meio', [2, 1, 3], hist(10, 0, 10)),
+    Azarado: ph(3, 'Azarado', [2, 1, 3], hist(10, 0, 0, 10)),
+  };
+  for (const [x, y, leva] of [
+    ['Sortudo', 'Meio', 'Meio'], ['Sortudo', 'Azarado', 'Azarado'], ['Meio', 'Azarado', 'Azarado'],
+  ]) {
+    const r = solveWeek([trio[x], trio[y], PRIO], TRES);
+    ok(dia(r, 'Prio') === 2, `${x} x ${y}: Prio fica na terca que pediu (${dia(r, 'Prio')})`);
+    ok(dia(r, leva) === 1, `${x} x ${y}: a segunda (2a opcao) vai para ${leva} (ficou na ${dia(r, leva)})`);
+  }
+}
+{
+  // A melhor posicao em jogo decide. A e B disputam a 1a contra a 3a: A ficou
+  // mais abaixo da 1a (60% x 40%), B mais abaixo da 3a (40% x 0%) - mas o que
+  // esta em jogo primeiro e a 1a. Vale com qualquer ordem de cadastro.
+  for (const [idA, idB] of [[1, 2], [2, 1]]) {
+    const r = solveWeek([
+      ph(idA, 'A', [2, 1, 3], hist(10, 4, 6, 0)),
+      ph(idB, 'B', [2, 1, 3], hist(10, 6, 0, 4)),
+      ph(3, 'C', [1], hist(10, 10)),
+    ], TRES);
+    ok(dia(r, 'A') === 2, `1a contra 3a, A com id ${idA}: terca vai para A (ficou na ${dia(r, 'A')})`);
+  }
+}
+{
+  // Empate perfeito: decide a ordem de cadastro - e quem ganhou melhora as
+  // proprias proporcoes e perde o proximo.
+  const semana = (hx, hy) => solveWeek([ph(1, 'X', [2, 1], hx), ph(2, 'Y', [2, 1], hy)], SEG_TER);
+  const r1 = semana(hist(10, 5), hist(10, 5));
+  ok(dia(r1, 'X') === 2, `empate perfeito: terca para X, cadastrado antes (ficou na ${dia(r1, 'X')})`);
+  const r2 = semana(hist(11, 6), hist(11, 5, 1));
+  ok(dia(r2, 'Y') === 2, `na semana seguinte a terca vai para Y (ficou na ${dia(r2, 'Y')})`);
+}
+{
+  // Nao foi empate: Alan so pediu terca, entao Arthur na terca custa mais para
+  // o grupo. O desempate nao entra, por mais que Arthur venha perdendo.
+  const r = solveWeek([ph(1, 'Arthur', [2, 1], hist(10, 0)), ph(2, 'Alan', [2], hist(10, 10))], SEG_TER);
+  ok(dia(r, 'Alan') === 2, `terca fica com Alan, a soma decide (ficou na ${dia(r, 'Alan')})`);
+}
+{
+  // Pessoa nova, sem historico, entra com a media do grupo: fica entre Z e Y.
+  const r = solveWeek([
+    ph(1, 'Z', [2, 1, 3], hist(10, 3, 7)),
+    ph(2, 'Novo', [2, 1, 3], hist(0)),
+    ph(3, 'Y', [2, 1, 3], hist(10, 7, 3)),
+  ], TRES);
+  ok(dia(r, 'Z') === 2 && dia(r, 'Novo') === 1 && dia(r, 'Y') === 3,
+     `Z na terca, Novo na segunda, Y na quarta (${['Z', 'Novo', 'Y'].map((n) => dia(r, n))})`);
+  const novo = r.explain.people.find((p) => p.name === 'Novo');
+  const z = r.explain.people.find((p) => p.name === 'Z');
+  ok(novo.tieProfile?.fromAverage === true && z.tieProfile?.fromAverage === false,
+     'o explain marca quem entrou pela media do grupo');
+}
+{
+  // Toda semana as mesmas pessoas pedem a mesma lista: o desempate da a melhor
+  // posicao a quem esta mais atras, e o rodizio das posicoes fecha.
+  const roda = (pessoas, capacity, semanas) => {
+    const povo = Array.from({ length: pessoas }, (_, i) => ph(i + 1, `P${i + 1}`, [2, 1, 3], hist(0)));
+    const vezes = new Map(povo.map((p) => [p.id, [0, 0, 0, 0]]));
+    for (let s = 0; s < semanas; s++) {
+      const r = solveWeek(povo, capacity);
+      for (const a of r.assignments) {
+        const pos = a.rank ?? 4;
+        vezes.get(a.personId)[pos - 1]++;
+        const p = povo.find((x) => x.id === a.personId);
+        const h = p.prefHistory;
+        p.prefHistory = hist(h.n + 1,
+          h.c1 + (pos === 1 ? 1 : 0), h.c2 + (pos === 2 ? 1 : 0), h.c3 + (pos === 3 ? 1 : 0));
+      }
+    }
+    return [...vezes.values()];
+  };
+  const tres = roda(3, TRES, 24);
+  ok(tres.every((v) => v.join() === '8,8,8,0'),
+     `3 pessoas, 24 semanas: 8 vezes em cada posicao (${tres.map((v) => v.slice(0, 3).join('/')).join(' ')})`);
+  const quatro = roda(4, { 1: 1, 2: 1, 3: 1, 4: 1, 5: 0 }, 24);
+  ok(quatro.every((v) => v.join() === '6,6,6,6'),
+     `4 pessoas, 24 semanas: 6 vezes em cada posicao e fora (${quatro.map((v) => v.join('/')).join(' ')})`);
+}
+
+// Semanas sorteadas, reproduziveis: o mesmo gerador sempre da as mesmas semanas.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const BOLSA_DE_DIAS = [1, 2, 2, 2, 3, 3, 4, 5];
+const VAGAS_POSSIVEIS = { 1: [0, 1, 2, 2], 2: [0, 2, 2], 3: [1, 2, 2], 4: [0, 2, 2], 5: [0, 1, 1] };
+const sorteiaSemana = (rand, { simples = false, minN = 0 } = {}) => {
+  const int = (lo, hi) => lo + Math.floor(rand() * (hi - lo + 1));
+  const pick = (xs) => xs[Math.floor(rand() * xs.length)];
+  const capacity = {};
+  for (const [d, xs] of Object.entries(VAGAS_POSSIVEIS)) capacity[d] = pick(xs);
+  const povo = [];
+  for (let id = 1, P = int(1, 14); id <= P; id++) {
+    const choices = [];
+    while (choices.length < 3) {
+      const d = pick(BOLSA_DE_DIAS);
+      if (!choices.includes(d)) choices.push(d);
+    }
+    const n = int(minN, 20);
+    const c1 = int(0, n);
+    const c2 = int(0, n - c1);
+    const c3 = int(0, n - c1 - c2);
+    const p = {
+      id, name: `P${id}`, choices, prefHistory: hist(n, c1, c2, c3),
+      totalCount: int(0, 39), fridayCount: int(0, 9), noFriday: false,
+    };
+    if (!simples) {
+      if (rand() < 0.10) p.priority = true;
+      if (rand() < 0.08) p.fixedDay = int(1, 5);
+      if (rand() < 0.10) p.blockedDays = [int(1, 5)];
+    }
+    povo.push(p);
+  }
+  return { povo, capacity };
+};
+const semHistorico = (povo) => povo.map(({ prefHistory, ...p }) => p);
+const contaPor = (r, campo) => {
+  const c = {};
+  for (const a of r.assignments) c[a[campo]] = (c[a[campo]] || 0) + 1;
+  return JSON.stringify(c);
+};
+const custoSegQui = (r, povo) => r.assignments
+  .filter((a) => a.day !== FRIDAY && a.via !== 'fixo')
+  .reduce((soma, a) => {
+    const rank = rankOf(povo.find((p) => p.id === a.personId), a.day);
+    return soma + (rank === null ? 8000 : [0, 1000, 2000][rank - 1]);
+  }, 0);
+const repeteDia = (r) =>
+  new Set(r.assignments.map((a) => `${a.personId}-${a.day}`)).size !== r.assignments.length;
+{
+  // O desempate nunca muda quem trabalha, quantas escalas cada um faz, quantas
+  // vagas cada dia preenche, nem a soma de preferencia do grupo.
+  const rand = mulberry32(12345);
+  let diferencas = 0;
+  let mexeu = 0;
+  for (let s = 0; s < 1000; s++) {
+    const { povo, capacity } = sorteiaSemana(rand);
+    const com = solveWeek(povo, capacity);
+    const sem = solveWeek(semHistorico(povo), capacity);
+    if (contaPor(com, 'personId') !== contaPor(sem, 'personId')
+        || contaPor(com, 'day') !== contaPor(sem, 'day')
+        || custoSegQui(com, povo) !== custoSegQui(sem, povo)
+        || repeteDia(com)) diferencas++;
+    if (JSON.stringify(com.assignments) !== JSON.stringify(sem.assignments)) mexeu++;
+  }
+  ok(diferencas === 0, `1.000 semanas sorteadas: o desempate mudou o que nao podia em ${diferencas}`);
+  ok(mexeu > 0, 'o historico de fato trocou dias em alguma semana');
+  console.log(`  1.000 semanas sorteadas: ${mexeu} com dia trocado pelo historico, ${diferencas} diferencas`);
+}
+{
+  // O texto da regra, par a par: dois com a mesma lista, em dias diferentes de
+  // segunda a quinta, que poderiam trocar. Quem esta na melhor posicao k ficou
+  // mais abaixo da k-esima; empatando, tem a pior media; empatando, o menor id.
+  const rand = mulberry32(12345);
+  let pares = 0;
+  let contradicoes = 0;
+  for (let s = 0; s < 1000; s++) {
+    const { povo, capacity } = sorteiaSemana(rand, { simples: true, minN: 5 });
+    const r = solveWeek(povo, capacity);
+    const pessoa = new Map(povo.map((p) => [p.id, p]));
+    const diasDe = (id) => r.assignments.filter((a) => a.personId === id).map((a) => a.day);
+    const segQui = r.assignments.filter((a) => a.day !== FRIDAY);
+    for (const a of segQui) {
+      for (const b of segQui) {
+        if (a.personId >= b.personId || a.day === b.day) continue;
+        const pa = pessoa.get(a.personId);
+        const pb = pessoa.get(b.personId);
+        if (pa.choices.join() !== pb.choices.join()) continue;
+        // A troca so e possivel se nenhum dos dois ja estiver no dia do outro.
+        if (diasDe(pa.id).includes(b.day) || diasDe(pb.id).includes(a.day)) continue;
+        const posA = rankOf(pa, a.day) ?? 4;
+        const posB = rankOf(pb, b.day) ?? 4;
+        if (posA === posB) continue;
+        pares++;
+        const [ganhou, perdeu, k] = posA < posB ? [pa, pb, posA] : [pb, pa, posB];
+        const g = tieProfile(ganhou.prefHistory);
+        const p = tieProfile(perdeu.prefHistory);
+        const certo = g.below[k - 1] > p.below[k - 1]
+          || (g.below[k - 1] === p.below[k - 1]
+            && (g.avgPos > p.avgPos || (g.avgPos === p.avgPos && ganhou.id < perdeu.id)));
+        if (!certo) contradicoes++;
+      }
+    }
+  }
+  ok(pares > 0 && contradicoes === 0, `${contradicoes} contradicoes com o texto da regra em ${pares} pares`);
+  console.log(`  ${pares} pares com a mesma lista que podiam trocar, ${contradicoes} contradicoes`);
+}
+{
+  // O explain guarda os numeros que o desempate usou, para a tela citar depois.
+  const entrada = [ph(1, 'Arthur', [2, 1], hist(10, 4)), ph(2, 'Geovani', [2, 1], hist(10, 6))];
+  const e = solveWeek(entrada, SEG_TER).explain;
+  ok(e.tieBreak === 1, `versao da regra gravada na raiz (tieBreak=${e.tieBreak})`);
+  for (const p of entrada) {
+    const linha = e.people.find((x) => x.personId === p.id);
+    ok(JSON.stringify(linha.prefBefore) === JSON.stringify(p.prefHistory),
+       `${p.name}: prefBefore e o historico de entrada (${JSON.stringify(linha.prefBefore)})`);
+    ok(Object.keys(linha.tieOrder ?? {}).join() === '1,2,3', `${p.name}: tieOrder tem os niveis 1, 2 e 3`);
+  }
+  for (const k of [1, 2, 3]) {
+    const posicoes = e.people.map((x) => x.tieOrder?.[k]).sort((a, b) => a - b);
+    ok(posicoes.join() === entrada.map((_, i) => i + 1).join(),
+       `nivel ${k}: as posicoes na fila sao 1..${entrada.length} (${posicoes})`);
+  }
+  const arthur = e.people.find((x) => x.name === 'Arthur');
+  ok(arthur.tieProfile?.below[0] === 0.6 && arthur.tieProfile.fromAverage === false,
+     `tieProfile traz as proporcoes usadas (${JSON.stringify(arthur.tieProfile)})`);
+  const novato = solveWeek([mk(0)], CAP).explain.people[0];
+  ok(JSON.stringify(novato.prefBefore) === JSON.stringify(hist(0)),
+     `sem prefHistory, prefBefore vem zerado (${JSON.stringify(novato.prefBefore)})`);
+}
+{
+  // Semana sem vaga de segunda a quinta (feriados): nao ha o que desempatar, e
+  // a escala e a mesma de sem historico.
+  const SO_SEXTA = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 1 };
+  const povo = [
+    ph(1, 'A', [2, 1, 3], hist(10, 4, 3, 2)),
+    ph(2, 'B', [1, 2, 5], hist(8, 1, 1, 1)),
+    ph(3, 'C', [5, 1, 2], hist(6, 6)),
+  ];
+  const com = solveWeek(povo, SO_SEXTA);
+  const sem = solveWeek(semHistorico(povo), SO_SEXTA);
+  ok(com.assignments.length === 1 && com.assignments[0].day === FRIDAY,
+     `so a sexta e preenchida (${JSON.stringify(com.assignments)})`);
+  ok(JSON.stringify(com.assignments) === JSON.stringify(sem.assignments)
+     && JSON.stringify(com.unfilledSlots) === JSON.stringify(sem.unfilledSlots),
+     'e igual ao resultado sem historico');
+}
+{
+  // Equipe menor que as vagas, com dia fixo: a etapa 2 nunca poe a mesma pessoa
+  // duas vezes no mesmo dia, nem de novo no dia ja reservado. A tentacao existe:
+  // os tres pedem [segunda, terca, quarta] e Fixa e a primeira da fila do nivel
+  // 1 - trocar de dia com quem esta na segunda-feira daria a mesma soma.
+  const DOBRA = { 1: 2, 2: 2, 3: 2, 4: 2, 5: 0 };
+  const r = solveWeek([
+    ph(1, 'Fixa', [1, 2, 3], hist(10, 0), { fixedDay: 1 }),
+    ph(2, 'B', [1, 2, 3], hist(10, 9)),
+    ph(3, 'C', [1, 2, 3], hist(10, 5, 5)),
+  ], DOBRA);
+  ok(r.assignments.some((a) => a.name === 'Fixa' && a.day === 1 && a.via === 'fixo'),
+     'Fixa fica na segunda pelo dia fixo');
+  ok(!repeteDia(r), `nenhuma pessoa duas vezes no mesmo dia (${r.assignments.map((a) => `${a.name}@${a.day}`)})`);
+  ok(!r.assignments.some((a) => a.name === 'Fixa' && a.day === 1 && a.via === 'preferencia'),
+     'nenhuma linha de preferencia no dia fixo de Fixa');
+  ok(r.unfilledSlots.length === 0, `todas as vagas preenchidas (${r.unfilledSlots})`);
 }
 
 console.log('\n--- casos limite ---');

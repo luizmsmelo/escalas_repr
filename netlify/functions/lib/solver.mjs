@@ -79,6 +79,23 @@
 // Os dois contadores sao GERAIS, nao mensais. O mes tem 4 ou 5 sextas para 9
 // pessoas: um contador que zera todo mes nunca fecha o rodizio, e a mesma
 // metade do grupo acaba pegando todas.
+//
+// DESEMPATE. Quando duas distribuicoes de segunda a quinta dao exatamente a
+// mesma soma de preferencia - o caso tipico: duas pessoas com a mesma lista -,
+// o dia disputado vai para quem mais vezes ficou ABAIXO da posicao em jogo;
+// empatando, para a pior posicao media; empatando de novo, para quem foi
+// cadastrado antes. Os numeros vem do historico de posicoes (prefHistory, ver
+// tiebreak.mjs). Sem isso, quem decide e a ordem em que o fluxo percorre o
+// grafo - fixa na pratica -, e a mesma pessoa leva a 1a opcao toda semana.
+//
+// O desempate e uma ETAPA SEPARADA (tieBreakWeekdays), rodada depois do fluxo
+// principal e presa ao resultado dele: mesmas pessoas, mesmo numero de escalas
+// para cada uma, mesmas vagas preenchidas em cada dia, mesma soma de
+// preferencia. Dentro do fluxo principal ele tambem mexeria em QUEM entra, e
+// ao contrario do que pretende: num empate de contador de escalas, quem mais
+// tinha perdido a 1a opcao seria justamente quem ficaria de fora da semana.
+
+import { tieOrders } from './tiebreak.mjs';
 
 export const DAYS = [1, 2, 3, 4, 5];
 export const WEEKDAYS = [1, 2, 3, 4];
@@ -197,11 +214,16 @@ class MinCostFlow {
  *   fixedDay e 1..5 para quem tem dia fixo, ou null/undefined para todo mundo.
  *   priority marca quem escolhe um dia so - `choices` tem um dia, e e o unico
  *   dia admissivel dela nesta semana.
+ *   prefHistory e { n, c1, c2, c3 }: quantas escalas contam para o desempate e
+ *   quantas cairam na 1a, 2a e 3a opcao. Ausente = sem historico.
  * @param {object} capacity { 1: 2, 2: 2, 3: 2, 4: 2, 5: 1 }
  * @returns {{ assignments, unfilledSlots, fixed, friday, summary }}
  */
 export function solveWeek(participants, capacity) {
   const people = [...participants].sort((a, b) => a.id - b.id); // determinismo
+  // Uma conta so por semana: a etapa 2 desempata com ela, e o explain grava
+  // exatamente os mesmos numeros.
+  const orders = tieOrders(people);
 
   const fixed = placeFixed(people, capacity);
   // As fases seguintes so enxergam o que sobrou de vaga depois dos fixos.
@@ -221,7 +243,7 @@ export function solveWeek(participants, capacity) {
   // esta na sexta e o ultimo a dobrar, e quem esta em dia fixo nao pode cair
   // de novo no proprio dia.
   const onFriday = new Set(friday.picked.map((p) => p.person.id));
-  const weekdays = solveWeekdays(people, left, { onFriday, fixedOn: fixed.dayOf });
+  const weekdays = solveWeekdays(people, left, { onFriday, fixedOn: fixed.dayOf, orders });
 
   const assignments = [
     ...fixed.placed,
@@ -271,7 +293,7 @@ export function solveWeek(participants, capacity) {
         && people.some((p) => p.noFriday),
     },
     summary: buildSummary(assignments, capacity),
-    explain: buildExplain(people, capacity, assignments, friday, unfilledSlots),
+    explain: buildExplain(people, capacity, assignments, friday, unfilledSlots, orders),
   };
 }
 
@@ -431,7 +453,34 @@ function byQueue(a, b) {
 
 /* ------------------------------------------------------------------ fase 2 */
 
-function solveWeekdays(people, capacity, { onFriday, fixedOn }) {
+// Os dois fluxos de seg-qui - o principal e o do desempate - tem o mesmo
+// desenho: origem, um no por pessoa, um no por dia, destino.
+function weekdayNodes(P) {
+  return {
+    SOURCE: 0,
+    personNode: (i) => 1 + i,
+    dayNode: (d) => 1 + P + (d - 1),
+    SINK: 1 + P + WEEKDAYS.length,
+  };
+}
+
+/**
+ * Dias de seg-qui em que a pessoa pode ser escalada nesta fase. As duas etapas
+ * usam a mesma lista: o desempate nunca abre um dia que a etapa 1 fechou.
+ */
+function openWeekdays(person, capacity, fixedOn) {
+  return WEEKDAYS.filter((d) => {
+    if (!capacity[d]) return false;
+    // Ja reservado neste dia pela fase 0: uma segunda aresta para o mesmo dia
+    // colocaria a pessoa duas vezes na mesma data.
+    if (fixedOn.get(person.id) === d) return false;
+    // Prioridade: uma aresta so, para o dia escolhido. Sem outra saida no
+    // grafo, ou a pessoa fica nesse dia ou fica de fora da semana.
+    return allowsDay(person, d);
+  });
+}
+
+function solveWeekdays(people, capacity, { onFriday, fixedOn, orders }) {
   const slots = WEEKDAYS.reduce((sum, d) => sum + (capacity[d] || 0), 0);
   const P = people.length;
   if (P === 0 || slots === 0) {
@@ -441,10 +490,7 @@ function solveWeekdays(people, capacity, { onFriday, fixedOn }) {
     };
   }
 
-  const SOURCE = 0;
-  const personNode = (i) => 1 + i;
-  const dayNode = (d) => 1 + P + (d - 1);
-  const SINK = 1 + P + WEEKDAYS.length;
+  const { SOURCE, personNode, dayNode, SINK } = weekdayNodes(P);
   const graph = new MinCostFlow(SINK + 1);
 
   // Quatro degraus, em ordem ESTRITA. Cada um vale mais do que tudo o que os
@@ -460,7 +506,8 @@ function solveWeekdays(people, capacity, { onFriday, fixedOn }) {
   //   3. SPARE_FRIDAY - entre quem pode dobrar, quem ja esta na sexta e o
   //                     ultimo: sexta e mais um dia na mesma semana e o pior
   //                     desenho possivel.
-  //   4. preferencia.
+  //   4. preferencia. Entre distribuicoes com a mesma soma, quem escolhe e a
+  //      etapa 2 (tieBreakWeekdays), depois deste fluxo.
   const totals = people.map((p) => p.totalCount ?? 0);
   const floor = Math.min(...totals);
   const spread = Math.max(...totals) - floor;
@@ -487,14 +534,7 @@ function solveWeekdays(people, capacity, { onFriday, fixedOn }) {
         + (ahead + nth) * HISTORY_COST
         + (nth > 0 && onFriday.has(id) ? SPARE_FRIDAY_COST : 0));
     }
-    for (const d of WEEKDAYS) {
-      if (!capacity[d]) continue;
-      // Ja reservado neste dia pela fase 0: uma segunda aresta para o mesmo dia
-      // colocaria a pessoa duas vezes na mesma data.
-      if (fixedOn.get(id) === d) continue;
-      // Prioridade: uma aresta so, para o dia escolhido. Sem outra saida no
-      // grafo, ou a pessoa fica nesse dia ou fica de fora da semana.
-      if (!allowsDay(people[i], d)) continue;
+    for (const d of openWeekdays(people[i], capacity, fixedOn)) {
       graph.addEdge(personNode(i), dayNode(d), 1, weekdayCost(people[i], d));
     }
   }
@@ -504,9 +544,94 @@ function solveWeekdays(people, capacity, { onFriday, fixedOn }) {
 
   graph.run(SOURCE, SINK);
 
-  const assignments = [];
+  const assignments = readWeekdays(graph, people);
   const filled = Object.fromEntries(WEEKDAYS.map((d) => [d, 0]));
+  for (const a of assignments) filled[a.day]++;
 
+  const unfilledSlots = [];
+  for (const d of WEEKDAYS) {
+    for (let k = filled[d]; k < (capacity[d] || 0); k++) unfilledSlots.push(d);
+  }
+
+  // So ha o que desempatar se a etapa 1 escalou alguem de segunda a quinta.
+  return {
+    assignments: assignments.length
+      ? tieBreakWeekdays(people, capacity, fixedOn, assignments, orders)
+      : assignments,
+    unfilledSlots,
+  };
+}
+
+/**
+ * Etapa 2 - o desempate. Refaz a distribuicao de seg-qui presa ao resultado da
+ * etapa 1: cada pessoa com o mesmo numero de escalas, cada dia com as mesmas
+ * vagas preenchidas, as mesmas arestas. Dentro disso, so escolhe entre as
+ * distribuicoes com a MESMA soma de preferencia.
+ *
+ * O custo de cada aresta tem dois andares. O de cima e a preferencia,
+ * multiplicada por TIE_SCALE, que e maior do que todo o desempate da semana
+ * somado: a soma de preferencia continua a minima, e o desempate nao troca um
+ * ponto dela por nada.
+ *
+ * O de baixo e o desempate. Em cada nivel k (disputa pela 1a, 2a, 3a opcao) a
+ * pessoa tem um peso, P + 1 - posicao dela na fila do nivel (orders): P para a
+ * primeira da fila, 1 para a ultima. Cair da posicao k para a k+1 custa
+ * peso_k x LEVEL[k], e ficar na posicao r custa os degraus de 1 ate r-1 (dia
+ * nao pedido = posicao 4). Os niveis sao potencias de P+1: entre duas pessoas,
+ * um ponto de peso a mais no nivel de cima vale mais do que qualquer diferenca
+ * nos de baixo, entao a melhor posicao em jogo decide a disputa. Usar a
+ * posicao na fila, e nao as proporcoes, deixa a conta em inteiros pequenos -
+ * sem arredondamento, e o resultado nao muda de uma geracao para a outra.
+ */
+function tieBreakWeekdays(people, capacity, fixedOn, stage1, orders) {
+  const P = people.length;
+  const LEVEL = { 1: (P + 1) ** 2, 2: P + 1, 3: 1 };
+  // O maior desempate de uma escala e cair abaixo da 3a com peso P nos tres
+  // niveis; a semana inteira soma no maximo `slots` vezes isso.
+  const slots = stage1.length;
+  const TIE_SCALE = slots * P * (LEVEL[1] + LEVEL[2] + LEVEL[3]) + 1;
+
+  const tieCost = (person, position) => {
+    const { order } = orders.get(person.id);
+    let cost = 0;
+    for (let k = 1; k < position; k++) cost += (P + 1 - order[k]) * LEVEL[k];
+    return cost;
+  };
+
+  const shifts = new Map();
+  const filled = Object.fromEntries(WEEKDAYS.map((d) => [d, 0]));
+  for (const a of stage1) {
+    shifts.set(a.personId, (shifts.get(a.personId) ?? 0) + 1);
+    filled[a.day]++;
+  }
+
+  const { SOURCE, personNode, dayNode, SINK } = weekdayNodes(P);
+  const graph = new MinCostFlow(SINK + 1);
+  people.forEach((person, i) => {
+    const count = shifts.get(person.id);
+    if (!count) return;
+    // Quem entra e quantas vezes ja foi decidido: a aresta da origem nao custa
+    // nada e deixa passar exatamente as escalas da etapa 1.
+    graph.addEdge(SOURCE, personNode(i), count, 0);
+    for (const d of openWeekdays(person, capacity, fixedOn)) {
+      graph.addEdge(personNode(i), dayNode(d), 1,
+        weekdayCost(person, d) * TIE_SCALE + tieCost(person, rankOf(person, d) ?? 4));
+    }
+  });
+  for (const d of WEEKDAYS) {
+    if (filled[d]) graph.addEdge(dayNode(d), SINK, filled[d], 0);
+  }
+
+  graph.run(SOURCE, SINK);
+  return readWeekdays(graph, people);
+}
+
+// Quem ficou em qual dia, lido do fluxo resolvido: as arestas pessoa -> dia
+// que sairam saturadas.
+function readWeekdays(graph, people) {
+  const P = people.length;
+  const { personNode } = weekdayNodes(P);
+  const assignments = [];
   for (let i = 0; i < P; i++) {
     for (let e = graph.head[personNode(i)]; e !== -1; e = graph.next[e]) {
       if (e % 2 !== 0 || graph.cap[e] !== 0) continue; // so arestas de ida saturadas
@@ -519,16 +644,9 @@ function solveWeekdays(people, capacity, { onFriday, fixedOn }) {
         rank: rankOf(people[i], d),
         via: people[i].priority ? 'prioridade' : 'preferencia',
       });
-      filled[d]++;
     }
   }
-
-  const unfilledSlots = [];
-  for (const d of WEEKDAYS) {
-    for (let k = filled[d]; k < (capacity[d] || 0); k++) unfilledSlots.push(d);
-  }
-
-  return { assignments, unfilledSlots };
+  return assignments;
 }
 
 // So a preferencia. O historico da pessoa nao entra aqui: ele decide QUEM e
@@ -574,7 +692,7 @@ function buildSummary(assignments, capacity) {
  * refeita depois, que daria outro resultado assim que qualquer outra semana
  * fosse gerada.
  */
-function buildExplain(people, capacity, assignments, friday, unfilledSlots) {
+function buildExplain(people, capacity, assignments, friday, unfilledSlots, orders) {
   const porPessoa = new Map();
   for (const a of assignments) {
     if (!porPessoa.has(a.personId)) porPessoa.set(a.personId, []);
@@ -585,12 +703,28 @@ function buildExplain(people, capacity, assignments, friday, unfilledSlots) {
   // Infinity significa "nao houve corte" - e nao sobrevive a um JSON.
   const cut = Number.isFinite(friday.cut) ? friday.cut : null;
 
+  // O desempate como a etapa 2 o usou: o historico de posicoes com que a pessoa
+  // chegou, as proporcoes (as do grupo, para quem nao tem historico) e a
+  // posicao dela na fila de cada nivel.
+  const desempate = (p) => {
+    const { profile, order } = orders.get(p.id);
+    const h = p.prefHistory ?? {};
+    return {
+      prefBefore: { n: h.n ?? 0, c1: h.c1 ?? 0, c2: h.c2 ?? 0, c3: h.c3 ?? 0 },
+      tieProfile: { ...profile, below: [...profile.below] },
+      tieOrder: { ...order },
+    };
+  };
+
   return {
     capacity: { ...capacity },
     totalSlots: DAYS.reduce((sum, d) => sum + (capacity[d] || 0), 0),
     unfilled: [...unfilledSlots],
     headcount: people.length,
     cut,
+    // Versao da regra de desempate. Semana gravada sem o campo foi montada
+    // antes dela, e os numeros abaixo nao existem.
+    tieBreak: 1,
     people: people.map((p) => ({
       personId: p.id,
       name: p.name,
@@ -605,6 +739,7 @@ function buildExplain(people, capacity, assignments, friday, unfilledSlots) {
       fridayPos: posNaFila.get(p.id) ?? null,
       aboveCut: cut != null && (p.totalCount ?? 0) > cut,
       days: porPessoa.get(p.id) ?? [],
+      ...desempate(p),
     })),
   };
 }
