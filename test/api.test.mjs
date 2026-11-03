@@ -1035,35 +1035,44 @@ console.log('\n=== publicacao automatica ===');
 {
   delete process.env.ESCALAS_SEM_PUBLICACAO_AUTOMATICA;
   const comum = { admin: false };
+  // O prazo da semana de 18/01 e a sexta anterior, 15/01, as 15h00 de Brasilia.
   const SEM = '2027-01-18';                                  // segunda
-  const SEXTA = '2027-01-15', DOMINGO = '2027-01-17', SEGUNDA = '2027-01-18';
+  const QUINTA = '2027-01-14', SEXTA_1459 = '2027-01-15T14:59', SEXTA_15H = '2027-01-15T15:00';
+  const SABADO = '2027-01-16', SEGUNDA = '2027-01-18';
   const estado = async (hoje, semana = SEM) =>
     (await call('GET', `state?week=${semana}`, undefined, hoje)).json;
 
-  const ativos = (await estado(SEXTA)).people.filter((p) => p.active);
+  const ativos = (await estado(QUINTA)).people.filter((p) => p.active);
   for (const [i, p] of ativos.entries()) {
     await call('POST', 'preferences',
-      { monday: SEM, personId: p.id, choices: TOP3[i % TOP3.length] }, SEXTA, comum);
+      { monday: SEM, personId: p.id, choices: TOP3[i % TOP3.length] }, QUINTA, comum);
   }
-  const naSexta = await estado(SEXTA);
-  ok(naSexta.week.published === false && naSexta.preview != null,
-     'na sexta, a semana que vem e so previa');
-  const vistaNaSexta = naSexta.week.explain.generatedAt;
+  const naQuinta = await estado(QUINTA);
+  ok(naQuinta.week.published === false && naQuinta.preview != null,
+     'na quinta, a semana que vem e so previa');
+  const vistaNaQuinta = naQuinta.week.explain.generatedAt;
 
-  ok((await estado(DOMINGO)).week.published === false, 'no domingo ainda nao publica');
+  ok((await estado(SEXTA_1459)).week.published === false, 'na sexta as 14h59 ainda nao publica');
+  ok((await call('POST', 'preferences', { monday: SEM, personId: ativos[0].id,
+     choices: TOP3[0] }, SEXTA_1459, comum)).status === 200,
+     'na sexta as 14h59 ainda da para mudar a preferencia');
 
   await new Promise((r) => setTimeout(r, 15));
-  const segunda = await estado(SEGUNDA);
-  ok(segunda.week.published === true, 'na segunda, o primeiro acesso publica a semana');
-  ok(segunda.preview === null, 'e ela deixa de ser previa');
-  ok(segunda.assignments.length > 0, 'com a escala preenchida');
-  ok(segunda.week.explain.generatedAt !== vistaNaSexta,
+  const sexta = await estado(SEXTA_15H);
+  ok(sexta.week.published === true, 'na sexta as 15h, o primeiro acesso publica a semana que vem');
+  ok(sexta.preview === null, 'e ela deixa de ser previa');
+  ok(sexta.assignments.length > 0, 'com a escala preenchida');
+  ok(sexta.week.explain.generatedAt !== vistaNaQuinta,
      'montada na hora de publicar, com as respostas ate o prazo');
-  ok(segunda.log.length === 0,
-     `publicar de oficio nao vai para o registro (${segunda.log.map((l) => l.action)})`);
+  ok(sexta.log.length === 0,
+     `publicar de oficio nao vai para o registro (${sexta.log.map((l) => l.action)})`);
 
   ok((await call('POST', 'preferences', { monday: SEM, personId: ativos[1].id, choices: [1, 2, 3] },
-     SEGUNDA, comum)).status === 409, 'preferencia depois do prazo e recusada');
+     SABADO, comum)).status === 409, 'preferencia depois do prazo e recusada');
+  ok((await call('POST', 'preferences', { monday: '2027-01-25', personId: ativos[1].id,
+     choices: [1, 2, 3] }, SABADO, comum)).status === 200,
+     'no fim de semana ja da para responder a semana seguinte');
+  const segunda = await estado(SEGUNDA);
 
   // Publicada, para de ser montada: o acesso seguinte le o que ficou gravado.
   const congelada = segunda.week.explain.generatedAt;
@@ -1091,7 +1100,7 @@ console.log('\n=== publicacao automatica ===');
   ok(segunda2.log.filter((l) => l.action === 'editar').length === 1,
      'e o registro guarda so a edicao, que foi o que alguem fez');
 
-  // Semana em que ninguem abriu o app: a publicacao de segunda nao aconteceu,
+  // Semana em que ninguem abriu o app: a publicacao de sexta nao aconteceu,
   // e escala que ficou sem publicar nao conta para ninguem. O primeiro acesso
   // depois fecha a semana que ficou para tras.
   const ESQUECIDA = '2027-02-01';

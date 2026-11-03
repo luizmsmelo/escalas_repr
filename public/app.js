@@ -262,14 +262,13 @@ function renderPicker() {
     && !ferias.blocked.includes(meuFixo);
 
   $('#pickLocked').hidden = !locked;
-  // Prazo: na segunda 00h00 a semana e gerada com as respostas salvas e
-  // publicada sozinha - e dai em diante as preferencias travam.
-  const comPrazo = !locked && week.monday > state.data.currentMonday;
+  // Prazo: na sexta anterior, 15h00, a semana e gerada com as respostas salvas
+  // e publicada sozinha - e dai em diante as preferencias travam.
+  const comPrazo = !locked && prazoAberto(week.monday);
   $('#pickDeadline').hidden = !comPrazo;
   if (comPrazo) {
-    $('#pickDeadline').innerHTML = 'Prazo para responder: <b>domingo, '
-      + `${fmtDay(addDays(week.monday, -1))}, até 23h59</b> — `
-      + `<span data-deadline="${week.monday}"></span>. Na segunda-feira a escala é montada `
+    $('#pickDeadline').innerHTML = `Prazo para responder: <b>${prazoPorExtenso(week.monday)}</b> — `
+      + `<span data-deadline="${week.monday}"></span>. Nesse horário a escala é montada `
       + 'com as respostas salvas e publicada automaticamente.';
     renderCountdown();
   }
@@ -391,7 +390,7 @@ function renderPicker() {
   const status = $('#saveStatus');
   status.hidden = !salva || locked || soDesfazerAusencia || save.hidden;
   if (!status.hidden) {
-    const ate = comPrazo ? `até domingo, ${fmtDay(addDays(week.monday, -1))}, às 23h59`
+    const ate = comPrazo ? `até ${prazoPorExtenso(week.monday)}`
       : 'enquanto a escala desta semana não for publicada';
     status.dataset.tone = jaSalva ? 'saved' : 'changed';
     status.textContent = jaSalva
@@ -678,13 +677,17 @@ function contagemDeRespostas() {
 /* --- quanto falta para a escala valer ------------------------------------- */
 
 /*
- * O prazo de uma semana fecha na segunda-feira, 00h00 de Brasilia: e o mesmo
- * instante em que as escolhas travam e em que o app publica a escala. O Brasil
- * nao tem mais horario de verao, entao o deslocamento e sempre -03:00 - e
- * escrito assim, e nao pelo relogio do aparelho, para quem estiver com o fuso
- * trocado ver o mesmo prazo que todo mundo.
+ * O prazo de uma semana fecha na sexta-feira anterior, 15h00 de Brasilia: e o
+ * mesmo instante em que as escolhas travam e em que o app publica a escala. O
+ * Brasil nao tem mais horario de verao, entao o deslocamento e sempre -03:00 -
+ * e escrito assim, e nao pelo relogio do aparelho, para quem estiver com o fuso
+ * trocado ver o mesmo prazo que todo mundo. A API usa a mesma conta.
  */
-const prazoDaSemana = (monday) => new Date(`${monday}T00:00:00-03:00`);
+const sextaDoPrazo = (monday) => addDays(monday, -3);
+const prazoDaSemana = (monday) => new Date(`${sextaDoPrazo(monday)}T15:00:00-03:00`);
+const prazoAberto = (monday) => prazoDaSemana(monday).getTime() > Date.now();
+/** "sexta, 13/11, às 15h" */
+const prazoPorExtenso = (monday) => `sexta, ${fmtDay(sextaDoPrazo(monday))}, às 15h`;
 
 /** "2 dias, 4h e 12min" - com os segundos quando falta menos de um dia. */
 function faltaPara(alvo) {
@@ -862,13 +865,12 @@ function renderRequests() {
 
   // O que esta tela e, e o que ela nao e: pedido nao e vaga garantida.
   const { responderam, de } = contagemDeRespostas();
-  const futura = week.monday > state.data.currentMonday;
   const situacao = week.published
     ? '<b>Semana publicada:</b> os pedidos travaram.'
-    : futura
-      ? `Os pedidos ainda podem mudar até <b>domingo, ${fmtDay(addDays(week.monday, -1))}, 23h59</b>
+    : prazoAberto(week.monday)
+      ? `Os pedidos ainda podem mudar até <b>${prazoPorExtenso(week.monday)}</b>
          &mdash; <span data-deadline="${week.monday}"></span>.`
-      : week.monday === state.data.currentMonday
+      : week.monday >= state.data.currentMonday
         ? 'Os pedidos ainda podem mudar enquanto a escala desta semana não for publicada.'
         : '';
   const notice = $('#reqNotice');
@@ -1013,11 +1015,10 @@ function renderSchedule(generation = state.data.generation) {
     const { responderam, de } = contagemDeRespostas();
     const hora = new Date(state.data.preview.at)
       .toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    const futura = week.monday > state.data.currentMonday;
     box.innerHTML = `<b>Prévia calculada agora, às ${hora}.</b> Ela foi montada neste
       instante, com as respostas de <b>${responderam} de ${de}</b>
-      ${de === 1 ? 'pessoa' : 'pessoas'} — e muda a cada nova resposta.${futura
-        ? ` Vale a partir de <b>segunda, ${fmtDay(week.monday)}, 00h</b>, quando o app
+      ${de === 1 ? 'pessoa' : 'pessoas'} — e muda a cada nova resposta.${prazoAberto(week.monday)
+        ? ` O prazo fecha na <b>${prazoPorExtenso(week.monday)}</b>, quando o app
             publica a escala: <span data-deadline="${week.monday}"></span>.`
         : ' Esta semana ainda não foi publicada.'}`;
     renderCountdown();
@@ -1066,8 +1067,8 @@ function renderSchedule(generation = state.data.generation) {
         + 'automaticamente: ela só volta a contar quando ele publicar de novo.');
     } else if (!state.data.preview) {
       messages.push('Esta escala foi <b>ajustada à mão</b> e ficou guardada como está: ela '
-        + 'não acompanha mais as respostas que chegarem. Na segunda-feira é publicada assim '
-        + '— para voltar à prévia automática, use <b>Descartar ajustes</b>.');
+        + 'não acompanha mais as respostas que chegarem. No prazo, sexta às 15h, é publicada '
+        + 'assim — para voltar à prévia automática, use <b>Descartar ajustes</b>.');
     } else if (week.monday <= state.data.currentMonday) {
       messages.push('Esta semana ainda não foi publicada: ela só passa a contar nos '
         + 'contadores depois de <b>publicada</b>.');
@@ -1168,7 +1169,7 @@ function renderSchedule(generation = state.data.generation) {
 
 /* --- quem mexeu nesta escala ---------------------------------------------- */
 
-// So o que ALGUEM fez. Montar a escala e publicar na segunda sao do app,
+// So o que ALGUEM fez. Montar a escala e publicar no prazo sao do app,
 // acontecem toda semana e nao entram aqui: anotados, afogariam a excecao, que e
 // o que se quer ver nesta lista.
 const LOG_ACAO = {
@@ -2773,7 +2774,7 @@ function tourSteps() {
     { alvo: '.tabbtn[data-goto="escala"]', titulo: 'Veja a escala',
       texto: 'Para ver quem fica em cada dia, toque em Escala, aqui embaixo. Antes do '
         + 'prazo o que aparece ali é uma prévia, calculada na hora: ela muda a cada '
-        + 'resposta nova, até domingo 23h59.' },
+        + 'resposta nova, até sexta às 15h.' },
     { titulo: 'Pronto!',
       texto: 'Se quiser ver estas dicas de novo, toque no ? lá no topo da tela.' },
   ];

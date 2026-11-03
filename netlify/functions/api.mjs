@@ -4,7 +4,7 @@ import { solveWeek, rankOf, DAYS, DAY_NAMES, FRIDAY } from './lib/solver.mjs';
 import { decisionsFromExplain } from './lib/tiebreak.mjs';
 import {
   todayISO, mondayOf, nextMonday, addDays, weekDates, monthOf, parseISO,
-  isValidISO, isValidMonth,
+  isValidISO, isValidMonth, deadlinePassed,
 } from './lib/dates.mjs';
 import { dayStatus, workingDaysInMonth, monthDays, isLocked,
          hasCalendar, TYPE_LABEL } from './lib/holidays.mjs';
@@ -21,8 +21,8 @@ export default async function handler(request) {
 
   try {
     await ensureSchema();
-    // Antes de qualquer rota: quem abre o app na segunda ja encontra a semana
-    // publicada, e ninguem salva preferencia depois do prazo.
+    // Antes de qualquer rota: quem abre o app depois do prazo (sexta, 15h) ja
+    // encontra a semana publicada, e ninguem salva preferencia depois dele.
     await autoPublishSafe();
     const body = request.method === 'GET' ? {} : await readJson(request);
     const data = await dispatch(route, request.method, url.searchParams, body, request);
@@ -540,14 +540,15 @@ async function assertVacationOpen(start, end) {
 /* ------------------------------------------------ publicacao automatica -- */
 
 /**
- * A escala da semana e publicada pelo proprio app a partir de segunda-feira
- * 00h00 (horario de Brasilia), no primeiro acesso. Nao ha agendador, e nao
- * precisa: so importa que ela esteja publicada para quem abre o app.
+ * A escala da semana e publicada pelo proprio app a partir do prazo - a sexta
+ * anterior, 15h00 (horario de Brasilia) -, no primeiro acesso. Nao ha
+ * agendador, e nao precisa: so importa que ela esteja publicada para quem abre
+ * o app.
  *
  * O que vai para o ar depende do estado da semana:
  *
  *   - sem escala gravada, a previa e montada agora - com as respostas como
- *     ficaram no prazo (domingo 23h59) e os contadores como estao - e gravada.
+ *     ficaram no prazo (sexta, 15h) e os contadores como estao - e gravada.
  *     E a mesma conta que a tela vinha mostrando a semana inteira; aqui ela
  *     deixa de ser previa e vira fato;
  *   - com escala gravada, ela veio do ajuste do administrador e e publicada
@@ -557,7 +558,7 @@ async function assertVacationOpen(start, end) {
  * publicar de novo.
  *
  * Publicar assim nao entra no registro de "quem mexeu": nao ha ninguem por
- * tras, e anotar o que acontece toda segunda-feira so afogaria o que alguem de
+ * tras, e anotar o que acontece toda sexta-feira so afogaria o que alguem de
  * fato fez.
  */
 async function fecharSemana(week) {
@@ -590,18 +591,25 @@ async function fecharSemana(week) {
 }
 
 /**
- * Fecha a semana atual e, antes dela, a anterior que tenha ficado sem publicar.
+ * Fecha a semana mais recente cujo prazo ja passou e, antes dela, a anterior
+ * que tenha ficado sem publicar.
+ *
+ * A mais recente e a proxima semana a partir de sexta, 15h; antes disso, de
+ * segunda ate sexta a tarde, e a semana atual - o prazo dela foi na sexta
+ * passada.
  *
  * A anterior existe porque a publicacao depende de alguem abrir o app: numa
  * semana de recesso, feriadao ou ferias coletivas, pode nao haver esse alguem -
  * e escala que ficou sem publicar nao conta para ninguem, o que desloca os
  * contadores de todo mundo dali para a frente. Ela vem primeiro porque,
- * publicada, entra nos contadores que decidem a semana atual.
+ * publicada, entra nos contadores que decidem a seguinte.
  */
 async function autoPublish() {
   const atual = mondayOf(todayISO());
-  await fecharSemana(addDays(atual, -7));
-  await fecharSemana(atual);
+  const proxima = addDays(atual, 7);
+  const fechada = deadlinePassed(proxima) ? proxima : atual;
+  await fecharSemana(addDays(fechada, -7));
+  await fecharSemana(fechada);
 }
 
 /** A publicacao automatica nunca derruba o pedido de quem abriu o app. */
@@ -728,7 +736,7 @@ function congelada(week, linhas) {
 
 /**
  * Monta a escala de uma semana e devolve o resultado SEM gravar nada. E a
- * mesma conta para a previa da tela, para a publicacao de segunda e para o
+ * mesma conta para a previa da tela, para a publicacao automatica e para o
  * ponto de partida de uma edicao a mao; o que muda e o que o chamador faz com
  * ela.
  *
@@ -1046,8 +1054,8 @@ function manualRank(choices, day) {
 }
 
 /**
- * Publicar e reabrir a mao. A publicacao de rotina e do app, na segunda-feira
- * (ver `fecharSemana`); isto aqui e a excecao - antecipar a semana que ja esta
+ * Publicar e reabrir a mao. A publicacao de rotina e do app, no prazo da
+ * sexta-feira (ver `fecharSemana`); isto aqui e a excecao - antecipar a semana que ja esta
  * decidida, ou tirar do ar uma semana que nao deveria valer. Por ser ato de
  * alguem, e nao rotina, vai para o registro de "quem mexeu".
  */

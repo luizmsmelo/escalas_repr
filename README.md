@@ -2,8 +2,8 @@
 
 Os colegas da equipe escolhem, semana a semana, em que dia ficam até as 18h.
 Cada um marca três dias em ordem de preferência — quem tem **prioridade** marca um
-só — até **domingo 23h59**. Na segunda-feira o app monta a escala, resolvendo os
-conflitos pelos contadores, e a **publica sozinho**. Quem o administrador libera
+só — até **sexta-feira 15h** da semana anterior. Nesse horário o app monta a
+escala, resolvendo os conflitos pelos contadores, e a **publica sozinho**. Quem o administrador libera
 para **escala fixa** escolhe um dia e sai da escolha semanal. O que mexe no sistema
 inteiro — pessoas, vagas, calendário, editar e publicar escala — fica com o
 **administrador**, que tem senha.
@@ -11,7 +11,7 @@ inteiro — pessoas, vagas, calendário, editar e publicar escala — fica com o
 **Ninguém aperta botão para a escala existir.** Antes do prazo, a aba Escala
 mostra uma **prévia**, calculada no instante em que a tela é aberta, com as
 respostas daquele momento — e por isso ela nunca está desatualizada. Na
-segunda-feira 00h essa mesma conta é congelada e publicada.
+sexta-feira às 15h essa mesma conta é congelada e publicada.
 
 **Vagas por semana:** 2 pessoas de segunda a quinta, 1 pessoa na sexta — 9 vagas.
 Hoje são 19 pessoas para essas 9 vagas.
@@ -497,8 +497,8 @@ caso: a semana que não deveria valer. Semana reaberta **não volta a ser public
 sozinha** até o administrador publicar de novo.
 
 **Ajustar congela a semana.** A escala ajustada é guardada como está e deixa de
-acompanhar as respostas que continuarem chegando — na segunda-feira ela é
-publicada assim. É o que se quer quando o ajuste veio de um acordo do grupo, e o
+acompanhar as respostas que continuarem chegando — no prazo, sexta às 15h, ela
+é publicada assim. É o que se quer quando o ajuste veio de um acordo do grupo, e o
 caminho de volta é **Descartar ajustes**: a semana volta a ser prévia, montada de
 novo a cada leitura. Semana já publicada não volta a ser prévia — ela aconteceu, e
 os contadores de todo mundo já contam com ela.
@@ -574,7 +574,7 @@ A janela em que cada coisa vale:
 | ação | vale para |
 | --- | --- |
 | prévia | só a semana **atual** e a **próxima** |
-| publicar | automática na segunda-feira; o administrador publica qualquer semana até a **próxima** |
+| publicar | automática na sexta-feira às 15h; o administrador publica qualquer semana até a **próxima** |
 | editar à mão | só o administrador, em semana que já tenha escala na tela — publicada ou não |
 | descartar ajustes | só o administrador, em semana **não publicada** dentro da janela da prévia |
 
@@ -585,13 +585,15 @@ de hoje, seria inventar passado. Nos dois casos a aba Escala simplesmente mostra
 semana vazia; não há erro a resolver.
 
 **Publicação automática.** A escala da semana é publicada pelo próprio app a
-partir de **segunda-feira 00h00** (horário de Brasília), no primeiro acesso — não
-há agendador, e não precisa: só importa que ela esteja publicada para quem abre o
-app.
+partir de **sexta-feira 15h00** da semana anterior (horário de Brasília), no
+primeiro acesso — não há agendador, e não precisa: só importa que ela esteja
+publicada para quem abre o app. O fim de semana já começa com a escala decidida.
 
-- O **prazo** das preferências é **domingo 23h59**. Na segunda a semana é
-  publicada e as preferências travam. As duas telas mostram um **contador
-  regressivo** até lá, para ninguém ler a prévia como se já fosse a escala.
+- O **prazo** das preferências é **sexta-feira 15h**. Nesse instante a semana
+  seguinte é publicada e as preferências dela travam. As duas telas mostram um
+  **contador regressivo** até lá, para ninguém ler a prévia como se já fosse a
+  escala. Do prazo até domingo, já dá para responder a semana depois dela; a
+  prévia dessa semana aparece na segunda, quando ela passa a ser a próxima.
 - Semana **sem escala gravada**: a prévia é montada na hora — com as respostas
   como ficaram no prazo e os contadores como estão — e gravada. É a mesma conta
   que a tela vinha mostrando a semana inteira; ali ela deixa de ser prévia e vira
@@ -603,12 +605,12 @@ app.
   semana de recesso, feriadão ou férias coletivas pode não haver ninguém para
   abrir o app — e escala que ficou sem publicar não conta para ninguém, o que
   desloca os contadores de todo mundo dali para a frente. A anterior é fechada
-  primeiro: publicada, ela entra nos contadores que decidem a semana atual.
+  primeiro: publicada, ela entra nos contadores que decidem a seguinte.
 
 **Quem mexeu.** O registro guarda **só o que alguém fez**: editar, publicar à mão,
 reabrir e descartar ajustes, com data, hora e o tipo de aparelho — visível só no
 modo admin, na aba Escala, em "Quem mexeu nesta escala?". Montar a escala e
-publicar na segunda-feira são tarefas do app, acontecem toda semana e não entram
+publicar no prazo de sexta-feira são tarefas do app, acontecem toda semana e não entram
 na lista: anotadas, afogariam a exceção, que é o que se quer ver ali. Como não há
 senha, o nome é o que a pessoa escolheu no app; o aparelho ajuda a tirar a dúvida.
 

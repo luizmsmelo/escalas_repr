@@ -14,6 +14,19 @@ ok(D.addDays('2026-12-31', 1) === '2027-01-01', 'virada de ano');
 ok(D.addDays('2028-02-28', 1) === '2028-02-29', 'ano bissexto');
 ok(D.isValidISO('2026-02-30') === false, 'rejeita 30 de fevereiro');
 ok(D.isValidMonth('2026-13') === false, 'rejeita mes 13');
+// Prazo da semana de 09/11/2026: sexta, 06/11, as 15h00 de Brasilia (18h00 UTC).
+ok(new Date(D.deadlineOf('2026-11-09')).toISOString() === '2026-11-06T18:00:00.000Z',
+   'o prazo e a sexta anterior, 15h de Brasilia');
+ok(!D.deadlinePassed('2026-11-09', Date.parse('2026-11-06T14:59:59-03:00')),
+   'as 14h59 de sexta o prazo ainda esta aberto');
+ok(D.deadlinePassed('2026-11-09', Date.parse('2026-11-06T15:00:00-03:00')),
+   'as 15h00 de sexta o prazo fecha');
+process.env.ESCALAS_HOJE = '2026-11-06T15:30';
+ok(D.todayISO() === '2026-11-06' && D.nowMs() === Date.parse('2026-11-06T15:30:00-03:00'),
+   'ESCALAS_HOJE com hora fixa o dia e o instante');
+process.env.ESCALAS_HOJE = '2026-11-06';
+ok(D.nowMs() === Date.parse('2026-11-06T00:00:00-03:00'), 'ESCALAS_HOJE so com o dia e o comeco dele');
+delete process.env.ESCALAS_HOJE;
 
 console.log('\n--- calendário oficial de 2026 ---');
 const ago = workingDaysInMonth('2026-08');
